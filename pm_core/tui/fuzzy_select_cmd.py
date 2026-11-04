@@ -18,7 +18,9 @@ import shlex
 
 from pm_core import store
 from pm_core.cli.helpers import _pr_display_id
-from pm_core.tui.model_screen import escape
+# The shared escaper (this module used to import it from the model screen,
+# where it lived before the command-surface sweep made it common).
+from pm_core.command_surface import escape_markup as escape
 
 _SELECT_RE = re.compile(r"(pr|plan)\s+select(?:\s+(.*))?", re.DOTALL)
 

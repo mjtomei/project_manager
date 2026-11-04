@@ -12,7 +12,14 @@ from pm_core.cli import cli
 
 @cli.group()
 def qa():
-    """Manage QA instructions, regression tests, artifact recipes, and mocks."""
+    """Manage QA instructions, regression tests, artifact recipes, and mocks.
+
+    This group runs individual items (`pm qa run`, `pm qa standalone`,
+    `pm qa regression`).  The full QA loop for a PR — planner plus
+    scenario windows — runs from the TUI: select the PR and press `t`
+    (`z t` fresh restart, `zz t` loop).  `pm pr qa <id>` prints that
+    command-bar form.
+    """
 
 
 _QA_LIST_CATEGORIES = [
@@ -69,7 +76,7 @@ def qa_show(instruction_id: str, category: str | None):
     item = _resolve_qa_item(qa_instructions, root, instruction_id, category)
 
     if item is None:
-        click.echo(f"QA item not found: {instruction_id}", err=True)
+        click.echo(f"QA item not found: {instruction_id}. Run 'pm qa list' to see the library.", err=True)
         raise SystemExit(1)
 
     click.echo(f"# {item['title']}")
@@ -147,7 +154,9 @@ def _qa_add(name: str, category: str) -> None:
     filepath = d / f"{file_id}.md"
 
     if filepath.exists():
-        click.echo(f"Already exists: {filepath}", err=True)
+        click.echo(
+            f"Already exists: {filepath}. Edit it with 'pm qa edit "
+            f"{file_id}' or choose another name.", err=True)
         raise SystemExit(1)
 
     title = name.replace("-", " ").title()
@@ -212,7 +221,7 @@ def qa_captures_path(pr_id: str):
     data = store.load(state_root())
     pr_entry = _resolve_pr_id(data, pr_id)
     if pr_entry is None:
-        click.echo(f"PR '{pr_id}' not found.", err=True)
+        click.echo(f"PR '{pr_id}' not found. Run 'pm pr list' to see every PR.", err=True)
         raise click.exceptions.Exit(1)
     path = captures_dir(pr_entry["id"])
     if path is None:
@@ -242,7 +251,11 @@ def _qa_author(name: str, category: str) -> None:
 
     target = _author_path(category, name)
     if target.exists():
-        click.echo(f"Already exists: {target}", err=True)
+        # Same remedy as the `_qa_add` / `qa mocks add` scaffolders: the
+        # refusal names the editor or the other way out, not just the path.
+        click.echo(
+            f"Already exists: {target}. Edit it with 'pm qa edit "
+            f"{target.stem}' or choose another name.", err=True)
         raise SystemExit(1)
 
     root = state_root()
@@ -293,7 +306,7 @@ def qa_edit(instruction_id: str, category: str | None):
     item = _resolve_qa_item(qa_instructions, root, instruction_id, category)
 
     if item is None:
-        click.echo(f"QA item not found: {instruction_id}", err=True)
+        click.echo(f"QA item not found: {instruction_id}. Run 'pm qa list' to see the library.", err=True)
         raise SystemExit(1)
 
     editor = os.environ.get("EDITOR", "vim")
@@ -656,10 +669,14 @@ def qa_regression(test_id: str, file_prs: bool, branch: str | None,
 @click.argument("instruction_id")
 @click.option("--pr", "pr_id", default=None, help="PR to run QA against")
 def qa_run(instruction_id: str, pr_id: str | None):
-    """Run a QA instruction against a PR.
+    """Run one QA instruction against a PR (not the full QA loop).
 
     Creates a boilerplate single-scenario QA plan and runs it using the
     same child session infrastructure as the auto-start flow.
+
+    For the full QA loop (planner + all scenarios) use `pm pr qa <id>`,
+    which prints the TUI command-bar form (TUI: `t`; `z t` fresh
+    restart, `zz t` loop).
     """
     from pm_core import qa_instructions, store, qa_loop
     from pm_core.cli.helpers import _resolve_pr_id, _infer_pr_id
@@ -673,7 +690,7 @@ def qa_run(instruction_id: str, pr_id: str | None):
         category = "regression"
         item = qa_instructions.get_instruction(root, instruction_id, category)
     if item is None:
-        click.echo(f"Instruction not found: {instruction_id}", err=True)
+        click.echo(f"Instruction not found: {instruction_id}. Run 'pm qa list' to see the library.", err=True)
         raise SystemExit(1)
 
     data = store.load(root)
@@ -682,12 +699,12 @@ def qa_run(instruction_id: str, pr_id: str | None):
     if pr_id is None:
         pr_id = _infer_pr_id(data)
     if pr_id is None:
-        click.echo("No PR specified and no active PR found.", err=True)
+        click.echo("No PR specified and no active PR found. Pass --pr <id> (see 'pm pr list').", err=True)
         raise SystemExit(1)
 
     pr_data = _resolve_pr_id(data, pr_id)
     if not pr_data:
-        click.echo(f"PR not found: {pr_id}", err=True)
+        click.echo(f"PR not found: {pr_id}. Run 'pm pr list' to see every PR.", err=True)
         raise SystemExit(1)
 
     # Build a boilerplate single-scenario plan
@@ -785,13 +802,13 @@ def qa_debug(instruction_id: str, branch: str | None, foreground: bool):
     if item is None:
         item = qa_instructions.get_instruction(root, instruction_id, "regression")
     if item is None:
-        click.echo(f"Instruction not found: {instruction_id}", err=True)
+        click.echo(f"Instruction not found: {instruction_id}. Run 'pm qa list' to see the library.", err=True)
         raise SystemExit(1)
 
     data = store.load(root)
     session = get_pm_session()
     if not session:
-        click.echo("No pm session found. Run inside a pm tmux session.", err=True)
+        click.echo("No pm session found. Start one with: pm session", err=True)
         raise SystemExit(1)
 
     # Container mode is an execution boundary.  Resolve it before creating
@@ -975,8 +992,9 @@ End with a summary of which steps work and which don't, then one of:
                 err=True,
             )
             click.echo(
-                "Remedy: make sure the pm session is running "
-                "('pm tui view'), then retry.", err=True)
+                "Remedy: start (or attach) the pm session with 'pm session', "
+                "then retry; 'pm tui view' only reads an already-running "
+                "TUI.", err=True)
             raise SystemExit(1)
         click.echo(f"Launched debug session")
         click.echo(f"  Instruction: {item['title']}")
@@ -1005,7 +1023,11 @@ def qa_launch(item_id: str, target_window: str | None):
 
     parts = item_id.split(":", 1)
     if len(parts) != 2:
-        click.echo(f"Invalid QA item id (expected 'category:id'): {item_id}", err=True)
+        # Name the listing command too: the expected format alone does not
+        # tell the operator which ids exist (the TUI sibling names it).
+        click.echo(
+            f"Invalid QA item id (expected 'category:id'): {item_id}. "
+            f"Run 'pm qa list' to see the library.", err=True)
         raise SystemExit(1)
     category, qa_id = parts
 
@@ -1024,16 +1046,17 @@ def qa_launch(item_id: str, target_window: str | None):
             raise SystemExit(1)
     item = qa_instructions.get_instruction(root, qa_id, category=category)
     if item is None:
-        click.echo(f"QA item not found: {item_id}", err=True)
+        click.echo(f"QA item not found: {item_id}. Run 'pm qa list' to see the library.", err=True)
         raise SystemExit(1)
 
     if not tmux_mod.has_tmux() or not tmux_mod.in_tmux():
-        click.echo("pm qa launch requires tmux.", err=True)
+        click.echo("pm qa launch requires tmux. Start a pm session first with: pm session", err=True)
         raise SystemExit(1)
 
     session = tmux_mod.get_session_name()
     if not session:
-        click.echo("No tmux session detected.", err=True)
+        click.echo("No tmux session detected — start one with: pm session",
+                   err=True)
         raise SystemExit(1)
 
     env: dict[str, str] = {}
@@ -1068,7 +1091,10 @@ To interact with this session, use commands like:
     if target_window:
         win = tmux_mod.find_window_by_name(session, target_window)
         if not win:
-            click.echo(f"Target window not found: {target_window}", err=True)
+            click.echo(
+                f"Target window not found: {target_window}. Omit "
+                f"--target-window to launch in a new window, or check names "
+                f"with 'tmux list-windows -t {session}'.", err=True)
             raise SystemExit(1)
         pane_id = tmux_mod.split_pane(session, "h", cmd, window=win["id"],
                                       env=env)
@@ -1106,7 +1132,7 @@ def qa_standalone(instruction_id: str):
                    f"'pm qa regression {instruction_id}'.", err=True)
         raise SystemExit(1)
     if item is None:
-        click.echo(f"Instruction not found: {instruction_id}", err=True)
+        click.echo(f"Instruction not found: {instruction_id}. Run 'pm qa list' to see the library.", err=True)
         raise SystemExit(1)
 
     data = store.load(root)
@@ -1186,7 +1212,7 @@ def qa_mocks_show(mock_id: str):
     mock = qa_instructions.get_mock(root, mock_id)
 
     if mock is None:
-        click.echo(f"Mock not found: {mock_id}", err=True)
+        click.echo(f"Mock not found: {mock_id}. Run 'pm qa mocks list' to see every mock.", err=True)
         raise SystemExit(1)
 
     click.echo(f"# {mock['title']}")
@@ -1210,7 +1236,9 @@ def qa_mocks_add(name: str):
     filepath = d / f"{file_id}.md"
 
     if filepath.exists():
-        click.echo(f"Mock already exists: {filepath}", err=True)
+        click.echo(
+            f"Mock already exists: {filepath}. Edit it with 'pm qa mocks "
+            f"edit {file_id}' or choose another name.", err=True)
         raise SystemExit(1)
 
     title = name.replace("-", " ").title()
@@ -1253,7 +1281,7 @@ def qa_mocks_edit(mock_id: str):
     mock = qa_instructions.get_mock(root, mock_id)
 
     if mock is None:
-        click.echo(f"Mock not found: {mock_id}", err=True)
+        click.echo(f"Mock not found: {mock_id}. Run 'pm qa mocks list' to see every mock.", err=True)
         raise SystemExit(1)
 
     editor = os.environ.get("EDITOR", "vim")

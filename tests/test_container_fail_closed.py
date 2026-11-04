@@ -838,6 +838,11 @@ def test_qa_debug_fails_closed_when_the_window_cannot_be_created(
     assert "Launched debug session" not in result.output
     assert "could not create the qa debug window" in result.output.lower()
     assert "released" in result.output.lower()
+    # The remedy names the command that starts the session.  It used to say
+    # "make sure the pm session is running ('pm tui view')", but `pm tui
+    # view` only reads an already-running TUI and fails for the same reason
+    # this window creation did — a dead-end corrective command.
+    assert "pm session" in result.output
     # Only this attempt's own container is released.
     assert remove.call_count == 1
 
@@ -1018,6 +1023,60 @@ def test_qa_run_exits_zero_for_a_completed_verdict(tmp_path, home):
 
     assert result.exit_code == 0
     assert "Result: NEEDS_WORK" in result.output
+
+
+def test_qa_run_without_a_session_names_the_start_remedy(tmp_path, home):
+    """A run that finds no pm session aborts with ERROR; the abort must carry
+    the corrective command, not just the one-line cause the TUI log shows."""
+    pr = {"id": "pr-c", "title": "T", "branch": "b", "status": "in_review"}
+    data = {"project": {"name": "t"}, "prs": [pr], "plans": []}
+    state = QALoopState(pr_id="pr-c", planning_phase=False)
+
+    with ExitStack() as stack:
+        stack.enter_context(patch("pm_core.store.load", return_value=data))
+        stack.enter_context(patch("pm_core.qa_loop._resolve_qa_model",
+                                  return_value=None))
+        stack.enter_context(patch("pm_core.qa_loop.get_pm_session",
+                                  return_value=None))
+        qa_loop.run_qa_sync(state, tmp_path / "pm", pr)
+
+    assert state.latest_verdict == "ERROR"
+    assert state.latest_output == "No pm session found"
+    assert qa_loop.qa_error_detail(state) == (
+        "No pm session found. Start one with: pm session")
+
+
+def test_qa_run_cli_prints_the_session_remedy(tmp_path, home):
+    """`pm qa run` must not end in a bare `Result: ERROR`: the operator needs
+    the command that starts the missing session."""
+    from pm_core.cli.qa import qa as qa_group
+
+    root = tmp_path / "pm"
+    root.mkdir()
+    instr = tmp_path / "repro.md"
+    instr.write_text("# repro\n")
+    item = {"path": str(instr), "title": "Repro", "description": "d"}
+    pr = {"id": "pr-c", "title": "T", "branch": "b", "status": "in_review"}
+    data = {"project": {"name": "t"}, "prs": [pr], "plans": []}
+
+    with ExitStack() as stack:
+        stack.enter_context(patch("pm_core.cli.qa.state_root",
+                                  return_value=root))
+        stack.enter_context(patch("pm_core.qa_instructions.get_instruction",
+                                  return_value=item))
+        stack.enter_context(patch("pm_core.store.load", return_value=data))
+        stack.enter_context(patch("pm_core.cli.helpers._resolve_pr_id",
+                                  return_value=pr))
+        stack.enter_context(patch("pm_core.qa_loop._resolve_qa_model",
+                                  return_value=None))
+        stack.enter_context(patch("pm_core.qa_loop.get_pm_session",
+                                  return_value=None))
+        result = CliRunner().invoke(qa_group,
+                                    ["run", "repro", "--pr", "pr-c"])
+
+    assert result.exit_code == 1
+    assert "No pm session found. Start one with: pm session" in result.output
+    assert "Result: ERROR" in result.output
 
 
 def test_initial_launch_keeps_queued_scenarios_visible(tmp_path, home):

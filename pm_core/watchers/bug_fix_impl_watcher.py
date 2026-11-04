@@ -25,6 +25,7 @@ class BugFixImplWatcher(BaseWatcher):
 
     WATCHER_TYPE = "bug-fix-impl"
     DISPLAY_NAME = "Bug-Fix Implementation Watcher"
+    DESCRIPTION = "Drive plan=bugs PRs through auto-sequence (auto-merge on QA PASS)"
     WINDOW_NAME = "bug-fix-impl"
     DEFAULT_INTERVAL = 300  # 5 minutes
     VERDICTS = ("READY", "INPUT_REQUIRED")

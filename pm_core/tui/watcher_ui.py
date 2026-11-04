@@ -189,20 +189,24 @@ def start_watcher(app, transcript_dir: str | None = None,
     from pm_core import tmux as tmux_mod
 
     if not tmux_mod.in_tmux():
-        app.log_message("Watcher requires tmux.")
+        app.log_message("Watcher requires tmux — start a pm session first with `pm session`.")
         return
 
     manager = app._watcher_manager
     existing = manager.find_by_type(watcher_type)
     if existing and existing.state.running:
-        app.log_message(f"Watcher '{watcher_type}' is already running.")
+        # `pm watcher stop` only prints how to stop one, so point at it as
+        # guidance rather than claiming it stops the watcher.
+        app.log_message(
+            f"Watcher '{watcher_type}' is already running — see `pm watcher "
+            f"stop {watcher_type}` for how to stop it.")
         return
 
     # Create and register a new watcher instance
     from pm_core.watchers import get_watcher_class
     cls = get_watcher_class(watcher_type)
     if not cls:
-        app.log_message(f"Unknown watcher type: {watcher_type}")
+        app.log_message(f"Unknown watcher type: {watcher_type} — see `pm watcher list`.")
         return
 
     pm_root = str(store.find_project_root())
@@ -245,7 +249,7 @@ def stop_watcher(app, watcher_type: str = "auto-start") -> None:
         )
         return
 
-    app.log_message("No watcher running.")
+    app.log_message("No watcher running — start one with `ws` (or `pm watcher start`).")
 
 
 def is_running(app, watcher_type: str = "auto-start") -> bool:

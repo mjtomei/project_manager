@@ -9,7 +9,7 @@ Keybinding variants (set up by app.action_start_qa_on_pr):
   zz t   — start/stop QA loop
 """
 
-from rich.markup import escape
+from pm_core.command_surface import escape_markup as escape
 
 from pm_core.paths import configure_logger, get_global_setting_value
 from pm_core import store
@@ -39,6 +39,21 @@ def _get_qa_pass_count() -> int:
         return max(1, int(val))
     except ValueError:
         return 1
+
+
+def _qa_running_remedy(pr_id: str) -> str:
+    """Corrective sentence for a QA start refused because a run exists."""
+    return (f"QA already running for {pr_id} — restart with "
+            f"`pr qa fresh {pr_id}` (TUI: select the PR, press z t); "
+            f"stop it with `pr qa loop {pr_id}` (TUI: zz t toggles the run).")
+
+
+def _qa_held_remedy(pr_id: str) -> str:
+    """Corrective sentence for a QA run waiting on the user's answer."""
+    return (f"QA for {pr_id} is waiting for input — answer in its scenario "
+            f"worker pane; the loop is still watching. To stop it: "
+            f"`pr qa loop {pr_id}` (TUI: zz t); to restart: "
+            f"`pr qa fresh {pr_id}` (TUI: z t).")
 
 
 def _get_selected_pr(app) -> tuple[str | None, dict | None]:
@@ -78,7 +93,7 @@ def focus_or_start_qa(app, pr_id: str) -> None:
         return
     pr = store.get_pr(data, pr_id)
     if not pr:
-        app.log_message(f"PR not found: {pr_id}")
+        app.log_message(f"PR not found: {pr_id} — see `pr list` (TUI: r to refresh)")
         return
 
     # If the main QA window already exists, just focus it.  Honor a
@@ -102,10 +117,7 @@ def focus_or_start_qa(app, pr_id: str) -> None:
                 # A held run is not over: it waits for the user's answer.
                 # Say so, as start_qa does when the window is gone, rather
                 # than only that its window was focused (S132).
-                app.log_message(
-                    f"QA for {pr_id} is waiting for input — answer in its "
-                    "scenario worker pane; the loop is still watching",
-                    force=True)
+                app.log_message(_qa_held_remedy(pr_id), force=True)
             elif not suppress:
                 app.log_message(f"Focused QA window for {pr_id}")
             else:
@@ -193,7 +205,7 @@ def start_qa(app, pr_id: str,
         return False
     pr = store.get_pr(data, pr_id)
     if not pr:
-        app.log_message(f"PR not found: {pr_id}")
+        app.log_message(f"PR not found: {pr_id} — see `pr list` (TUI: r to refresh)")
         return
 
     # Check if QA is already running for this PR
@@ -213,12 +225,9 @@ def start_qa(app, pr_id: str,
             # running=True before clearing held, so a run that is actively
             # collecting must not be described as waiting for input.
             if existing.running:
-                app.log_message(f"QA already running for {pr_id}", force=True)
+                app.log_message(_qa_running_remedy(pr_id), force=True)
             else:
-                app.log_message(
-                    f"QA for {pr_id} is waiting for input — answer in its "
-                    "scenario worker pane; the loop is still watching",
-                    force=True)
+                app.log_message(_qa_held_remedy(pr_id), force=True)
             return
 
     if not _enter_qa_status(app, pr_id, pr, "start_qa",
@@ -619,7 +628,7 @@ def fresh_start_qa(app, pr_id: str) -> None:
         return
     pr = store.get_pr(data, pr_id)
     if not pr:
-        app.log_message(f"PR not found: {pr_id}")
+        app.log_message(f"PR not found: {pr_id} — see `pr list` (TUI: r to refresh)")
         return
 
     # Stop any running QA for this PR
@@ -665,7 +674,7 @@ def start_or_stop_qa_loop(app, pr_id: str) -> None:
         return
     pr = store.get_pr(data, pr_id)
     if not pr:
-        app.log_message(f"PR not found: {pr_id}")
+        app.log_message(f"PR not found: {pr_id} — see `pr list` (TUI: r to refresh)")
         return
 
     # If a QA loop is running (or holding for input), stop it
@@ -719,7 +728,7 @@ def start_or_stop_qa_loop(app, pr_id: str) -> None:
     required = app._self_driving_qa[pr_id]["required_passes"]
     passes_label = f" ({required} pass{'es' if required > 1 else ''} required)" if required > 1 else ""
     app.log_message(
-        f"[bold]QA loop started[/] for {pr_id}{passes_label} — z t to stop",
+        f"[bold]QA loop started[/] for {pr_id}{passes_label} — zz t to stop",
         sticky=3, force=True,
     )
     _log.info("qa_loop_ui: starting QA loop for %s (passes=%d)", pr_id, required)
@@ -738,7 +747,7 @@ def stop_qa(app, pr_id: str) -> None:
         state.stop_requested = True
         app.log_message(f"Stopping QA for {pr_id}...")
     else:
-        app.log_message(f"No QA running for {pr_id}")
+        app.log_message(f"No QA running for {pr_id} — start with `pr qa {pr_id}` (TUI: t)")
 
 
 # ---------------------------------------------------------------------------

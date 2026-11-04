@@ -28,7 +28,7 @@ from textual.css.query import NoMatches
 from textual.timer import Timer
 
 from pm_core import store, guide, tui_pidfile
-from rich.markup import escape
+from pm_core.command_surface import escape_markup as escape
 
 from pm_core import tmux as tmux_mod
 from pm_core.tui.tech_tree import TechTree, PRSelected
@@ -1455,7 +1455,7 @@ class ProjectManagerApp(App):
 
         session = self._session_name
         if not session:
-            self.log_message("No tmux session found")
+            self.log_message("No tmux session found — start one with: pm session")
             return
 
         # Try to find and focus any running watcher's window
@@ -1537,7 +1537,7 @@ class ProjectManagerApp(App):
 
         pr = store.get_pr(self._data, pr_id)
         if not pr:
-            self.log_message(f"PR {pr_id} not found")
+            self.log_message(f"PR {pr_id} not found — see `pr list` (TUI: r to refresh)")
             return
 
         phase = spec_gen.get_pending_spec_phase(pr)
@@ -1813,13 +1813,12 @@ class ProjectManagerApp(App):
 
     def _focus_current_view(self) -> None:
         """Focus the visible view's main widget (plans pane, QA pane or
-        tree), e.g. when a command-bar command hands focus back."""
-        if self._plans_visible:
-            self.query_one("#plans-pane").focus()
-        elif self._qa_visible:
-            self.query_one("#qa-pane").focus()
-        else:
-            self.query_one("#tech-tree").focus()
+        tree), e.g. when a command-bar command hands focus back.
+
+        Delegates to :func:`pm_core.tui.pr_view._refocus_active_view` so the
+        command bar and the Esc handler cannot drift apart.
+        """
+        pr_view._refocus_active_view(self)
 
     def action_show_help(self) -> None:
         _log.debug("action: show_help")

@@ -173,7 +173,10 @@ def meta_cmd(task: str, branch: str | None, tag: str | None):
     # Launch Claude
     claude = find_claude()
     if not claude:
-        click.echo("Claude CLI not found.", err=True)
+        # Same remedy as `pm container build` and the TUI pane launchers:
+        # name the install, and what the printed prompt below is for.
+        click.echo("Claude CLI not found — install Claude Code first, or "
+                   "copy-paste this prompt into it.", err=True)
         click.echo("\nPrompt:")
         click.echo("-" * 60)
         click.echo(prompt)

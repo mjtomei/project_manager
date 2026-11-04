@@ -7,16 +7,19 @@ access app state and call app methods (log_message, _load_state, etc.).
 import shlex
 import sys
 
-from rich.markup import escape
-
 from pm_core.paths import configure_logger
-from pm_core import store
+from pm_core import command_surface, store
 from pm_core.tui._shell import _run_shell, _run_shell_async
 
 _log = configure_logger("pm.tui.pr_view")
 
 # PR command prefixes that require in-flight action guarding
 PR_ACTION_PREFIXES = ("pr start", "pr review", "pr qa", "pr merge")
+
+# QA command-bar modes are parsed by ``command_surface.parse_qa_command``:
+# positional (`pr qa fresh <id>`) and flag (`pr qa <id> --fresh`) spellings
+# are equivalent, and the CLI popup spinner parses the same queued command,
+# so the parser lives in the shared module rather than here.
 
 
 # ---------------------------------------------------------------------------
@@ -31,7 +34,12 @@ def guard_pr_action(app, action_desc: str) -> bool:
     """
     if app._inflight_pr_action:
         _log.info("action blocked: %s (busy: %s)", action_desc, app._inflight_pr_action)
-        app.log_message(f"Busy: {app._inflight_pr_action}", sticky=1.0)
+        # The in-flight action is the raw command the user typed; escape it
+        # or a bracketed token (`pr qa [x]`) is swallowed as markup and the
+        # command vanishes from the very message that names it.
+        app.log_message(
+            f"Busy: {command_surface.escape_markup(app._inflight_pr_action)} "
+            f"— wait for it to finish", sticky=1.0)
         app.clear_log_message_later(1.0)
         return False
     return True
@@ -422,7 +430,7 @@ def move_to_plan(app) -> None:
         return
     pr = store.get_pr(app._data, pr_id)
     if not pr:
-        app.log_message("PR not found")
+        app.log_message("PR not found — see `pr list` (TUI: r to refresh)")
         return
     plans = app._data.get("plans") or []
     current_plan = pr.get("plan") or None
@@ -538,7 +546,7 @@ def _do_cleanup(app, pr_id: str) -> dict | None:
         return None
     pr_entry = store.get_pr(data, pr_id)
     if not pr_entry:
-        app.log_message(f"PR not found: {pr_id}")
+        app.log_message(f"PR not found: {pr_id} — see `pr list` (TUI: r to refresh)")
         return None
 
     session = get_pm_session()
@@ -622,14 +630,93 @@ def cleanup_then_action(app, key: str) -> None:
 # Command execution
 # ---------------------------------------------------------------------------
 
+def _resolve_command_bar_pr(app, identifier: str) -> dict | None:
+    """Resolve a command-bar PR identifier to its registry entry.
+
+    Accepts the identifiers the CLI accepts (``pr-001``, ``42``, ``#42``) so
+    a command the CLI prints for a GitHub-backed PR — its display id is
+    ``#N`` — works when pasted into the command bar.  ``store.get_pr``
+    matches only the internal id.  Logs the not-found remedy and returns
+    ``None`` (as it does on a state-load error).
+    """
+    if not app._root:
+        app.log_message("No project root")
+        return None
+    try:
+        data = store.load(app._root)
+    except store.ProjectYamlParseError as e:
+        app.log_message(f"Error: {e}")
+        return None
+    from pm_core.cli.helpers import _resolve_pr_id
+    pr = _resolve_pr_id(data, identifier)
+    if pr is None:
+        # The identifier is user-typed; escape it or a bracketed typo
+        # (`pr qa [x]`) is swallowed as markup and the id vanishes from the
+        # remedy that is supposed to name it.
+        app.log_message(
+            f"PR not found: {command_surface.escape_markup(identifier)} — "
+            f"see `pr list` (TUI: r to refresh)")
+    return pr
+
+
+def _refocus_active_view(app) -> None:
+    """Return focus to the view the user is looking at.
+
+    The command bar keeps focus across a command, so every path that
+    finishes with it has to hand focus back.  In the QA view the target is
+    the QA pane: focusing the hidden tech-tree left the QA pane's keys dead
+    until the user left and re-entered the view.  Mirrors
+    ``ProjectManagerApp.action_unfocus_command``, which already handles all
+    three views.
+    """
+    if app._plans_visible:
+        app.query_one("#plans-pane").focus()
+    elif getattr(app, "_qa_visible", False):
+        app.query_one("#qa-pane").focus()
+    else:
+        app.query_one("#tech-tree").focus()
+
+
 def handle_command_submitted(app, cmd: str) -> None:
     """Handle commands typed in the command bar."""
     from pm_core.tui.tech_tree import TechTree
-    from pm_core.tui.plans_pane import PlansPane
     from pm_core.tui import pane_ops
 
     _log.info("command submitted: %s", cmd)
     cmd = cmd.strip()
+
+    # Command-bar help: show the same HelpScreen as `?` rather than shelling
+    # out to `pm help` (whose output the command bar only shows one line of,
+    # i.e. no help at all).  The screen now carries the command-bar forms.
+    if (cmd.lower() in ("help", "?", "commands", "command bar", "command-bar")
+            or cmd.lower().startswith("help ")):
+        # Hand focus back to the active view before the modal opens, as every
+        # other command-bar path does.  The bar keeps focus across a screen
+        # push/pop, so without this the next keystroke after closing help is
+        # typed into the command bar instead of moving the tree.
+        app.action_unfocus_command()
+        app.action_show_help()
+        return
+
+    # `--help` / `-h` is the universal spelling for help on every pm
+    # command, but the command bar runs commands through the CLI and logs
+    # only the *last* line of stdout, so a multi-line `--help` came out as
+    # one useless line — and `pr qa --help` (the command this PR exists to
+    # make discoverable) died as "unknown QA option".  Show the same screen
+    # `help` opens.  Tokenized with `shlex` — the same splitter `run_command`
+    # uses to build the CLI's argv — so a flag inside a quoted argument
+    # (`pr note add pr-001 'mention --help here'`) is left alone: the CLI
+    # receives that phrase as one value, not as its eager help flag.  An
+    # unmatched quote is a syntax error (handled below), never a help
+    # request, so it falls through rather than opening the screen.
+    try:
+        help_tokens = shlex.split(cmd)
+    except ValueError:
+        help_tokens = []
+    if any(tok in ("-h", "--help") for tok in help_tokens):
+        app.action_unfocus_command()
+        app.action_show_help()
+        return
 
     # Guard PR action commands from the command bar too
     action_key = None
@@ -637,10 +724,7 @@ def handle_command_submitted(app, cmd: str) -> None:
         if cmd.startswith(prefix):
             action_key = cmd
             if not guard_pr_action(app, action_key):
-                if app._plans_visible:
-                    app.query_one("#plans-pane", PlansPane).focus()
-                else:
-                    app.query_one("#tech-tree", TechTree).focus()
+                _refocus_active_view(app)
                 return
             app._inflight_pr_action = action_key
             break
@@ -653,11 +737,25 @@ def handle_command_submitted(app, cmd: str) -> None:
     if select_cmd is not None:
         kind, query = select_cmd
         fuzzy_select_cmd.handle_select_command(app, kind, query)
-        app._focus_current_view()
+        _refocus_active_view(app)
         return
 
-    parts = shlex.split(cmd)
-
+    # Parse the command.  An unmatched quote is an ordinary typo — a note
+    # containing an apostrophe (`pr note add pr-001 don't forget`) is the
+    # common case — and ``shlex`` raises on it.  Letting that escape the
+    # command-bar handler crashed the TUI (the popup runner already answers
+    # "Invalid command syntax"); do the same here.  The guard loop above may
+    # have recorded an in-flight action, so clear it or every later PR
+    # action reports "Busy".
+    try:
+        parts = shlex.split(cmd)
+    except ValueError as e:
+        app._inflight_pr_action = None
+        app.log_message(
+            f"Invalid command syntax: {e} — check the quoting "
+            f"(e.g. pr note add pr-001 'text')")
+        _refocus_active_view(app)
+        return
     # Handle review loop commands
     # Accepts: review-loop [start] [PR_ID]
     # No subcommand or 'start' → always start a fresh loop, superseding
@@ -668,9 +766,20 @@ def handle_command_submitted(app, cmd: str) -> None:
     if _rl_parts and _rl_parts[0] == "review-loop":
         from pm_core.tui import review_loop_ui
         _rl_rest = _rl_parts[1:]
+        # `review-loop stop` is a plausible guess (the toggle was removed),
+        # but "stop" is not a PR id: name the way to cancel instead of
+        # answering "PR not found: stop".  The command still starts a loop;
+        # this only refuses the spelling.
+        _stop_token = next(
+            (t for t in _rl_rest if t.lower() in ("stop", "cancel", "off")),
+            None)
+        if _stop_token:
+            app.log_message(
+                "review-loop has no stop command — cancel the loop with "
+                "Ctrl+R (restart the TUI) or Ctrl+C in its review pane.")
+            _refocus_active_view(app)
+            return
         # Tokens other than 'start' are treated as the optional PR id.
-        # 'stop' is no longer recognised — see start_or_stop_loop's
-        # docstring for the rationale.
         _rl_pr_id = next(
             (t for t in _rl_rest if t != "start"), None)
 
@@ -678,16 +787,16 @@ def handle_command_submitted(app, cmd: str) -> None:
         if _rl_pr_id:
             # Resolve the id before retargeting the tree selection so a
             # typo doesn't silently start a loop on the previously
-            # selected PR.  Mirrors the QA branch below.
+            # selected PR, and so `#N` works like the CLI.  Mirrors the QA
+            # branch below.
             if app._root:
-                try:
-                    _rl_data = store.load(app._root)
-                except store.ProjectYamlParseError as e:
-                    app.log_message(f"Error: {e}")
+                _rl_pr = _resolve_command_bar_pr(app, _rl_pr_id)
+                if not _rl_pr:
+                    # The bar keeps focus across a command; hand it back so
+                    # a typo'd id does not leave the next key typed into it.
+                    _refocus_active_view(app)
                     return
-                if not store.get_pr(_rl_data, _rl_pr_id):
-                    app.log_message(f"PR not found: {_rl_pr_id}")
-                    return
+                _rl_pr_id = _rl_pr["id"]
             tree.select_pr(_rl_pr_id)
 
         review_loop_ui.start_or_stop_loop(app)
@@ -695,10 +804,7 @@ def handle_command_submitted(app, cmd: str) -> None:
         # review-{display_id} to appear and switches there unless the
         # user dismissed the spinner with q/Esc.  Doing it here would
         # race with the popup and ignore the suppress flag.
-        if app._plans_visible:
-            app.query_one("#plans-pane", PlansPane).focus()
-        else:
-            tree.focus()
+        _refocus_active_view(app)
         return
 
     # Handle edit command: 'edit [PR_ID]' — opens the PR's edit pane
@@ -708,24 +814,21 @@ def handle_command_submitted(app, cmd: str) -> None:
         if len(parts) >= 2:
             edit_pr_id = parts[1]
             if app._root:
-                try:
-                    edit_data = store.load(app._root)
-                except store.ProjectYamlParseError as e:
-                    app.log_message(f"Error: {e}")
+                edit_pr = _resolve_command_bar_pr(app, edit_pr_id)
+                if not edit_pr:
+                    # Same focus hand-back as the review-loop branch: the
+                    # not-found remedy is logged, and the next key must
+                    # reach the view, not the command bar.
+                    _refocus_active_view(app)
                     return
-                if not store.get_pr(edit_data, edit_pr_id):
-                    app.log_message(f"PR not found: {edit_pr_id}")
-                    return
+                edit_pr_id = edit_pr["id"]
             tree = app.query_one("#tech-tree", TechTree)
             tree.select_pr(edit_pr_id)
         pane_ops.edit_plan(app)
-        # Return focus to the tree (or plans pane) so subsequent nav keys
+        # Return focus to the tree (or plans/QA pane) so subsequent nav keys
         # don't leak into the command bar's Input, mirroring the other
         # command branches.
-        if app._plans_visible:
-            app.query_one("#plans-pane", PlansPane).focus()
-        else:
-            app.query_one("#tech-tree", TechTree).focus()
+        _refocus_active_view(app)
         return
 
     # Handle auto-start commands: ``autostart [verb] [ids…] [flags]``
@@ -743,60 +846,68 @@ def handle_command_submitted(app, cmd: str) -> None:
             app.log_message(f"Auto-start: bad command: {e}")
         else:
             _auto_start.handle_command(app, _as_args)
-        # Unconditional: focus() targets the tree's own (base) screen, so
-        # when ``autostart status`` pushed the runs popup this doesn't
-        # steal focus from it — it makes Esc return to the tree instead
-        # of the command bar the popup was opened from.
-        app.query_one("#tech-tree", TechTree).focus()
+        # Unconditional: focus() targets the active view's widget on the
+        # base screen, so when ``autostart status`` pushed the runs popup
+        # this doesn't steal focus from it — it makes Esc return to that
+        # view instead of the command bar the popup was opened from.
+        # ``_refocus_active_view`` (not a bare tree focus) keeps the QA and
+        # plans views usable: focusing the hidden tree there left their
+        # panes' keys dead until the view was re-entered.
+        _refocus_active_view(app)
         return
 
     # Handle QA commands — route to qa_loop_ui instead of CLI.
-    # Forms:
-    #   pr qa [PR_ID]           — focus existing or one-shot start (= TUI 't')
-    #   pr qa fresh [PR_ID]     — fresh restart            (= TUI 'z t')
-    #   pr qa loop  [PR_ID]     — start/stop QA loop        (= TUI 'zz t')
+    # Forms (positional and flag spellings are equivalent):
+    #   pr qa [PR_ID]               — focus existing or one-shot start (= t)
+    #   pr qa fresh [PR_ID]         — fresh restart                    (= z t)
+    #   pr qa [PR_ID] --fresh       — same as `pr qa fresh`
+    #   pr qa loop [PR_ID]          — start/stop QA loop                (= zz t)
+    #   pr qa [PR_ID] --loop        — same as `pr qa loop`
     if len(parts) >= 2 and parts[0] == "pr" and parts[1] == "qa":
         from pm_core.tui import qa_loop_ui
-        from pm_core import store as _store
-        # Parse optional modifier ('fresh' or 'loop') and PR id.
-        rest = parts[2:]
-        qa_mode = None
-        if rest and rest[0] in ("fresh", "loop"):
-            qa_mode = rest[0]
-            rest = rest[1:]
-        if rest:
-            qa_pr_id = rest[0]
-        else:
+        try:
+            qa_mode, qa_pr_id = command_surface.parse_qa_command(parts[2:])
+        except ValueError as e:
+            # The usage text and any user-supplied token may contain
+            # brackets; escape them all or Textual eats them as markup and
+            # the corrective hint disappears exactly when it is needed.
+            app.log_message(command_surface.escape_markup(f"QA: {e}"))
+            app._inflight_pr_action = None
+            _refocus_active_view(app)
+            return
+        if qa_pr_id is None:
             tree = app.query_one("#tech-tree", TechTree)
             qa_pr_id = tree.selected_pr_id
         if not qa_pr_id:
-            app.log_message("No PR specified for QA")
+            # Name the mode the user asked for: suggesting plain `pr qa`
+            # after a fresh/loop request would start the wrong kind of run.
+            # The TUI key differs per mode too (`t`, `z t`, `zz t`), so read
+            # it from the shared table rather than always saying `t`.
+            mode_hint = f" {qa_mode}" if qa_mode else ""
+            key = command_surface.QA_MODE_KEYS.get(qa_mode or "run", "t")
+            app.log_message(f"No PR specified for QA — select one, or run "
+                            f"`pr qa{mode_hint} <id>` (TUI: {key})")
         else:
-            if app._root:
-                try:
-                    qa_data = _store.load(app._root)
-                except _store.ProjectYamlParseError as e:
-                    app.log_message(f"Error: {e}")
-                    qa_data = None
-                if qa_data is not None:
-                    qa_pr = _store.get_pr(qa_data, qa_pr_id)
-                    if qa_pr:
-                        if qa_mode == "fresh":
-                            qa_loop_ui.fresh_start_qa(app, qa_pr["id"])
-                        elif qa_mode == "loop":
-                            qa_loop_ui.start_or_stop_qa_loop(app, qa_pr["id"])
-                        else:
-                            qa_loop_ui.focus_or_start_qa(app, qa_pr["id"])
-                    else:
-                        app.log_message(f"PR not found: {qa_pr_id}")
-            else:
-                app.log_message("No project root")
+            qa_pr = _resolve_command_bar_pr(app, qa_pr_id)
+            if qa_pr:
+                handlers = {
+                    None: qa_loop_ui.focus_or_start_qa,
+                    "fresh": qa_loop_ui.fresh_start_qa,
+                    "loop": qa_loop_ui.start_or_stop_qa_loop,
+                }
+                handler = handlers.get(qa_mode)
+                if handler is None:
+                    # A mode the parser accepts from the shared table but
+                    # this branch does not wire up must not silently fall
+                    # back to a plain run (which could be destructive).
+                    app.log_message(
+                        f"QA mode '{qa_mode}' is documented but not supported "
+                        f"here — run `pr qa <id>` instead")
+                else:
+                    handler(app, qa_pr["id"])
         # QA is handled directly (not via run_command), so clear the guard
         app._inflight_pr_action = None
-        if app._plans_visible:
-            app.query_one("#plans-pane", PlansPane).focus()
-        else:
-            app.query_one("#tech-tree", TechTree).focus()
+        _refocus_active_view(app)
         return
 
     # Commands that launch interactive Claude sessions need a tmux pane
@@ -816,10 +927,7 @@ def handle_command_submitted(app, cmd: str) -> None:
             working_message = f"Reviewing {pr_id}"
 
         run_command(app, cmd, working_message=working_message, action_key=action_key)
-    if app._plans_visible:
-        app.query_one("#plans-pane", PlansPane).focus()
-    else:
-        app.query_one("#tech-tree", TechTree).focus()
+    _refocus_active_view(app)
 
 
 def run_command(app, cmd: str, working_message: str | None = None,
@@ -844,7 +952,7 @@ def run_command(app, cmd: str, working_message: str | None = None,
         # Run sync for quick commands
         # The typed command is text too: "pr note add … 'creds[work]'" lost
         # "[work]", and a "[/…]" in it refused the whole line.
-        app.log_message(f"> {escape(cmd)}")
+        app.log_message(f"> {command_surface.escape_markup(cmd)}")
         _run_command_sync(app, parts)
         if action_key:
             app._inflight_pr_action = None
@@ -867,13 +975,16 @@ def _run_command_sync(app, parts: list[str]) -> None:
         # The command's output is text, not markup: a path such as
         # ".../creds[work]/..." in a route remedy lost its "[work]" (S53).
         if result.stdout.strip():
-            app.log_message(escape(result.stdout.strip().split("\n")[-1]))
+            app.log_message(command_surface.escape_markup(
+                result.stdout.strip().split("\n")[-1]))
         if result.returncode != 0 and result.stderr.strip():
-            app.log_message(
-                f"Error: {escape(result.stderr.strip().split(chr(10))[-1])}")
+            # R35/E18: the bar shows one line, so surface the remedy even
+            # when trailing context ("Available PRs/notes: …") follows it.
+            last_err = command_surface.pick_error_line(result.stderr)
+            app.log_message(f"Error: {command_surface.escape_markup(last_err)}")
     except Exception as e:
         _log.exception("command failed: %s", parts)
-        app.log_message(f"Error: {escape(str(e))}")
+        app.log_message(f"Error: {command_surface.escape_markup(str(e))}")
 
     # Reload state
     app._load_state()
@@ -917,12 +1028,14 @@ async def _run_command_async(app, cmd: str, parts: list[str], working_message: s
                    proc.returncode, stdout_text[:200], stderr_text[:200])
 
         if stdout_text.strip():
-            app.log_message(escape(stdout_text.strip().split("\n")[-1]))
+            app.log_message(command_surface.escape_markup(
+                stdout_text.strip().split("\n")[-1]))
         elif proc.returncode == 0:
             app.log_message(f"✓ {working_message} done")
         if proc.returncode != 0 and stderr_text.strip():
-            app.log_message(
-                f"Error: {escape(stderr_text.strip().split(chr(10))[-1])}")
+            # Same one-line rule as the sync path (R35/E18).
+            last_err = command_surface.pick_error_line(stderr_text)
+            app.log_message(f"Error: {command_surface.escape_markup(last_err)}")
 
     except asyncio.TimeoutError:
         spinner_running = False
@@ -931,7 +1044,7 @@ async def _run_command_async(app, cmd: str, parts: list[str], working_message: s
     except Exception as e:
         spinner_running = False
         _log.exception("command failed: %s", cmd)
-        app.log_message(f"Error: {escape(str(e))}")
+        app.log_message(f"Error: {command_surface.escape_markup(str(e))}")
     finally:
         if action_key:
             app._inflight_pr_action = None

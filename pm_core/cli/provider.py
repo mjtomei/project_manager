@@ -394,6 +394,7 @@ def _echo_provider(name: str, status: bool = False) -> None:
         p = get_provider(name, strict=True)
     except ProviderNotFoundError as exc:
         click.echo(f"Error: {exc}", err=True)
+        click.echo("Run 'pm provider list' to see configured providers.", err=True)
         raise SystemExit(1)
     for line in provider_detail_lines(p, status=status):
         click.echo(line)
@@ -486,7 +487,7 @@ def provider_remove(name: str):
         config = _load_for_edit()
         providers = config["providers"]
         if name not in providers:
-            click.echo(f"Provider '{name}' not found.", err=True)
+            click.echo(f"Provider '{name}' not found. Run 'pm provider list' to see configured providers.", err=True)
             raise SystemExit(1)
 
         del providers[name]

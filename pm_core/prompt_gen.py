@@ -107,7 +107,7 @@ commands so they target the correct session even from workdir clones:
 - `pm tui send <keys> -s {session_name}` — send keystrokes to the TUI (e.g. `pm tui send j` to move down)
 
 **Do not** run commands that spawn new Claude sessions yourself (e.g. `pm pr start`, \
-`pm pr done`, `pm plan add`, `pm plan breakdown`, `pm plan review`). These must be \
+`pm pr review`, `pm plan add`, `pm plan breakdown`, `pm plan review`). These must be \
 triggered through the TUI so panes are managed correctly. Use `pm tui send` to press \
 the appropriate key in the TUI instead.
 """
@@ -1719,7 +1719,7 @@ def generate_discovery_supervisor_prompt(data: dict, session_name: str | None = 
 
     The discovery supervisor schedules regression tests and reconciles their
     filings (newly-opened bug/improvement PRs) against existing open PRs in
-    the ``bugs`` and ``ux`` plans.
+    the ``bugs`` and ``improvements`` plans.
     """
     if not meta_pm_root:
         meta_pm_root = "pm"
@@ -1849,17 +1849,17 @@ its cadence unchanged.
 
 For tests that completed since the last tick (visible in the work log or by a
 pane that has since exited after its run started, see step 4), inspect any
-new PRs in the `bugs` and `ux` plans:
+new PRs in the `bugs` and `improvements` plans:
 
 ```
 pm pr list --plan bugs
-pm pr list --plan ux
+pm pr list --plan improvements
 ```
 
 For each newly-filed PR:
 - Skim title + description against existing open PRs in the same plan.
 - If it duplicates an open PR, merge useful detail into the existing one with
-  `pm pr note <existing-id> '<additional context>'` and close the duplicate
+  `pm pr note add <existing-id> '<additional context>'` and close the duplicate
   via the standard pm flow. Record the dedup decision in the work log.
 - If it is genuinely new, leave it.
 
@@ -2061,7 +2061,7 @@ def generate_improvement_fix_impl_prompt(data: dict, session_name: str | None = 
                                          meta_pm_root: str | None = None) -> str:
     """Generate a prompt for one tick of the improvement-fix implementation watcher.
 
-    Picks a candidate from ``plan=ux`` and advances it via
+    Picks a candidate from ``plan=improvements`` and advances it via
     ``pm pr auto-sequence``.  Unlike the bug-fix watcher, PRs that PASS
     QA are NOT auto-merged — they are held in their post-QA state for a
     human taste check.  The watcher does not call ``pm pr merge``.
@@ -2091,7 +2091,7 @@ def generate_improvement_fix_impl_prompt(data: dict, session_name: str | None = 
 
 ## Role
 
-You drive PRs in the `ux` plan through implementation → review → QA
+You drive PRs in the `improvements` plan through implementation → review → QA
 using `pm pr auto-sequence`. **You do NOT merge.** PRs that pass QA are
 left in their post-QA state and held for a human taste check. The
 human merge cadence is the throttle — your job ends at "ready_to_merge".
@@ -2123,10 +2123,10 @@ merge so you do not pick the same candidate redundantly.
 ### 1. Inventory candidates
 
 ```
-pm pr list --plan ux
+pm pr list --plan improvements
 ```
 
-Build the candidate set: PRs in `plan=ux` whose status is `pending`,
+Build the candidate set: PRs in `plan=improvements` whose status is `pending`,
 `in_progress`, `in_review`, or `qa`. Skip `merged` PRs and skip PRs
 already noted in the work log as "ready_to_merge — held for human"
 on a recent tick (re-pinging auto-sequence on those is harmless but
@@ -2951,7 +2951,7 @@ tmux window that does its specific job and emits a verdict.
 1. **Discovery supervisor** — schedules regression tests from
    `pm/qa/regression/*.md`, monitors the test sessions (which file new
    bug / improvement PRs themselves), and reconciles those filings
-   (dedup against open PRs in the `bugs` / `ux` plans).
+   (dedup against open PRs in the `bugs` / `improvements` plans).
    Work log: `{discovery_log}`.
 
 2. **Bug-fix implementation watcher** — picks the best candidate from
@@ -2960,7 +2960,7 @@ tmux window that does its specific job and emits a verdict.
    Work log: `{bug_fix_log}`.
 
 3. **Improvement-fix implementation watcher** — same shape against
-   `plan=ux`, but with a gated merge: PRs that PASS QA wait for a
+   `plan=improvements`, but with a gated merge: PRs that PASS QA wait for a
    human taste check before merging.
    Work log: `{improvement_fix_log}`.
 
@@ -2970,7 +2970,7 @@ section of `notes.txt` (read via `pm notes` or directly).
 ## Your data sources
 
 - **Work logs** (above) — primary. Each line is one tick's summary.
-- **`pm pr list`**, **`pm pr list --plan bugs`**, **`pm pr list --plan ux`**.
+- **`pm pr list`**, **`pm pr list --plan bugs`**, **`pm pr list --plan improvements`**.
 - **`pm pr graph`** — full PR dependency tree.
 - **`pm plan list`** — plan inventory.
 - `notes.txt` Watcher section — current user guidance.
@@ -2995,7 +2995,7 @@ After the summary, stop and wait for the human to drive.
 
 ## Read-only commands (safe to run any time)
 
-- `pm pr list`, `pm pr list --plan bugs`, `pm pr list --plan ux`
+- `pm pr list`, `pm pr list --plan bugs`, `pm pr list --plan improvements`
 - `pm plan list`
 - `pm pr graph`
 - `tail` / `cat` / `ls` on the work logs and transcript directory
@@ -3017,7 +3017,7 @@ for the human to say "yes" / "go ahead". Do **not** run write commands
 silently.
 
 Forbidden (must always be done via the TUI by the human):
-`pm pr start`, `pm pr done`, `pm plan add`, `pm plan breakdown`,
+`pm pr start`, `pm pr review`, `pm plan add`, `pm plan breakdown`,
 `pm plan review` — anything that spawns a new Claude session.
 
 ## Tone

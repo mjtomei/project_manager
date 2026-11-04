@@ -76,6 +76,20 @@ def test_typed_command_echo_keeps_brackets(tmp_path):
     assert Content.from_markup(logs[0]).plain == f"> {cmd}"
 
 
+def test_uppercase_bracket_text_keeps_brackets(tmp_path):
+    """rich's own ``escape()`` only escapes ``[`` before a lowercase
+    letter, ``#``, ``@`` or ``/``.
+
+    ``[OK]`` therefore passed through unescaped and the markup parser
+    dropped it; the shared helper escapes every ``[``.
+    """
+    app, logs = _app(tmp_path)
+    result = SimpleNamespace(returncode=1, stdout="", stderr="[OK] done\n")
+    with patch.object(pr_view, "_run_shell", return_value=result):
+        pr_view._run_command_sync(app, ["pr", "list"])
+    assert _plain(logs)[-1] == "Error: [OK] done"
+
+
 def test_command_exception_keeps_brackets(tmp_path):
     app, logs = _app(tmp_path)
 
@@ -90,3 +104,57 @@ def test_command_exception_keeps_brackets(tmp_path):
                       side_effect=OSError("cannot run [/x]")):
         pr_view._run_command_sync(app, ["pr", "start", "pr-x"])
     assert _plain(logs)[-1] == "Error: cannot run [/x]"
+
+
+def test_sync_command_error_logs_the_remedy_not_trailing_context(tmp_path):
+    """R35/E18: `pr add X --depends-on bogus` prints its remedy first and
+    `Available PRs: …` after it; the bar must keep the remedy."""
+    app, logs = _app(tmp_path)
+    result = SimpleNamespace(
+        returncode=1, stdout="",
+        stderr=("Unknown PR IDs in --depends-on: bogus — run 'pm pr list' "
+                "to see every PR.\nAvailable PRs: pr-1, pr-2\n"))
+    with patch.object(pr_view, "_run_shell", return_value=result):
+        pr_view._run_command_sync(app, ["pr", "add", "Dependent",
+                                        "--depends-on", "bogus"])
+    assert _plain(logs) == [
+        "Error: Unknown PR IDs in --depends-on: bogus — run 'pm pr list' "
+        "to see every PR."]
+
+
+def test_sync_command_error_logs_the_note_remedy(tmp_path):
+    app, logs = _app(tmp_path)
+    result = SimpleNamespace(
+        returncode=1, stdout="",
+        stderr=("Note 'bogus' not found on pr-1 — run 'pm pr note list pr-1' "
+                "to see them.\nAvailable notes:\n  note-1: First note\n"))
+    with patch.object(pr_view, "_run_shell", return_value=result):
+        pr_view._run_command_sync(app, ["pr", "note", "edit", "pr-1",
+                                        "bogus", "x"])
+    assert _plain(logs) == [
+        "Error: Note 'bogus' not found on pr-1 — run 'pm pr note list pr-1' "
+        "to see them."]
+
+
+def test_async_command_error_logs_the_remedy_not_trailing_context(tmp_path):
+    app, logs = _app(tmp_path)
+
+    class Proc:
+        returncode = 1
+
+        async def communicate(self):
+            return b"", (b"Unknown PR IDs in --depends-on: bogus \xe2\x80\x94 "
+                         b"run 'pm pr list' to see every PR.\n"
+                         b"Available PRs: pr-1, pr-2\n")
+
+    async def fake_shell(*a, **k):
+        return Proc()
+
+    with patch.object(pr_view, "_run_shell_async", fake_shell):
+        asyncio.run(pr_view._run_command_async(
+            app, "pr add Dependent --depends-on bogus",
+            ["pr", "add", "Dependent", "--depends-on", "bogus"], "Adding"))
+    out = [p for p in _plain(logs) if "Adding..." not in p]
+    assert out == [
+        "Error: Unknown PR IDs in --depends-on: bogus — run 'pm pr list' "
+        "to see every PR."]

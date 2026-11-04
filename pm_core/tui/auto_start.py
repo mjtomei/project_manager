@@ -963,14 +963,18 @@ def add_targets(app, ids: list[str], policy: str | None = None,
                 "changes": []}
     found, missing = _resolve_ids(app, ids)
     if missing:
+        # The command bar reaches this too (`autostart add nope`); name the
+        # listing command like the CLI sibling in `pm_core/cli/autostart.py`.
         return {"ok": False, "error": "unknown_pr",
-                "message": f"unknown PR id(s): {', '.join(missing)}",
+                "message": f"unknown PR id(s): {', '.join(missing)} — run "
+                           f"`pr list` to see every PR",
                 "invalid": missing, "changes": []}
     closed = [p["id"] for p in found
               if p.get("status") in autostart_state.TERMINAL_STATUSES]
     if closed:
         return {"ok": False, "error": "terminal_pr",
-                "message": f"already merged/closed: {', '.join(closed)}",
+                "message": f"already merged/closed: {', '.join(closed)} — "
+                           f"run `pr list` to see every PR and its status",
                 "invalid": closed, "changes": []}
 
     # Both policy inputs go through the same alias mapping and validation:
@@ -1065,7 +1069,8 @@ def remove_targets(app, ids: list[str]) -> dict:
     found, missing = _resolve_ids(app, ids)
     if missing:
         return {"ok": False, "error": "unknown_pr",
-                "message": f"unknown PR id(s): {', '.join(missing)}",
+                "message": f"unknown PR id(s): {', '.join(missing)} — run "
+                           f"`pr list` to see every PR",
                 "invalid": missing, "changes": []}
     targets = _targets(app)
     held_before = set(merge_holds(app))
@@ -1803,7 +1808,7 @@ async def _start_pr_quiet(app, pr_id: str, fresh: bool = False) -> None:
                   else f"exit {proc.returncode}")
         if _start_failures_shown(app).get(pr_id) != reason:
             _start_failures_shown(app)[pr_id] = reason
-            from rich.markup import escape
+            from pm_core.command_surface import escape_markup as escape
             app.log_message(f"[red]Auto-start: pm pr start {pr_id} "
                             f"failed[/]: {escape(reason)}",
                             force=True, hold=CONFIRM_HOLD_SECONDS)

@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-571a13b
+  active_pr: pr-86152a8
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -26969,11 +26969,21 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-08T20:50:25.310435+00:00'
-  updated_at: '2026-05-08T20:50:25.310435+00:00'
+  updated_at: '2026-11-02T08:19:13.573516+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-9861b8a
+    text: 'pr-fa9f172 (improvements) already rewrote the live plan=ux references as
+      part of its sweep: pm_core/prompt_gen.py, pm_core/cli/watcher.py, pm_core/watchers/discovery_supervisor.py,
+      pm_core/watchers/improvement_fix_impl_watcher.py, pm/plans/plan-regression.md
+      and pm/docs/literature-review.md now say plan=improvements, and tests/test_command_surface.py::test_no_stale_ux_plan_name_in_code
+      guards it. Check whether anything remains (e.g. other prompt sites, project.yaml
+      plan descriptions) before redoing this work; historical pm/specs/** and pm/docs/adversarial-review/**
+      are deliberately untouched.'
+    created_at: '2026-11-02T08:19:13Z'
+    last_edited: '2026-11-02T08:19:13Z'
 - id: pr-be00809
   plan: bugs
   title: 'Bug: QA result PR notes render empty scenario summary even when scenarios
@@ -34486,7 +34496,7 @@ prs:
   title: 'Self-documenting + consistent pm commands: complete --help, actionable errors,
     unified flags'
   branch: pm/pr-fa9f172-self-documenting-consistent-pm-commands-complete-h
-  status: pending
+  status: in_progress
   depends_on: []
   description: 'Make pm''s command surface self-documenting so an operator — human
     OR a driving Claude session — can go from "I know the task" to "I know the exact
@@ -34533,12 +34543,12 @@ prs:
     parsing + errors), keeping CLI / command-bar / TUI in sync. Tests: help lists
     each command''s modes/flags; key error paths include a corrective command; --fresh
     accepted on start/review/qa/merge.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/295
+  gh_pr_number: 295
   created_at: '2026-05-25T23:07:46.493552+00:00'
-  updated_at: '2026-11-02T02:24:43.719441+00:00'
-  started_at: null
+  updated_at: '2026-11-04T05:15:47.032555+00:00'
+  started_at: '2026-11-02T02:25:01.682313+00:00'
   reviewed_at: null
   merged_at: null
   notes:
@@ -34570,10 +34580,634 @@ prs:
       wait-for-merge remains required.'
     created_at: '2026-11-02T02:24:43Z'
     last_edited: '2026-11-02T02:24:43Z'
+  - id: note-ce97911
+    text: 'QA scenario 4 refinement (concurrent actors / state remedies): three draft
+      remedies have NO user-surface entry point and cannot be driven — (1) qa_loop_ui.stop_qa''s
+      ''No QA running for <id> — start with pr qa <id> (TUI: t)'' (stop_qa has no
+      caller; zz t starts a loop instead); (2) review_loop_ui._stop_loop''s ''No review
+      loop running … review-loop <id> … one-shot review, not a loop'' (only stop_loop_for_pr,
+      which has no caller; zz d always starts a loop); (3) watcher_ui.start_watcher''s
+      ''Watcher <type> is already running — see pm watcher stop <type>'' (ws toggles
+      and stops instead; the message is only reachable from an internal second start,
+      e.g. breadcrumb resume). Scenario 4 was refined to the reachable subset: no-workdir
+      review-loop remedy, double-submit already-running QA remedy, t-focus, held remedy,
+      loop-key wording, two-client fresh+plain picker race with a #42 display id,
+      and the command-bar Busy guard. Note for the worker: the fixture needs gh_pr_number:
+      42 on the in_review PR (bootstrap edit) so qa-#42 windows exist; export PM_PROJECT=<test>/pm
+      before pm session so popup spinner state_root() resolves the project when the
+      popup cwd is a workdir.'
+    created_at: '2026-11-02T20:50:03Z'
+    last_edited: '2026-11-02T20:50:03Z'
+  - id: note-38926c0
+    text: 'QA scenario 4 (concurrent actors / remedies) PASS. Fixture gotchas for
+      the next run: (1) the PR-action picker z/zz chord path needs fzf — the no-fzf
+      fallback is a line menu with no chords; install an fzf static binary (aarch64
+      in this container) on the popup PATH before the two-client race. (2) A pre-existing
+      QA spec (pm/specs/<PR>/qa.md) is required because the scripted fake planner
+      writes none in Step 0. (3) The scenario''s single-burst `tmux send-keys … Enter
+      … Enter` races the command bar focus hand-off (first Enter swallowed or characters
+      interleaved); at human typing speed it works, and the focus-independent TUI
+      queue (submit_tui_command, the same handle_command_submitted path the picker
+      uses) reliably shows the back-to-back already-running/Busy remedies. Captures:
+      /pm-captures/scenarios/4/{story6-two-client-race,tui-remedies}.'
+    created_at: '2026-11-02T21:37:03Z'
+    last_edited: '2026-11-02T21:37:03Z'
+  - id: note-eaaf278
+    text: 'QA scenario 5 incidental fix: discovery supervisor prompt told the watcher
+      to dedup with pm pr note <existing-id>, which fails with No such command; corrected
+      to pm pr note add <existing-id>. Commit f174ca89.'
+    created_at: '2026-11-02T21:43:09Z'
+    last_edited: '2026-11-02T21:43:09Z'
+  - id: note-f11f9d5
+    text: 'review-loop b8ed i1: the plan-name NEEDS_WORK is addressed at the one live
+      surface that was missing it. `pm watcher list` printed only display name/window/interval,
+      so the improvement-fix watcher never read as driving `plan=improvements` (R22
+      names `pm watcher list` alongside `pm watcher start --help`). `BaseWatcher`
+      now has a DESCRIPTION class attribute, set on all four built-ins; `pm watcher
+      list` prints it (plan=bugs / plan=improvements), with a test asserting both
+      and no `plan=ux`. Verified separately: all 152 leaf-command `--help` outputs,
+      the generated discovery/bug-fix/improvement prompts, and `pm tui keys` contain
+      no `plan=ux`. The only remaining `plan=ux` in a `pm prompt <id>` output is this
+      PR''s own description, notes and impl spec — historical records that spec section
+      D deliberately excludes. Full suite green (5561 passed, 1 skipped).'
+    created_at: '2026-11-02T22:18:03Z'
+    last_edited: '2026-11-02T22:18:03Z'
+  - id: note-eb8ca4b
+    text: 'QA scenario 6 (help renderers): CLI half, the ? modal at 200x50 and 60x30,
+      plans/QA help, and all four command-bar spellings (help, ?, commands, help pr)
+      verified from the surface; captures in /pm-captures/scenarios/6/{cli-help,tui-help}.
+      Two literal Then mismatches look like scenario errata vs the approved spec:
+      (1) the ? screen command-bar section header renders "Command Bar" (the title-case
+      section heading; impl spec A4 calls it a "Command Bar" section) rather than
+      "Command bar (press /):" — the rows and --loop note are present; (2) with the
+      two independent no-plan PRs the tree places the components side by side, so
+      j/Down has no down-neighbour and does not move the selection (l/Right does,
+      and j is not typed into the bar, so focus did return). Please confirm: treat
+      as scenario errata, or change HelpScreen to the shared COMMAND_BAR_HEADER?'
+    created_at: '2026-11-03T00:03:52Z'
+    last_edited: '2026-11-03T00:03:52Z'
+  - id: note-36fc51c
+    text: 'QA scenario 8 (sign-off help + skip_qa lifecycle) PASS. Runtime-confirmed:
+      bare `pm pr signoff` auto-selects the sole in_review PR under skip_qa on (stdout,
+      rc 0, no tmux session created); skip_qa-aware refusals for pending/in_progress
+      say "after review (expected qa, in_review, sign_off)" with the pr start / pr
+      review remedies; `pm pr signoff help` and `--help` both exit 0 and list exactly
+      integrate + record; `pm pr signoff --fresh <id>` routes to the hidden run form
+      (Click 8.5.0, no E9); with skip_qa off, in_review is refused with "after QA
+      (expected qa, sign_off)" + command-bar remedy, qa is accepted, merged refuses
+      with the inspect remedy. One literal mismatch for future scenario authors, not
+      a defect: the group usage renders `pm pr signoff [OPTIONS] [COMMAND] [ARGS]...`
+      (COMMAND optional) because the hidden run form handles bare/`--fresh` invocations
+      — same shape as `pm watcher`, whereas `pm pr note` (no run form) renders required
+      COMMAND. Captures: /pm-captures/scenarios/8/{story1-autoselect,story2-refusals,story3-help-and-fresh,story4-expected-states}.'
+    created_at: '2026-11-03T00:13:29Z'
+    last_edited: '2026-11-03T00:13:29Z'
+  - id: note-5ed05a4
+    text: 'QA S9 (concurrent CLI actors on one PR) found a double-start race: two
+      simultaneous `pm pr start` invocations for one PR shared the `.tmp-<id>` clone
+      path, and the loser died with an unhandled `OSError: [Errno 39] Directory not
+      empty: df` from `shutil.rmtree(tmp_path)` at pm_core/cli/pr.py:1079 instead
+      of an actionable message. Fixed in a22c1f18: a per-PR start lock (same idiom
+      as the merge lock) + re-load under the lock, so the loser takes the existing
+      already-in_progress reuse path; the lock is released before an interactive fallback
+      launch. Regression test tests/test_pr_start_concurrency.py fails with the lock
+      disabled and passes with it. Captures: /pm-captures/scenarios/9/pre-fix and
+      post-fix (cross-linked manifests); stories 1/3/4/5 PASS in story1-close-vs-start,
+      story3-merge-gate, story4-qa-and-notes, story5-watcher-stop. Full suite: 5550
+      passed, 12 failed — all pre-existing test_markdown_render.py ModuleNotFoundError
+      in the venv (markdown package absent). Also filed pr-fc6c29e: a repo directory
+      name containing a dot makes the computed pm session name unresolvable (tmux
+      renames . to _), so pr start from outside tmux falls back to interactive launch.'
+    created_at: '2026-11-03T00:52:44Z'
+    last_edited: '2026-11-03T00:52:44Z'
+  - id: note-8d147b4
+    text: 'QA S13 (command-bar identifiers/modes/fresh/loop/Busy) PASS. Errata + observations
+      for the next run: (1) the GIVEN "press k then j until the log shows Selected:
+      <B_ID>" does not work here: with two standalone PRs the tree renders them side
+      by side, so k/j have no vertical neighbour and never move the selection; use
+      l/Right (and after pr start reorders in_progress first, the columns swap). (2)
+      Story 7 says submit both commands "in the same burst": a human-speed tmux send-keys
+      burst (Enter, then / at +0.4 s) lands after `pm pr start` has already returned
+      (~1 s for the tiny fixture clone), so the Busy guard never fires; submitting
+      both through the TUI queue (submit_tui_command, the picker path) back-to-back
+      reproduces it deterministically. (3) Observed, not asserted by the scenario:
+      after overlapping fresh/loop actions at 07:36:55 two windows named qa-#42 coexisted
+      (@29 and @30) even though the fresh path logged killing the stale ones; the
+      window-id-change assertion still held, but worth a look if window leaks recur.'
+    created_at: '2026-11-03T07:44:22Z'
+    last_edited: '2026-11-03T07:44:22Z'
+  - id: note-e4dddb4
+    text: 'QA S13 story 7 re-run (supersedes item 2 of note-8d147b4): the prescribed
+      no-wait command-bar burst DOES hit the Busy guard. Fixture: PR-A #42 in_review
+      with a live QA run, PR-B pending with no workdir (so pr start clones). Driver:
+      type `/` + `pr start pr-02a12bc` + Enter, then — as soon as the "⠋ Starting
+      pr-02a12bc..." spinner line appears (no wait for completion) — `/` + `pr qa
+      #42 --fresh` + Enter. Both arrive through the command bar in the same second:
+      "Busy: pr start pr-02a12bc — wait for it to finish", fresh-start count 0→0,
+      qa-#42 windows @2/@3 unchanged. The earlier submit_tui_command driver was a
+      workaround for a burst paced 0.4 s per keystroke, which outran the ~1 s start;
+      it is not needed. Focus probe: the command bar keeps its unfocused placeholder,
+      `l` moves the tree and logs Selected: pr-327e83c; k/j still cannot move because
+      the two standalone PRs render side by side (item 1 of the earlier note stands).
+      Captures rewritten in /pm-captures/scenarios/13/story7-busy-guard/.'
+    created_at: '2026-11-03T08:01:54Z'
+    last_edited: '2026-11-03T08:01:54Z'
+  - id: note-4cf118a
+    text: 'QA scenario 15 (top-level help / Click compatibility / TUI launcher remedy):
+      NEEDS_WORK, fixed in 9e10f888. `pm pr signoff help` exited 2 with "Error: No
+      such command ''--help''." on Click 8.1.8 because HelpGroup rewrote `help` to
+      `--help` and relied on Click >= 8.2 re-parsing the rewritten args; HelpGroup
+      now renders the group help and exits directly. Verified on 8.1.8 and 8.4.1 (both
+      forms exit 0, byte-identical help; same group help as 8.4), with a regression
+      test using Click 8.1 resolve_command semantics. Stories 1 (pm help / getting-started),
+      2 (pm tui keys), 3 (? screen from plans view), 4 (signoff help on 8.4.1) and
+      6 (TUI launcher install remedy, no claude on PATH) all PASS. Full suite 5575
+      passed, 1 skipped. Captures: /pm-captures/scenarios/15/{cli-help,tui-keys,tui-help,signoff-help,click81,tui-launcher}.'
+    created_at: '2026-11-03T08:36:29Z'
+    last_edited: '2026-11-03T08:36:29Z'
+  - id: note-aeb85d5
+    text: 'review-loop e4f7 i3 (692008f3) incidental fixes beyond the help/error sweep:
+      (1) plans view: Enter on a plan (launch_plan_activated) and `e` (handle_plan_action
+      edit) returned silently when the plan file was missing — a live plan here (plan-b6aac3d)
+      has no file on disk — and an empty `file` resolved to the project root, so `e`
+      would open the editor on the whole project; both now log the same "Plan file
+      not found — run `pm plan list`" remedy as `v`, via one helper. (2) command bar:
+      every branch restored focus with "plans pane else tech-tree", so in the QA view
+      focus landed on the hidden tree and the QA pane keys (j/k, Enter, e, d, a) went
+      dead until the view was re-entered; one _refocus_active_view helper (mirroring
+      action_unfocus_command) handles all three views. (3) the `z` prefix row names
+      the `wr` watcher-review chord. Full suite (minus the known markdown-module baseline)
+      5556 passed, 1 skipped.'
+    created_at: '2026-11-03T02:25:36Z'
+    last_edited: '2026-11-03T02:25:36Z'
+  - id: note-8f0e257
+    text: 'review-loop e4f7 i5: two stale surfaces the sweep missed. (1) `pm help`''s
+      `pm qa regression` line still said "(replaces `pm tui test`)" — the removed
+      command read as runnable ("No such command"); it now names `pm/qa/regression/`,
+      with a test that HELP_TEXT names neither `pm tui test` nor `pm pr done`. (2)
+      The three TUI pane launchers (launch_claude, launch_discuss, launch_watcher_review)
+      logged a bare "Claude CLI not found" and returned with no fallback (the CLI
+      launchers print a copy-paste prompt); each now says "install Claude Code first",
+      matching claude_launcher''s "install it first", with a parametrized test. Full
+      suite (minus the known markdown-module baseline) 5561 passed, 1 skipped. Commit
+      d7878f78.'
+    created_at: '2026-11-03T04:36:37Z'
+    last_edited: '2026-11-03T04:36:37Z'
+  - id: note-d40c323
+    text: 'QA S16 (command-bar help — flag spelling, quoting, focus return) PASS.
+      Runtime-verified from the TUI at 200x50: `/ pr qa --help` and `/ pr start -h`
+      both open the real Keyboard Shortcuts HelpScreen (no CLI dump, no `unknown QA
+      option`), whose `Command bar (press /):` section lists `pr qa [PR_ID]` t, `pr
+      qa fresh [PR_ID]` z t, `pr qa loop [PR_ID]` zz t and the `--fresh`/`--loop`
+      flag-equivalence notes; Esc restores the unfocused command bar and the next
+      nav key moves the tree selection. `/ pr note add pr-95325c4 ''mention --help
+      here''` opens no HelpScreen and `pm pr note list` keeps the literal `--help`;
+      `/ pr note add pr-95325c4 don''t forget` and `/ pr start "unclosed` log `Invalid
+      command syntax: No closing quotation — check the quoting (e.g. pr note add pr-001
+      ''text'')` with the TUI still responsive; the following `pr start pr-95325c4`
+      is not Busy and logs `Launched Claude in tmux window` (fake-claude `_all` confirmed).
+      In the QA and plans views, `help` opens/closes and `j` moves ▶ First Item→Second
+      Item / Plan A→Plan B. The `?` screen and `pm tui keys` both name `z s/d/t/i
+      fresh` / `zz d/t loop` with `requires fzf`; only `pm tui keys` adds the no-fzf
+      numbered-menu fallback. Fixture notes for the next run: (1) the GIVEN needs
+      an initial git commit plus committing pm/project.yaml on master (pm push alone
+      leaves it on a sync branch) or `pr start` refuses with "not committed on master
+      yet"; (2) with two standalone PRs the tree lays them out side by side, so k/j
+      have no vertical neighbour — use l/h to show selection movement (same errata
+      as scenarios 6/15); (3) create the verify window with `new-window -d -P -F "#{window_index}"`
+      and target it by index, since a second window named `verify` makes the name
+      target ambiguous. Captures: /pm-captures/scenarios/16/{command-bar-help,quoting,view-focus,prefix-fzf}.'
+    created_at: '2026-11-03T19:11:46Z'
+    last_edited: '2026-11-03T19:11:46Z'
+  - id: note-94e56e0
+    text: 'QA S18 PASS (autostart owner refusals + group help aliases across Click
+      versions). Erratum for future scenario authors, not a defect: for groups with
+      a hidden no-subcommand run form the usage line differs by Click version — on
+      8.1.7 `pm watcher help` / `pm pr signoff help` render `Usage: pm <group> [OPTIONS]
+      COMMAND [ARGS]...`, while Click 8.2+ renders `[COMMAND]` (optional). Within
+      each version `help` is byte-identical to `--help`, which is what S18 asserts
+      (extends the signoff-shape note from S8 to watcher). Verified all 17 top-level
+      groups on both 8.1.7 and 8.5.0: exit 0, empty stderr, help == --help, no "No
+      such command". Autostart refusals verified verbatim: owner_unavailable (no session
+      / no pidfile / stale pidfile incl. unreadable), unknown_pr, terminal_pr, the
+      --json shape, and no autostart key written. Captures: /pm-captures/scenarios/18/{cli-autostart,click81,click85}.'
+    created_at: '2026-11-03T19:14:16Z'
+    last_edited: '2026-11-03T19:14:16Z'
+  - id: note-fb770fd
+    text: 'Refiner scenario 20 (E15/E16/R30): verified all commands/messages on this
+      branch. E15 caveat: the same-name scaffolder is check-then-write (exists() then
+      write_text, no O_EXCL/lock) — in 2/60 back-to-back concurrent trials both invocations
+      printed "Created:" and exited 0. The file was always complete (104 B instructions
+      template) with no traceback, and when a loser occurred it exited 1 naming "pm
+      qa edit <id>", so scenario 20 asserts the conditional ("any refusal names pm
+      qa edit") plus one complete file. E16 verified against a live TUI on an isolated
+      TMUX_TMPDIR: concurrent add A / add A B both exit 0, final set is A once + B
+      once (wait-for-merge), pm tui view still renders; with the session killed both
+      exit 2 naming "pm session", and a restarted session lists no targets.'
+    created_at: '2026-11-03T21:32:33Z'
+    last_edited: '2026-11-03T21:32:33Z'
+  - id: note-74efc06
+    text: 'QA scenario 20 (E15/E16/R30) PASS. Runtime-verified on an isolated project/TUI
+      (TMUX_TMPDIR=/scratch/pm-qa20/.tmux, session pm-pm-qa20-cde36e31): (1) qa add-instruction
+      first run Created + exit 0, second run exit 1 naming pm qa edit regression-reuse;
+      qa list/show match the template. (2) 5 same-name concurrent trials each left
+      exactly one 104-byte complete template (4 ## headings, no traceback); every
+      refusal exited 1 naming pm qa edit concurrent-item; distinct reg-one/art-one
+      pair both Created and listed once; sequential re-runs of all three scaffolders
+      exit 1 with the pm qa edit <id> remedy. (3) concurrent autostart add A / add
+      A B both exit 0 with added/unchanged + targets lines; list shows A once and
+      B once as wait-for-merge with titles; TUI tree still renders AUTO x2. (4) with
+      the session killed both concurrent adds exit 2 with owner_unavailable naming
+      pm session, tmux ls reports no server, and after restart list shows Auto-start:
+      off / No auto-start targets. Note: the E15 scaffolder is check-then-write, so
+      one complete file is the invariant, not who wins; in this run the loser was
+      refused on every trial. Captures: /pm-captures/scenarios/20/{story1-cli,story2-concurrency,story3-autostart-cli,story4-owner-unavailable,tui-library-and-autostart}.
+      Fixture note: agg is absent in this container; installed the aarch64 static
+      binary into the scratchpad for the mp4 renders. TUI capture shows the auto-start
+      owner logging "not committed on master yet" because the throwaway project.yaml
+      was not committed on master; that is a fixture limitation, not the asserted
+      outcome.'
+    created_at: '2026-11-03T21:42:44Z'
+    last_edited: '2026-11-03T21:42:44Z'
+  - id: note-a05bffe
+    text: 'S21 refiner at HEAD e5faafbb1: R35/E18 are NOT met by the command bar.
+      `pr add X --depends-on bogus` prints the remedy (`... run ''pm pr list'' ...`)
+      first, then `Available PRs: ...`; `pr note edit <id> bogus ''x''` prints the
+      remedy first, then `Available notes:` + rows. The bar logs only the LAST stderr
+      line, so it shows `Error: Available PRs: ...` / `Error:   note-...: ...` and
+      drops the remedy. S21 will report NEEDS_WORK unless the TUI picks the remedy
+      line or the CLI prints the remedy last. Rest of S21 drivable: two PRs; `pm pr
+      start` (fake `_all`); `review-loop <id>` with `{"review":{"verdicts":[]}}` holds
+      the loop in iteration 1; stop/cancel refusal verified at 200x50 (same review
+      window id); `pm pr list` logs `Error: Error: No such command ''pm''.` and a
+      following `pr list` works.'
+    created_at: '2026-11-03T21:41:48Z'
+    last_edited: '2026-11-03T21:41:48Z'
+  - id: note-c683f69
+    text: 'QA scenario 21 (command bar as a general CLI) — PASS on stories 1/3/4/5,
+      NEEDS_WORK on story 2 fixed in efab1f4f8. R35/E18: the generic `<command> [args]`
+      path logged only the last stderr line, so `pr add X --depends-on bogus` showed
+      "Available PRs: …" and `pr note edit <id> bogus ''x''` showed the note row,
+      dropping the `pm pr list` / `pm pr note list <id>` remedy printed above them.
+      `command_surface.pick_error_line` now prefers the first stderr line naming a
+      pm command to run and otherwise keeps the last line (Click usage errors and
+      a traceback''s final exception line stay last); both the sync and async command-bar
+      runners use it. Runtime-verified pre/post fix at 200x50; captures under /pm-captures/scenarios/21/{pre-fix,post-fix,story1-command-bar,story3-prefixed-spelling,story4-review-loop-stop,story5-literal-markup}.
+      Story 4 (R32/E17): `review-loop stop|cancel <id>` against a live loop logs the
+      cancel-path refusal verbatim, the review window id @7 and its python3 fake process
+      are untouched, and the tree stays `in_review ⟳1`. Story 5: `creds[work] and
+      [x]` renders literally in the bar and in `pm pr note list`. Errata for the next
+      run: (1) the fixture must commit pm/project.yaml on master or `pr start` refuses;
+      (2) with two standalone PRs the tree is side by side, so use h/l (not j/k) for
+      the focus check; (3) story 3''s `pm pr list` still logs only Click''s `Error:
+      No such command ''pm''.` — R35''s closing sentence reads as wanting a correction
+      there too, but the scenario''s Then asserts this exact line, so it was not changed.'
+    created_at: '2026-11-03T22:04:09Z'
+    last_edited: '2026-11-03T22:04:09Z'
+  - id: note-7c21dbd
+    text: 'QA scenario 22 (fresh restart parity) PASS. Runtime-verified in a throwaway
+      local project at 9585f9a66: (1) `pm pr start` on a pending PR prints "is now
+      in_progress" + "Launched Claude in tmux window", the plain re-run prints "already
+      in_progress, reusing existing workdir." + "Switched to existing window" and
+      keeps the same window id (nwin 1), `--fresh` prints the same reuse line + "Killed
+      existing window" + "Launched Claude in tmux window" and yields a NEW window
+      id with nwin 1; one in_progress record throughout. (2) Two simultaneous `--fresh`
+      starts both exit 0 with no Traceback, each showing the clean kill/relaunch pair,
+      ending with exactly one window, one record, no .tmp-<id> partial clone and a
+      single (clean) workdir line. (3) `pm pr review` / `--fresh` mirror the start
+      behavior for review-<id> (plain switches, fresh kills+reopens, id changes, status
+      stays in_review). (4) `pm pr signoff` / `--fresh` do the same for signoff-<id>;
+      the plain and fresh re-runs do not reprint "marked as sign_off" and status stays
+      sign_off. (5) `pm pr merge --fresh` is rejected by Click (rc=2, "Error: No such
+      option ''--fresh''.") with the status unchanged, and `pm pr merge --help` exits
+      0, states "There is no --fresh option", names the retry path `pm pr signoff
+      --fresh <id>` then merge again, lists the TUI `g      merge` / `G      merge
+      with a companion shell pane` forms, and its Options block holds only --companion,
+      --no-signoff-check and -h/--help. No code changes needed. Captures: /pm-captures/scenarios/22/{story1-start,story2-concurrent,story3-review,story4-signoff,story5-merge}
+      (cast + mp4 + manifest each).'
+    created_at: '2026-11-03T22:09:34Z'
+    last_edited: '2026-11-03T22:09:34Z'
+  - id: note-8074a70
+    text: 'QA S23 refiner (single-instruction `pm qa run`): prereqs and findings.
+
+      (1) `pm qa run` stops at INPUT_REQUIRED (exit 0) unless the PR has a QA spec:
+      create `pm/specs/<pr-id>/qa.md` as a fixture (`pm pr spec <id> qa` uses print-mode
+      Claude, which fake-claude does not cover).
+
+      (2) Fake config set from the project dir (so the tag matches the pm session):
+      `pm fake-claude config set ''{"_all": {}, "qa_scenario": {"verdicts": ["PASS"]}}''`.
+      The `_all` catch-all also gives `qa_concretize` REFINED_STEPS and `qa_finalize`
+      FINALIZE_DONE; without it the refiner is a no-verdict mock and the run hangs.
+
+      (3) With a spec and fake, `pm qa run <id> --pr <id>` prints `Running QA: …`,
+      `  Workdir: …`, final `Result: PASS`, exit 0; the session gains `qa-<pr-id>`
+      (status pane `Overall: PASS`) and `qa-<pr-id>-s1`; `pm qa list` still lists
+      the instruction. The TUI QA view (`q`) is the instruction library, NOT a per-PR
+      verdict; the PR stays `in_review` (CLI run does not transition/write a QA note).
+
+      (4) Gap: with no pm session, `pm qa run` prints only `Result: ERROR` (no cause,
+      no `pm session`) and exits 1 — a dead end the scenario expects remedied; `pm
+      qa debug` does print `No pm session found. Start one with: pm session`.'
+    created_at: '2026-11-03T22:22:53Z'
+    last_edited: '2026-11-03T22:22:53Z'
+  - id: note-5b0368c
+    text: 'QA scenario 23 (single-instruction `pm qa run` + qa run/debug/launch remedies):
+      NEEDS_WORK, fixed in 162913959. Runtime-verified on a throwaway project (pr-c0372f8,
+      fake `_all` + qa_scenario PASS, QA spec fixture) at 81775f329: (1) `pm qa run
+      smoke --pr <id>` prints `Running QA: Smoke against …`, `  Workdir: …`, final
+      blank line + `Result: PASS`, exit 0; the session gains `qa-<pr>` (status pane
+      scenario PASS / `Overall: PASS`) and `qa-<pr>-s1`; `pm qa list` still lists
+      `smoke: Smoke`; `pm tui view` renders the tree with the PR still in_review.
+      (2) not-found forms: `Instruction not found: no-such-instruction. Run `pm qa
+      list` …` and `PR not found: bogus. Run `pm pr list` …`, both exit 1. (3) GAP
+      found: with no pm session, `pm qa run` printed only `Result: ERROR` / exit 1
+      (no cause, no remedy; `_error` was empty) while `pm qa debug` already said `No
+      pm session found. Start one with: pm session`. Fixed by recording that cause+remedy
+      in `state._error`, which the CLI already prints for ERROR runs; post-fix the
+      run prints `No pm session found. Start one with: pm session` then `Result: ERROR`
+      / exit 1. Regression tests added in tests/test_container_fail_closed.py (core
+      + CLI). (4) `pm qa launch smoke` → `Invalid QA item id (expected `category:id`):
+      smoke. Run `pm qa list` …` exit 1; `pm qa launch instructions:smoke` → `Launched
+      instructions:smoke in new window `qa-smoke`` exit 0 and the qa-smoke window
+      exists; `instructions:no-such` → `QA item not found: …` exit 1; TUI stays responsive.
+      (5) `pm pr close` clears the active pointer; `pm qa run smoke` with no --pr
+      → `No PR specified and no active PR found. Pass --pr <id> (see `pm pr list`).`
+      exit 1. Fixture gotchas for the next run: the container default PYTHONPATH=/opt/pm-src
+      shadows the PR checkout — export PYTHONPATH=/workspace (a scaffold tmux pane
+      inherits the caller env, so re-export inside the driver script); `pm qa run`
+      stops at INPUT_REQUIRED without `pm/specs/<pr>/qa.md`; fake config must be set
+      from the project dir so the session tag matches. Captures: /pm-captures/scenarios/23/{story1-qa-run,story2-not-found,story3-no-session/pre-fix,story3-no-session/post-fix,story4-launch,story5-no-pr}
+      (cast + mp4 + manifest each).'
+    created_at: '2026-11-03T22:36:49Z'
+    last_edited: '2026-11-03T22:36:49Z'
+  - id: note-4ffc00d
+    text: 'QA scenario 22 capture correction (follow-up to note-7c21dbd): the scenario
+      was assigned both capture recipes and the first run only produced the CLI one.
+      Re-ran all five stories in a fresh throwaway project (/tmp/pm-test2-1793745303,
+      session pm-pm-test2-1793745303-b915c655) with both recipes recorded from the
+      same run: each story dir now holds cli-recording/ (drive-pane asciinema cast
+      + mp4 + manifest) and tmux-screen-recording/ (pipe-pane transcript.log of the
+      TUI pane, an asciinema cast of a separate recorder session attached to the pm
+      session, mp4, manifest). The TUI captures follow pm into the launched impl/review/sign-off
+      windows and end on the tree; verified frames show the status transitions (in_progress,
+      in_review, sign_off) and the tmux status line with exactly one window of each
+      name. Behavior re-verified unchanged at 81775f329: start IDs @4 -> @6 (plain
+      keeps @4, nwin 1, one record); concurrent fresh starts both rc 0, no Traceback,
+      kill/relaunch pair each, one window/record, no .tmp clone, single clean workdir;
+      review @11 -> @12 (plain keeps @11, status in_review); sign-off @15 -> @16 (plain
+      switches, no re-mark, status sign_off); merge --fresh rc 2 "No such option",
+      status unchanged, help rc 0 with "There is no --fresh option" + pm pr signoff
+      --fresh <id> / then merge again + g/G TUI forms, no --fresh in Options. Artifacts:
+      /pm-captures/scenarios/22/<story>/{cli-recording,tmux-screen-recording}/.'
+    created_at: '2026-11-03T22:39:59Z'
+    last_edited: '2026-11-03T22:39:59Z'
+  - id: note-1f24f24
+    text: 'QA planning pass for scenarios 24+: spec reconciled with S20-23 (all PASS
+      after efab1f4f8 / 162913959) and R33 corrected (the notes-pane wording landed
+      in `pm help`''s TUI section and `pm getting-started`, not `pm session --help`).
+      Next plan: S24 = the interrupted plans-view / standalone-PR plan remedies (R24/R33)
+      including per-plan window concurrency and the plans-view keys; S25 = the `pm
+      pr qa` diagnostic contract (R15/E1/E6/E8). Verified while planning, for S25
+      to assert: with tmux installed but NO pm session running, `pm pr qa <id>` prints
+      only the command-bar form and keys and omits the "start one with pm session"
+      remedy; that remedy appears only when tmux is absent from PATH (the check tests
+      `_get_pm_session()` truthiness, which returns a computed session name whenever
+      tmux exists). Fixture notes: `pm/project.yaml` is mode 444 (chmod before a bootstrap
+      edit); plan `file` paths resolve against the repo root (`plans/<id>.md`), not
+      `pm/plans/`; an outside-tmux run still sees `TMUX` if the driver shell is inside
+      a session, so unset TMUX/PM_IN_TMUX_SESSION when establishing "no session".'
+    created_at: '2026-11-03T23:19:24Z'
+    last_edited: '2026-11-03T23:19:24Z'
+  - id: note-e67016d
+    text: 'Refiner scenario 25 (QA diagnostic contract) — corrections and verified
+      fixture, at 7c8c3e233:
+
+      (1) Missing-session remedy is unreachable with tmux installed. `pm pr qa <id>`
+      from a plain shell with no pm session prints the session-present branch ("Open
+      the TUI command bar ... pr qa <id>" + "Or press ''t'' ... (z t = fresh restart,
+      zz t = loop)") and exits 1; it does NOT print "Start a session first with: pm
+      session". `_get_pm_session()` returns the computed cwd session name whenever
+      the tmux binary exists (has_tmux only checks the binary), so the no-session
+      branch fires only when tmux is absent. Pre-existing (blame f5539cf778) and accepted
+      per QA S1; the refined story accepts either branch and does not treat the absent
+      line as a failure.
+
+      (2) Runtime-verified verbatim: pending names `pm pr start <id>` (TUI: s); merged
+      says `Nothing to do` + `pm pr show <id>`; closed names `pm pr edit <id> --status
+      pending`; unknown prints `PR ''<id>'' not found.` + `pm pr list`; all exit 1.
+      All eight fresh/loop spellings print the mode hint (`''fresh'' ... pr qa fresh
+      <id> (TUI: z t)`) and exit 1, no Click errors; `pm pr qa fresh --help` and `--fresh
+      --help` both render identical full help and exit 0; `--frosh` exits 2 with `No
+      such option ''--frosh''`. No-id inference: single eligible -> `Auto-selected
+      <id>`; multiple -> `Multiple PRs eligible for QA. Specify one:` + rows; none
+      -> `No PRs in in_review or qa status` + `pm pr start` (TUI: s) + `pm pr list`;
+      all exit 1.
+
+      (3) No-id fixture: there is no CLI to clear active_pr, so make the active PR
+      an ineligible pending anchor (add eligible PRs first, add/select the anchor
+      last) and run from the project root, not a PR workdir; then the inference falls
+      through to the single/multi/none cases.
+
+      (4) 60-column help: COLUMNS=60 works; exit 0. The modes table lives in Click
+      `\b` blocks and its literal lines exceed 60 columns (soft-wrap only) — assert
+      tokens, not line width. The help says "This CLI form therefore does not launch
+      QA itself" and "It exits 1 even when the PR is valid: it performs no action."
+      (not the word "diagnostic"), and includes "If no pm session is running, start
+      one with `pm session`" plus the `pm qa run <instruction-id> --pr <pr-id>` pointer.
+
+      (5) Live-run fixture (verified): initial `git add -A && git commit` then `pm
+      push` (pr start refuses uncommitted project state); fake-claude `{"_all": {},
+      "qa_scenario": {"verdicts": [{"verdict": "PASS", "delay": 120}]}}` set from
+      the project dir; `pm pr start <id>` creates the workdir/branch and an impl window;
+      set `in_review`; `EDITOR=true pm qa add-instruction smoke`; `pm/specs/<id>/qa.md`
+      fixture; `pm qa run smoke --pr <id>` in a session pane creates `qa-<id>` and
+      `qa-<id>-s1`. Two concurrent `pm pr qa <id>` from session panes printed identical
+      diagnostics, exit 1, no traceback, same window ids, status unchanged.'
+    created_at: '2026-11-03T23:42:53Z'
+    last_edited: '2026-11-03T23:42:53Z'
+  - id: note-69ef5d6
+    text: 'QA S24 (plans-view file actions, standalone-PR remedy, help surfaces, per-plan
+      windows) PASS 5/5 stories at 7c8c3e233. Runtime-verified in /scratch/pm-test24-1793749715
+      (session pm-pm-test24-1793749715-41cba046) with less/vim installed and EDITOR=vim.
+      (1) Alpha (file deleted): Enter and e each log "Plan file not found: /scratch/.../pm/plans/plan-a3e13a1.md
+      — run `pm plan list` to see every plan"; the two identical consecutive lines
+      dedupe to one log record; no window/less/vim, no traceback, list intact, Down
+      moves ▶ to Beta. (2) Beta (file:"" via the store API bootstrap edit): both actions
+      log the no-path form "Plan file not found — run `pm plan list` to see every
+      plan"; no window, no editor on the project root (pane_start_command checked);
+      p toggles back to the tree. (3) Gamma (valid): Enter opens window plan-24ed2c5
+      running less on the plan file (GAMMA-UNIQUE-CONTENT renders, client follows);
+      e adds a second pane in the same window running vim on the plan file (not the
+      project root); :q closes it and the TUI stays responsive. (4) Standalone PR:
+      v logs "No plan associated with pr-67a5608 — assign one with `M` (or `pm pr
+      edit pr-67a5608 --plan <plan-id>`)." and creates nothing; after pm pr edit pr-67a5608
+      --plan plan-24ed2c5 the PR moves under Gamma and v logs "Launched plan pane"
+      with less in a plan-role main-window pane and no new remedy line. (5) Help:
+      pm getting-started has exactly "a=add  w=breakdown  c=review  l=load  e=edit  D=deps  Enter=view
+      file" and no v=view; the plans-view ? screen shows Plan Navigation/Enter View
+      plan file, Plan Actions a/e/w/c/l, Cross-plan D and no tree PR Actions; pm pr
+      edit --help names title/description/dependencies/status/plan + the interactive
+      editor; pm help and pm getting-started say pm session is the TUI with n for
+      notes and neither says "notes editor". (6) Two clients on the grouped session:
+      back-to-back Enter then e on Alpha logs the remedy once and creates no window;
+      Gamma then Delta open plan-24ed2c5 and plan-68b0be8 with their own less and
+      own UNIQUE-CONTENT and both clients follow; Enter twice on a windowless plan
+      yields exactly one window with one pane. No code changes needed. Fixture note
+      for the next run: the scenario points the recorder at $S~1 as "the attached
+      grouped session", but here the failed pm-session attach left $S~1 unattached
+      while the recorder attached to $S; the client-follow behavior is real and was
+      verified in S (story 3) and S~1 (story 6). Captures: /pm-captures/scenarios/24/{plans-view,help/cli-recording}
+      (cast + mp4 + manifest each; plans-view also has transcript.log).'
+    created_at: '2026-11-03T23:54:56Z'
+    last_edited: '2026-11-03T23:54:56Z'
+  - id: note-5705191
+    text: 'QA scenario 25 (pm pr qa diagnostic contract) PASS, 11/11 stories runtime-verified
+      on a throwaway local project at 7c8c3e233. All refusals exit 1 with the named
+      remedies: command-bar form + t/z t/zz t keys; pending -> pm pr start (TUI: s);
+      merged -> Nothing to do + pm pr show; closed -> pm pr edit --status pending;
+      unknown -> PR not found + pm pr list; all eight fresh/loop CLI spellings ->
+      the mode hint naming pr qa fresh|loop <id> and z t/zz t (no Click error); fresh
+      --help and --fresh --help identical full help, exit 0; --frosh -> Click No such
+      option, exit 2; no-id inference single -> Auto-selected, multiple -> list both,
+      none -> No PRs in in_review or qa status + pm pr start/review/list; COLUMNS=60
+      help complete. Concurrent story: two panes ran the diagnostic during a live
+      pm qa run (qa-<id> @5, qa-<id>-s1 @6); both printed the same diagnostic and
+      exited 1, window ids and in_review unchanged, and the live run then finished
+      Result: PASS. Fixture notes for the next run: commit pm/project.yaml on master
+      before pm pr start (else it refuses); fake config must be set from the project
+      dir so the session tag matches; the QA spec fixture is required (pm/specs/<id>/qa.md);
+      the tmux status line truncates the long session name to 10 chars, which is cosmetic.
+      Captures: /pm-captures/scenarios/25/{story1..story10,story11-concurrent-live/{cli-recording,tmux-screen-recording}}.'
+    created_at: '2026-11-04T00:08:21Z'
+    last_edited: '2026-11-04T00:08:21Z'
+  - id: note-7f477d5
+    text: 'Master integration 2026-11-04 (impl return from sign-off r1): origin/master@c3bac6ce
+      (#296; merge base c1fcecc5) merged into the branch as 6a6665e0e, spec updated
+      in d987e0628, pushed. Four conflicts resolved: pm/project.yaml (store.merge_3way
+      over index stages, rebuilt on master text with the branch records swapped in
+      and its two new records inserted — 619 PRs, 22 plans, branch notes intact);
+      pm_core/cli/__init__.py (master isolated-run wording for pm qa regression +
+      branch qa debug/launch lines); pm_core/prompt_gen.py (master #284 isolated-run
+      prose, branch improvements plan name kept where master still said ux); pm_core/tui/pr_view.py
+      (fuzzy pr select/plan select before the guarded shlex split, both hand focus
+      back). Semantic reconciliation: one focus helper (App._focus_current_view delegates
+      to pr_view._refocus_active_view, queried by id only); master #136/#284 pr select,
+      plan select and qa regression joined command_surface.COMMAND_BAR_COMMANDS plus
+      the ]/[ cycle key in pm tui keys, with the parity test now asserting them; two
+      master tests updated to this PR contracts (exact-id refusal still names the
+      listing remedy; command-bar --help opens the HelpScreen instead of pinning Click
+      No such option). Full suite on the merged tree: 5867 passed, 1 skipped, 0 failed;
+      tests/test_command_surface.py 176 passed on the final tree. Prior QA S1-S25
+      and review loops fcff/b8ed/e4f7/6a82 are pre-merge evidence; this integrated
+      HEAD needs fresh review/QA/sign-off. No user decisions were made; no PR merged.'
+    created_at: '2026-11-04T00:57:53Z'
+    last_edited: '2026-11-04T00:57:53Z'
+  - id: note-8784a22
+    text: 'QA scenario 26 (merged fuzzy-select command-bar surface: pr select / plan
+      select, ] / [ cycling, log messages, focus return, exact-only CLI counterpart)
+      PASS 11/11 stories at 41425435e. Runtime-verified in a throwaway project (2
+      plans, 5 PRs; session pm-pm-test-1793765356-63c695dd): (1) `]`/`[` with no prior
+      select logs exactly "No match results to cycle (use /pr select or /plan select)"
+      and the box does not move. (2) `pr select login` logs "Selected: pr-dd702ec
+      Add login feature [3 matches]" (description ranks above the two title-only matches),
+      moves the box, and `pm pr list` marks it ` *`. (3) `?` from the tree shows `]
+      / [  Cycle fuzzy match results`, `/pr select <query>  Fuzzy-find PR`, `/plan
+      select <query>  Fuzzy-find plan`; scrolling reaches `Command bar (press /):`
+      with the same rows; Esc closes; `pm tui keys` matches. (4) `]` x3 then `[` gives
+      Match 2/3, 3/3, 1/3 (wrap), 3/3, box follows, active PR follows. (5) `plan select
+      platform` replaces the PR match list with `Plan: plan-e0ba8de: Platform auth
+      → pr-24bfbc9 [2 matches]`, then `]` cycles `Match 2/2: plan-7fa5569 …` and wraps
+      to 1/2 with no PR-title entries. (6) plans view + `plan select billing` returns
+      to the tree on pr-4a4f5f7 with `Plan: plan-7fa5569: Platform billing → pr-4a4f5f7`,
+      and the next j logs Selected: pr-24bfbc9 (focus back in the tree); plans view
+      + `plan select zzz` logs "No plan matches for zzz", leaves the plans view open
+      and j moves ▶. (7) `pr select zzz` logs "No PR matches for zzz", leaves the
+      cursor, and the next `]` reports no match results. (8) hidden PR: with `filter:
+      hide closed`, `pr select pr-24bfbc9` logs "pr-24bfbc9 Login docs page is hidden
+      by the current filters (X: merged, f: status filter)", cursor stays on pr-40bf499
+      and does not land on the mention PR. (9) `edit pr-3c1` logs exactly "PR not
+      found: pr-3c1 — see `pr list` (TUI: r to refresh)", no pane opens, cursor unchanged.
+      (10) CLI: `pm pr select pr-3c1` exits 1 with PR not found + Available PRs +
+      Run pm pr list remedy; full id prints "Active PR: pr-3c1603e (Fix login timeout)"
+      exit 0; `pm tui keys` documents `CLI: pm pr select <PR_ID> (exact id)` vs `plan
+      select ... CLI: — (command bar / TUI only)`. Observation, not a defect: active_pr
+      persistence is enqueued on the TUI write queue (pr_view.persist_active_pr, deliberate
+      to avoid blocking the event loop), so `pm pr list` run within ~2 s of a `]`
+      press still shows the previous PR; it converges after ~2 s (verified 6 s and
+      3 s checks). Fixture notes: with one row per plan group j has no vertical neighbour
+      inside a group (here j moved between groups), so l/h are the reliable in-group
+      focus probes; `pm tui send` per key with a 0.7 s pause after "/" drives the
+      bar reliably; the capture recorder must run with SESS exported (a blank -t produces
+      an empty cast). Captures: /pm-captures/scenarios/26/{story1..story10}/ (cast
+      + mp4 + transcript.log + manifest each; story2/3/10 also have cli-recording
+      subdirs). No code changes needed.'
+    created_at: '2026-11-04T04:22:41Z'
+    last_edited: '2026-11-04T04:22:41Z'
+  - id: note-cf08a2b
+    text: 'QA scenario 28 (merged help, plan names, reconciled registry) PASS 4/4
+      stories at 96a001319. (1) pm help lists all nine named lifecycle commands and
+      the TUI / COMMAND BAR section (? / pm tui keys); pm getting-started plans line
+      is exactly "a=add  w=breakdown  c=review  l=load  e=edit  D=deps  Enter=view
+      file"; pm tui keys Plans view block has Enter/D and no v; pm pr qa --help exits
+      0 with the three modes and both flag spellings; none of the four outputs contains
+      "pm tui test" or "pm pr done". (2) TUI ? screens at 200x50 and 70x40: tree shows
+      the merged rows "]/[ Cycle fuzzy match results", "/pr select <query>", "/plan
+      select <query>" and, at "Command bar (press /):", pr qa fresh (TUI z t), pr
+      qa loop (TUI zz t) and qa regression (TUI q view: Enter). A full single-line
+      scroll of all three modals shows the identical 15-row shared command-bar table
+      (tree==plans==qa set-equal) and zero tree-only rows (Start QA on selected PR,
+      Launch Claude session, companion-pane, Start loop, Start QA loop, Prefix: restart
+      the pane) in plans/QA; at 70x40 the long CLI rows wrap inside the 50-col modal
+      instead of clipping. (3) pm watcher list and pm watcher start --help describe
+      improvement-fix-impl as plan=improvements (gated at QA PASS); pm prompt prints
+      Part of plan "" (improvements).; pm pr list --plan improvements lists only that
+      PR; no plan=ux anywhere. (4) In /workspace the merged registry: four read-only
+      commands exit 0, plan list keeps tui-ux: TUI and UX improvements [draft] and
+      improvements [active], pr show pr-f38005f prints Plan: plan-003 plus notes note-181f05d/note-60be829/note-23e1756,
+      pr list --plan improvements renders 59 rows vs 619 unfiltered, and md5sum is
+      unchanged (e14404ce4314526cfc11d24c3d21c8b5). No code changes needed. Fixture
+      note for the next run: the plans/QA ? modals are ~90 lines and page keys (J)
+      skip rows — sweep with single-line j (0.25 s apart) if you need to prove the
+      full shared table. Captures: /pm-captures/scenarios/28/{story1-cli-help,story2-tui-help,story3-plan-naming,story4-merged-registry}
+      (cast + mp4 each; story2 also has transcript.log).'
+    created_at: '2026-11-04T04:53:26Z'
+    last_edited: '2026-11-04T04:53:26Z'
+  - id: note-6d5bc9c
+    text: 'QA S29 (concurrent actors on the shared registry + isolated regression
+      runs) PASS, 2/2 stories at dd94d148f. Runtime-verified in a throwaway project
+      (/scratch/pm-test-rec-1793768993, session pm-pm-test-rec-1793768993-25b08007)
+      with two real tmux clients on grouped views (~1, ~2) of one session sharing
+      a single TUI pane. (1) Fuzzy `pr select login` from the command bar submitted
+      while two CLI `pm pr select` writers (PR_B, PR_C) ran concurrently: log line
+      "Selected: pr-95325c4 Add login feature" with that row double-boxed, both CLI
+      writers exited 0 with their own Active PR lines, no traceback anywhere, and
+      after `R` exactly one `*` in `pm pr list` matching the double-boxed row (the
+      TUI write took the project.yaml lock last); a following command-bar `pr list`
+      rendered its row with no Busy guard. (2) Two regressions launched at once (command
+      bar + CLI pane): distinct run ids (…-c397 / …-0088), distinct clones and captures
+      dirs, each captures dir holding only its own prompt.md; pm/qa/regression git
+      status + sha256, pm/project.yaml and pm pr list unchanged (project.yaml byte-identical
+      to HEAD); two distinct ~/.pm/workdirs/qa/regression-*-<run>/s-0/{repo,scratch};
+      no tracebacks; command-bar pane dead=1 with output preserved, CLI pane back
+      at prompt, TUI still usable, final `pm pr select pr-d17fe55` rc 0. Fixture notes
+      for the next run: (a) `pm tui view`/`pm session name` resolve against ANY running
+      pm-* session, so kill leftover sessions before starting a fresh one or you will
+      bind the old one — run setup with exactly one pm session alive; (b) `tmux new-window
+      -t "$SESS"` (no -d) steals the grouped clients and the recorder to the new window,
+      so re-select window 0 right after sending the CLI-pane keys if you want the
+      TUI in the capture; (c) agg is absent in this container — installed the aarch64
+      v1.9.0 static binary (github release asset name is `agg-aarch64-unknown-linux-gnu`,
+      no `.tgz`) into /tmp/pm-tools for the mp4 renders; (d) `pm qa regression` needs
+      `pm/project.yaml` committed on master and the fake config set from the project
+      dir so the tag matches. No code changes needed. Captures: /pm-captures/scenarios/29/{story1-concurrent-select,story2-concurrent-regressions}/{tmux-screen-recording,cli-recording}
+      (cast + mp4 + manifest each; tmux captures also have transcript.log).'
+    created_at: '2026-11-04T05:15:46Z'
+    last_edited: '2026-11-04T05:15:46Z'
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-fa9f172-self-documenting-consistent-pm-comma-0c82d63b
   model: provider:deepseek-flash
   effort: high
   session_models:
-    signoff: provider:claude-main-xhigh-pm
+    signoff: provider:claude-work-xhigh-249
   session_effort:
     signoff: high
 - id: pr-71e9ec7
@@ -40768,38 +41402,40 @@ prs:
   notes: []
 - id: pr-9ee4d64
   plan: bugs
-  title: 'Bug: auto-start run transcripts overwrite pre-return impl/sign-off/review transcripts
-    after a sign-off return'
+  title: 'Bug: auto-start run transcripts overwrite pre-return impl/sign-off/review
+    transcripts after a sign-off return'
   branch: pm/pr-9ee4d64-bug-auto-start-run-transcripts-overwrite-pre-retur
   status: closed
   depends_on: []
   description: 'pm/transcripts/<autostart-run>/ keeps one file per (step, pr): impl-<pr>.jsonl,
     signoff-<pr>.jsonl, review-<pr>-i1.jsonl. When sign-off routes a PR back (SIGNOFF_IMPL/REVIEW)
-    within the same auto-start run, the rework impl, the fresh review loop (iteration restarts
-    at 1) and the fresh sign-off write the same paths, so the archived transcript of the router
-    that made the return decision (and the pre-return impl/review) is lost from the run archive
-    (the original ~/.claude/projects JSONL survives). Repro (QA pr-ac10f03 S15, 2026-10-22):
-    two overlapping PRs, B returned SIGNOFF_IMPL at 03:39:55; after B merged, pm/transcripts/autostart-*/signoff-<B>.jsonl
-    and impl-<B>.jsonl hold only the post-return sessions. Suggest suffixing by return round
-    (e.g. signoff-<pr>-r2.jsonl) or by session id.
+    within the same auto-start run, the rework impl, the fresh review loop (iteration
+    restarts at 1) and the fresh sign-off write the same paths, so the archived transcript
+    of the router that made the return decision (and the pre-return impl/review) is
+    lost from the run archive (the original ~/.claude/projects JSONL survives). Repro
+    (QA pr-ac10f03 S15, 2026-10-22): two overlapping PRs, B returned SIGNOFF_IMPL
+    at 03:39:55; after B merged, pm/transcripts/autostart-*/signoff-<B>.jsonl and
+    impl-<B>.jsonl hold only the post-return sessions. Suggest suffixing by return
+    round (e.g. signoff-<pr>-r2.jsonl) or by session id.
 
 
-    2026-10-28 live collector failure: #241 old review completion finalized the shared review-i1
-    transcript path before checking current loop ownership. A newer loop (8101 i1) had reused
-    the path; the obsolete callback froze its live symlink into an early copy, so the collector
-    saw no verdict even though the canonical newer SID finished with its own NEEDS_WORK. Recovery
-    preserved both and restored the exact link before collecting the original reviewer outcome.
-    Evidence: /home/matt/.local/state/pm-pr-shepherd/241-review-8101-i1-transcript-recovery.json
-    and check-20261028T122913Z/241-transcript-link-preservation. #248 S11 also exposed loss
-    of the earlier session_id from overwrite.
+    2026-10-28 live collector failure: #241 old review completion finalized the shared
+    review-i1 transcript path before checking current loop ownership. A newer loop
+    (8101 i1) had reused the path; the obsolete callback froze its live symlink into
+    an early copy, so the collector saw no verdict even though the canonical newer
+    SID finished with its own NEEDS_WORK. Recovery preserved both and restored the
+    exact link before collecting the original reviewer outcome. Evidence: /home/matt/.local/state/pm-pr-shepherd/241-review-8101-i1-transcript-recovery.json
+    and check-20261028T122913Z/241-transcript-link-preservation. #248 S11 also exposed
+    loss of the earlier session_id from overwrite.
 
 
     Extend acceptance to immutable per-attempt/loop/session archives and ownership-checked
-    finalization: superseded callbacks cannot freeze, replace, unlink or redirect a current
-    attempt''s live collector transcript. Keep both complete original sessions across multiple
-    sign-off returns, iteration resets, restart and late completion. Current collectors must
-    see later appended verdicts; never invent a verdict or delete history. User authorized
-    this PR to start2026-10-28 alongside the earlier integration gate.'
+    finalization: superseded callbacks cannot freeze, replace, unlink or redirect
+    a current attempt''s live collector transcript. Keep both complete original sessions
+    across multiple sign-off returns, iteration resets, restart and late completion.
+    Current collectors must see later appended verdicts; never invent a verdict or
+    delete history. User authorized this PR to start2026-10-28 alongside the earlier
+    integration gate.'
   agent_machine: spark-424d
   gh_pr: https://github.com/mjtomei/project_manager/pull/275
   gh_pr_number: 275
@@ -40810,91 +41446,96 @@ prs:
   merged_at: null
   notes:
   - id: note-6f1c638
-    text: 'QA INPUT_REQUIRED: Sign-off IMPL return keeps the pre-return implementation and
-      router transcripts: PASS; Sign-off REVIEW return restarts the review loop without overwriting
-      the earlier loop: PASS; A superseded review loop cannot freeze the current loop''s live
-      transcript: PASS; Turning auto-start off, or a watcher completing, must not freeze a
-      loop that is still writing: PASS; Restarting the TUI mid-run resumes on the same transcripts:
-      PASS; Two PRs and two sign-off returns inside one auto-start run: INPUT_REQUIRED; CLI
-      drivers preserve transcripts too (auto-sequence and CLI watcher): PASS; The bug''s reproduction
-      tests pass on the fix and fail before it: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-9ee4d64-0de466423db9dfc5)'
+    text: 'QA INPUT_REQUIRED: Sign-off IMPL return keeps the pre-return implementation
+      and router transcripts: PASS; Sign-off REVIEW return restarts the review loop
+      without overwriting the earlier loop: PASS; A superseded review loop cannot
+      freeze the current loop''s live transcript: PASS; Turning auto-start off, or
+      a watcher completing, must not freeze a loop that is still writing: PASS; Restarting
+      the TUI mid-run resumes on the same transcripts: PASS; Two PRs and two sign-off
+      returns inside one auto-start run: INPUT_REQUIRED; CLI drivers preserve transcripts
+      too (auto-sequence and CLI watcher): PASS; The bug''s reproduction tests pass
+      on the fix and fail before it: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-9ee4d64-0de466423db9dfc5)'
     created_at: '2026-10-28T20:28:46Z'
     last_edited: '2026-10-28T20:28:46Z'
   - id: note-user-restart-all-20261029
-    text: 'NEW USER AUTHORIZATION 2026-10-29: Following the test-session leak, restart this
-      PR in implementation and merge latest origin/master INTO this existing PR branch before
-      any new review/QA. User explicitly released old review/QA holds for this restart; preserve
-      all earlier questions, answers, verdicts and evidence and re-evaluate after integration
-      rather than invent answers or waive acceptance. Preserve dirty source, planner/spec
-      edits, local registry/routing, stashes, untracked files and all evidence. The interrupted
-      work is retained under /home/matt/.local/state/pm-pr-shepherd/test-session-leak-20261029T012237Z;
-      inspect its per-PR backup and original transcripts as needed. Safely reconcile interrupted
-      changes and current master, test, commit and push only this PR branch. Never force-push/reset
-      master or merge the PR into master. Report integrated master SHA and tests; only then
-      hand off to native review/QA. Keep assigned primary/helper model and explicit work Opus5.5/xhigh
-      signoff override. No new dependencies or unrelated work are authorized.
+    text: 'NEW USER AUTHORIZATION 2026-10-29: Following the test-session leak, restart
+      this PR in implementation and merge latest origin/master INTO this existing
+      PR branch before any new review/QA. User explicitly released old review/QA holds
+      for this restart; preserve all earlier questions, answers, verdicts and evidence
+      and re-evaluate after integration rather than invent answers or waive acceptance.
+      Preserve dirty source, planner/spec edits, local registry/routing, stashes,
+      untracked files and all evidence. The interrupted work is retained under /home/matt/.local/state/pm-pr-shepherd/test-session-leak-20261029T012237Z;
+      inspect its per-PR backup and original transcripts as needed. Safely reconcile
+      interrupted changes and current master, test, commit and push only this PR branch.
+      Never force-push/reset master or merge the PR into master. Report integrated
+      master SHA and tests; only then hand off to native review/QA. Keep assigned
+      primary/helper model and explicit work Opus5.5/xhigh signoff override. No new
+      dependencies or unrelated work are authorized.
 
       Test isolation is mandatory: #267 S10 refiner killed the REAL pm-project_manager-5b29c418
-      session after mistaking a test PR launch for ownership of that session. S9/S12 inherited
-      ambient tmux context and recreated test TUIs under that real name; S12 changed global
-      tmux PATH/PYTHONPATH and shared ~/.pm breadcrumb files. Use an explicit dedicated test
-      tmux socket and isolated state/config, verify fixture ownership; never mutate the user''s
-      real session or shared host configuration as test cleanup. Preserve the failed-run evidence.
-      #278 is the existing per-session tmux-isolation fix. Do not relaunch old QA fixture
-      workers.'
+      session after mistaking a test PR launch for ownership of that session. S9/S12
+      inherited ambient tmux context and recreated test TUIs under that real name;
+      S12 changed global tmux PATH/PYTHONPATH and shared ~/.pm breadcrumb files. Use
+      an explicit dedicated test tmux socket and isolated state/config, verify fixture
+      ownership; never mutate the user''s real session or shared host configuration
+      as test cleanup. Preserve the failed-run evidence. #278 is the existing per-session
+      tmux-isolation fix. Do not relaunch old QA fixture workers.'
     created_at: '2026-10-29T01:33:53.678599+00:00'
     last_edited: '2026-10-29T01:33:53.678599+00:00'
   - id: note-5d78b22
-    text: 'QA INPUT_REQUIRED: A sign-off implementation return keeps the pre-return implementation
-      and router transcripts: PASS; Whole-run archive audit across two returns, a restart
-      and the merge step: PASS; Review-loop ownership across a restart, a dead attempt and
-      a second loop: PASS; A pre-upgrade run directory — legacy adoption, frozen legacy files
-      and a live legacy link: PASS; Concurrent sweeps and overlapping writers: PASS; A failed
-      archive, and a pruned native transcript, never block the workflow: PASS; A sign-off
-      QA return archives its router and does not replay its verdict: PASS; CLI drivers keep
-      history too, and do not freeze a TUI loop: INPUT_REQUIRED (workdir: /home/matt/.pm/workdirs/qa/pr-9ee4d64-b0d9756bebb216d5)'
+    text: 'QA INPUT_REQUIRED: A sign-off implementation return keeps the pre-return
+      implementation and router transcripts: PASS; Whole-run archive audit across
+      two returns, a restart and the merge step: PASS; Review-loop ownership across
+      a restart, a dead attempt and a second loop: PASS; A pre-upgrade run directory
+      — legacy adoption, frozen legacy files and a live legacy link: PASS; Concurrent
+      sweeps and overlapping writers: PASS; A failed archive, and a pruned native
+      transcript, never block the workflow: PASS; A sign-off QA return archives its
+      router and does not replay its verdict: PASS; CLI drivers keep history too,
+      and do not freeze a TUI loop: INPUT_REQUIRED (workdir: /home/matt/.pm/workdirs/qa/pr-9ee4d64-b0d9756bebb216d5)'
     created_at: '2026-10-29T10:23:47Z'
     last_edited: '2026-10-29T10:23:47Z'
   - id: note-61363a5
-    text: 'User-authorized restart from the main PM session on 2026-10-31 after #249 merged
-      as eaf3372e60d1717bd97cc50b5e0b04c6df881fa1. Resume this existing PR in its existing
-      workdir. First integrate current origin/master INTO THIS PR branch, preserving its intended
-      behavior and all earlier review/QA corrections; resolve real code/test conflicts and
-      validate the combined behavior before handing off for a fresh review/QA/sign-off sequence.
-      Do not merge this PR into master or push/reset/delete master or other branches. This
-      is a user-directed implementation return, not a reviewer/sign-off verdict. GitHub reports
-      the PR conflicts with current master; reconcile that before resuming the prior review/QA
-      work. Retain all original source, dirty files, stashes, drafts, fixtures and captures.
-      Existing uncommitted content may have been intentionally excluded; inspect its provenance
-      instead of automatically committing it. Preserve every PR record and unrelated local
-      metadata during project.yaml reconciliation. Do not weaken acceptance criteria, choose
-      unresolved user policy questions or reuse stale PASS results. Historical captures have
-      been copied intact to the main session captures; overwritten filename collisions are
-      backed up in the host migration record. Main session is pm-project_manager-c5a1006b;
-      keep old restored sessions idle. Assigned models and explicit work-Opus sign-off override
-      remain unchanged. Autostart will use wait_for_merge; no PR merge is authorized by this
-      request.'
+    text: 'User-authorized restart from the main PM session on 2026-10-31 after #249
+      merged as eaf3372e60d1717bd97cc50b5e0b04c6df881fa1. Resume this existing PR
+      in its existing workdir. First integrate current origin/master INTO THIS PR
+      branch, preserving its intended behavior and all earlier review/QA corrections;
+      resolve real code/test conflicts and validate the combined behavior before handing
+      off for a fresh review/QA/sign-off sequence. Do not merge this PR into master
+      or push/reset/delete master or other branches. This is a user-directed implementation
+      return, not a reviewer/sign-off verdict. GitHub reports the PR conflicts with
+      current master; reconcile that before resuming the prior review/QA work. Retain
+      all original source, dirty files, stashes, drafts, fixtures and captures. Existing
+      uncommitted content may have been intentionally excluded; inspect its provenance
+      instead of automatically committing it. Preserve every PR record and unrelated
+      local metadata during project.yaml reconciliation. Do not weaken acceptance
+      criteria, choose unresolved user policy questions or reuse stale PASS results.
+      Historical captures have been copied intact to the main session captures; overwritten
+      filename collisions are backed up in the host migration record. Main session
+      is pm-project_manager-c5a1006b; keep old restored sessions idle. Assigned models
+      and explicit work-Opus sign-off override remain unchanged. Autostart will use
+      wait_for_merge; no PR merge is authorized by this request.'
     created_at: '2026-10-31T18:07:25.345765+00:00'
     last_edited: '2026-10-31T18:07:25.345765+00:00'
   - id: note-6a31b67
-    text: 'QA PASS: A sign-off return keeps the pre-return implementation and router transcripts
-      (original bug), and the run ends with live canonicals: PASS; A sign-off REVIEW return
-      starts a separate review loop and adopts an already-open return review window: PASS;
-      Overlapping review loops, a TUI restart and a follow-up verdict never cut the current
-      loop off from its own transcript: PASS; Turning auto-start off and finishing the watcher,
-      even at the same moment, never freezes a canonical transcript: PASS; One run, two PRs,
-      two returns and a restart: whole-run archive audit with concurrent writers: PASS; CLI
-      drivers keep history: auto-sequence returns and watcher runs, including two watchers
-      at once: PASS; Archive failures, pruned or dangling sessions and frozen canonicals never
-      block a return: PASS; Resuming a pre-upgrade run directory and an imperfect breadcrumb:
-      PASS (workdir: /home/matt/.pm/workdirs/qa/pr-9ee4d64-f7bc35893e6a7d19)'
+    text: 'QA PASS: A sign-off return keeps the pre-return implementation and router
+      transcripts (original bug), and the run ends with live canonicals: PASS; A sign-off
+      REVIEW return starts a separate review loop and adopts an already-open return
+      review window: PASS; Overlapping review loops, a TUI restart and a follow-up
+      verdict never cut the current loop off from its own transcript: PASS; Turning
+      auto-start off and finishing the watcher, even at the same moment, never freezes
+      a canonical transcript: PASS; One run, two PRs, two returns and a restart: whole-run
+      archive audit with concurrent writers: PASS; CLI drivers keep history: auto-sequence
+      returns and watcher runs, including two watchers at once: PASS; Archive failures,
+      pruned or dangling sessions and frozen canonicals never block a return: PASS;
+      Resuming a pre-upgrade run directory and an imperfect breadcrumb: PASS (workdir:
+      /home/matt/.pm/workdirs/qa/pr-9ee4d64-f7bc35893e6a7d19)'
     created_at: '2026-11-02T04:32:33Z'
     last_edited: '2026-11-02T04:32:33Z'
   - id: note-0a052ee
     text: 'Closed by explicit user request 2026-11-02, not merged. Superseded by pr-ec5bc84:
-      use harness-native logs directly and remove PM transcript symlink/copy/archive indirection.
-      Native retention is already configured. Keep this branch, workdir, QA evidence and drafts
-      for reference; never restart this closed PR.'
+      use harness-native logs directly and remove PM transcript symlink/copy/archive
+      indirection. Native retention is already configured. Keep this branch, workdir,
+      QA evidence and drafts for reference; never restart this closed PR.'
     created_at: '2026-11-02T05:06:21Z'
     last_edited: '2026-11-02T05:06:21Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9ee4d64-bug-auto-start-run-transcripts-overw-fb6d03d0
@@ -53797,6 +54438,41 @@ prs:
     signoff: provider:claude-work-xhigh-249
     merge: provider:deepseek-flash
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-049649a-remove-all-pr-autostart-and-fail-clo-registered-20261027
+- id: pr-fc6c29e
+  plan: bugs
+  title: 'Bug: pm session name is unresolvable when the repo directory name contains
+    a dot'
+  branch: pm/pr-fc6c29e-bug-pm-session-name-is-unresolvable-when-the-repo-
+  status: pending
+  depends_on: []
+  description: "Location: pm_core/paths.py get_session_tag / pm_core/cli/helpers.py\
+    \ _get_session_name_for_cwd, consumed by pm_core/tmux.py session_exists.\n\nRepro:\n\
+    \  TEST_DIR=$(mktemp -d /tmp/demo.XXXXXX)   # basename contains a dot\n  cd \"\
+    $TEST_DIR\" && git init -q && git commit --allow-empty -qm seed\n  pm init --backend\
+    \ local --no-import\n  pm session                                # \"Creating\
+    \ tmux session 'pm-demo.abcd-<hash>'...\"\n  tmux ls                         \
+    \          # actual session: pm-demo_abcd-<hash> (tmux replaces . with _)\n  pm\
+    \ session name                           # pm-demo.abcd-<hash>\n  tmux has-session\
+    \ -t \"$(pm session name)\"  # rc 1: can't find pane: abcd-<hash>\n  pm pr start\
+    \ <id>                          # from a plain shell: session_exists() is false,\
+    \ so it falls back to an interactive launch instead of opening the pm window\n\
+    \nCause: tmux sanitizes \".\" to \"_\" when creating a session, but pm computes\
+    \ the session name from the repo directory name without sanitizing. Outside tmux\
+    \ every pm command that resolves the session from cwd (pr start/review/signoff,\
+    \ TUI routing) computes a name that does not exist. Directories containing dots\
+    \ are common (e.g. foo.js, versioned paths).\n\nExpected: the computed name and\
+    \ the tmux session name agree (sanitize \".\"/\":\" consistently at creation and\
+    \ lookup), and pm session re-attaches instead of reporting/creating a different\
+    \ name."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-03T00:47:04.527482+00:00'
+  updated_at: '2026-11-03T00:47:04.527482+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
 - id: pr-8162f0f
   plan: plan-delivery
   title: Project-owner guidance for automatic versus human-approved merges
@@ -55667,62 +56343,66 @@ prs:
   branch: pm/pr-ec5bc84-use-native-session-logs-and-remove-pm-transcripts-
   status: pending
   depends_on: []
-  description: 'Replace the PM-owned transcript symlink/copy/archive tree with direct references
-    to harness-native session history. Supersedes closed #275 / pr-9ee4d64 by eliminating
-    the mutable indirection that caused the bug, rather than adding another archive layer.
-    User explicitly approved closing #275 and starting this simpler design on 2026-11-02.
+  description: 'Replace the PM-owned transcript symlink/copy/archive tree with direct
+    references to harness-native session history. Supersedes closed #275 / pr-9ee4d64
+    by eliminating the mutable indirection that caused the bug, rather than adding
+    another archive layer. User explicitly approved closing #275 and starting this
+    simpler design on 2026-11-02.
 
 
     Why: Claude already retains the original JSONL; the current installation has cleanupPeriodDays=365000.
-    PM currently reuses phase/iteration paths and sometimes freezes a live symlink into a
-    copy. A real #241 incident let an obsolete review completion freeze the next loop''s live
-    file and hide its eventual NEEDS_WORK. Earlier sign-off return history was also lost from
-    PM''s run directory even though native sessions survived.
+    PM currently reuses phase/iteration paths and sometimes freezes a live symlink
+    into a copy. A real #241 incident let an obsolete review completion freeze the
+    next loop''s live file and hide its eventual NEEDS_WORK. Earlier sign-off return
+    history was also lost from PM''s run directory even though native sessions survived.
 
 
-    Desired design: keep the smallest durable mapping needed to associate project/PR, phase
-    and exact run/loop/attempt with native session ID and native log location, reusing existing
-    session/runtime metadata. Launches register their own identity; collectors and history
-    readers read that session directly. Do not derive identity from a mutable alias, scan
-    the entire history when a known session ID suffices, or replace this with a new copy/archive
-    service. Use native retention; do not silently change global retention or promise history
-    beyond the configured harness retention. A missing/pruned native log must be reported
-    accurately, never treated as a verdict or another session.
+    Desired design: keep the smallest durable mapping needed to associate project/PR,
+    phase and exact run/loop/attempt with native session ID and native log location,
+    reusing existing session/runtime metadata. Launches register their own identity;
+    collectors and history readers read that session directly. Do not derive identity
+    from a mutable alias, scan the entire history when a known session ID suffices,
+    or replace this with a new copy/archive service. Use native retention; do not
+    silently change global retention or promise history beyond the configured harness
+    retention. A missing/pruned native log must be reported accurately, never treated
+    as a verdict or another session.
 
 
     Retire all new writes and runtime dependence on pm/transcripts, including implementation,
-    reviews, QA roles, sign-off, watchers and CLI flows that use it. Keep genuine execution
-    stdout/stderr, recordings and non-native artifacts in their existing appropriate capture/state
-    locations; do not throw away evidence merely because it is called a transcript. Reuse
-    launch/session plumbing and one small common resolver rather than adding parallel role-specific
-    machinery. Review any proposed compatibility code against the simplification goal.
+    reviews, QA roles, sign-off, watchers and CLI flows that use it. Keep genuine
+    execution stdout/stderr, recordings and non-native artifacts in their existing
+    appropriate capture/state locations; do not throw away evidence merely because
+    it is called a transcript. Reuse launch/session plumbing and one small common
+    resolver rather than adding parallel role-specific machinery. Review any proposed
+    compatibility code against the simplification goal.
 
 
-    Upgrade safely: existing in-flight sessions and saved runtime records must remain identifiable,
-    and earlier evidence/unsent drafts must not be deleted. Preserve legacy copies that are
-    the only remaining evidence. A bounded read-only compatibility/adoption path is acceptable;
-    new runs must not recreate the old tree. Do not delete the live installation''s pm/transcripts
-    or alter the running host during implementation/QA.
+    Upgrade safely: existing in-flight sessions and saved runtime records must remain
+    identifiable, and earlier evidence/unsent drafts must not be deleted. Preserve
+    legacy copies that are the only remaining evidence. A bounded read-only compatibility/adoption
+    path is acceptable; new runs must not recreate the old tree. Do not delete the
+    live installation''s pm/transcripts or alter the running host during implementation/QA.
 
 
-    Acceptance: exact-session verdict collection across sign-off returns, fresh review loops
-    restarting at iteration one, concurrent PRs, late completion from an obsolete loop, TUI
-    restart/adoption and human follow-up in the existing pane. Reproduce #241''s stale-finalizer
-    failure and show it cannot freeze or retarget a newer native log. Verify newly appended
-    outcomes remain readable and prior session identities remain discoverable. Include representative
-    coverage of every affected producer/consumer; use isolated test projects, HOME/PM state
-    and tmux servers inside the configured containers. Preserve manual merge/spec gates and
-    the existing verdict policy. No broad workflow rewrite, new archive retention subsystem
-    or unrelated recipe hardening.
+    Acceptance: exact-session verdict collection across sign-off returns, fresh review
+    loops restarting at iteration one, concurrent PRs, late completion from an obsolete
+    loop, TUI restart/adoption and human follow-up in the existing pane. Reproduce
+    #241''s stale-finalizer failure and show it cannot freeze or retarget a newer
+    native log. Verify newly appended outcomes remain readable and prior session identities
+    remain discoverable. Include representative coverage of every affected producer/consumer;
+    use isolated test projects, HOME/PM state and tmux servers inside the configured
+    containers. Preserve manual merge/spec gates and the existing verdict policy.
+    No broad workflow rewrite, new archive retention subsystem or unrelated recipe
+    hardening.
 
 
-    Coordination: #248 INPUT_REQUIRED adoption, #260 fresh implementation handoff and #274
-    integration-return gate currently depend on #275''s session ownership fixes. The approved
-    scheduling holds now target this replacement for downstream review/QA; their existing
-    implementation/evidence remain preserved. Coordinate with #237 action history without
-    expanding into that feature. Start fresh from current master, not from #275''s unmerged
-    archive implementation; use its incident evidence and focused regression intent where
-    useful.'
+    Coordination: #248 INPUT_REQUIRED adoption, #260 fresh implementation handoff
+    and #274 integration-return gate currently depend on #275''s session ownership
+    fixes. The approved scheduling holds now target this replacement for downstream
+    review/QA; their existing implementation/evidence remain preserved. Coordinate
+    with #237 action history without expanding into that feature. Start fresh from
+    current master, not from #275''s unmerged archive implementation; use its incident
+    evidence and focused regression intent where useful.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
@@ -55733,12 +56413,13 @@ prs:
   merged_at: null
   notes:
   - id: note-dcc1cd1
-    text: 'User authorized this replacement to start immediately. Use main-account Opus 5.5/xhigh
-      for all roles/helpers/sign-off, matching the superseded PR current routing. The provider
-      pins the effective xhigh setting. Keep wait_for_merge. No spec-approval pause requested
-      for this code simplification; do not expand into prompt redesign. No live host PM/tmux/settings
-      mutation in tests. Preserve old #275 source and evidence; it is closed by user choice
-      despite its historical passing sign-off.'
+    text: 'User authorized this replacement to start immediately. Use main-account
+      Opus 5.5/xhigh for all roles/helpers/sign-off, matching the superseded PR current
+      routing. The provider pins the effective xhigh setting. Keep wait_for_merge.
+      No spec-approval pause requested for this code simplification; do not expand
+      into prompt redesign. No live host PM/tmux/settings mutation in tests. Preserve
+      old #275 source and evidence; it is closed by user choice despite its historical
+      passing sign-off.'
     created_at: '2026-11-02T05:06:19Z'
     last_edited: '2026-11-02T05:06:19Z'
   model: provider:claude-main-xhigh-pm
@@ -56072,6 +56753,46 @@ prs:
   gh_pr_number: null
   created_at: '2026-11-02T13:58:00.818355+00:00'
   updated_at: '2026-11-02T13:58:00.818355+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-86152a8
+  plan: bugs
+  title: 'Bug: the z prefix never expires, so a later s/d/t/e/v/n/L/H/c becomes a
+    destructive fresh restart'
+  branch: pm/pr-86152a8-bug-the-z-prefix-never-expires-so-a-later-s-d-t-e-
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/tui/app.py on_key (the `z` branch) / _consume_z.
+
+
+    Repro (TUI tree view): press `z` (the log line shows `z …`), navigate with `j`/`k`,
+    then press `s` (or `d`, `t`, `e`, `v`, `n`, `L`, `H`, `c`). The action runs as
+    a *fresh* restart — it kills the existing window/pane and starts over instead
+    of focusing it.
+
+
+    Cause: the `w` and `y` prefixes auto-cancel after 2 s (_cancel_w_mode / _cancel_y_mode),
+    but `z` has no timer, and nothing except Escape, `y`, or a third `z` clears `_z_count`.
+    A stray `z` stays armed indefinitely across navigation. `i` (sign-off) does not
+    consume `z` at all, so `z` then `i` leaves it armed for a later key.
+
+
+    Expected: `z` should expire like `w`/`y` (~2 s timer), so a key pressed later
+    cannot silently become destructive. Note the `wr` watcher-review chord relies
+    on `z` surviving the intermediate `w`, so a timer (not clear-on-any-key) is the
+    safe fix; the `z` row in `pm tui keys` and the `?` screen documents the full chord
+    list.
+
+
+    Found during the pr-fa9f172 help/error sweep (review-loop e4f7 i3); deliberately
+    not fixed there because it changes interaction behaviour and needs its own QA.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-03T02:25:44.805983+00:00'
+  updated_at: '2026-11-03T02:25:44.805983+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null

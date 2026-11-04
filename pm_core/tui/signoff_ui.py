@@ -201,7 +201,7 @@ async def _launch_quiet(app, pr_id: str, transcript) -> None:
     """
     import asyncio
     import sys
-    from rich.markup import escape
+    from pm_core.command_surface import escape_markup as escape
     from pm_core.tui._shell import _run_shell_async
 
     cmd = [sys.executable, "-m", "pm_core.wrapper", "pr", "signoff",

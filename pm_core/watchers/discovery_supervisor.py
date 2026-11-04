@@ -1,7 +1,7 @@
 """Discovery supervisor watcher.
 
 Runs the regression test suite on a schedule, files newly-discovered bugs
-and improvements as PRs into the ``bugs`` / ``ux`` plans, and reconciles
+and improvements as PRs into the ``bugs`` / ``improvements`` plans, and reconciles
 duplicates against existing open PRs.
 
 Mirrors ``pm_core/watchers/auto_start_watcher.py``: it inherits the shared
@@ -23,6 +23,8 @@ class DiscoverySupervisorWatcher(BaseWatcher):
 
     WATCHER_TYPE = "discovery"
     DISPLAY_NAME = "Discovery Supervisor"
+    DESCRIPTION = ("Schedule regression tests and reconcile filings into the "
+                   "bugs/improvements plans")
     WINDOW_NAME = "discovery"
     DEFAULT_INTERVAL = 1800  # 30 minutes
     VERDICTS = ("READY", "INPUT_REQUIRED")

@@ -171,8 +171,15 @@ class HelpGroup(click.Group):
             # If there's a real 'help' command registered, let it run
             if super().get_command(ctx, "help") is not None:
                 return super().resolve_command(ctx, args)
-            # Otherwise replace 'help' with '--help'
-            args = ["--help"] + args[1:]
+            # Otherwise render this group's help and exit.  Do it here rather
+            # than rewriting to '--help': on Click <8.2 an unknown
+            # option-looking token restarts option parsing from ``ctx.args``,
+            # which still holds the original 'help', so the rewritten flag is
+            # lost and the command fails with "No such command '--help'".
+            # ``pyproject.toml`` allows click>=8.0, so the alias must not rely
+            # on that newer-only restart.
+            click.echo(ctx.get_help(), color=ctx.color)
+            ctx.exit()
         # Alias l/ls to list when the group has a list subcommand
         if args and args[0] in ("l", "ls") and super().get_command(ctx, "list") is not None:
             args = ["list"] + args[1:]
@@ -382,6 +389,7 @@ def _require_pr(data: dict, pr_id: str) -> dict:
         for p in prs:
             ids.append(_pr_display_id(p))
         click.echo(f"Available PRs: {', '.join(ids)}", err=True)
+    click.echo("Run 'pm pr list' to see every PR (TUI: press r to refresh).", err=True)
     raise SystemExit(1)
 
 
@@ -394,6 +402,7 @@ def _require_plan(data: dict, plan_id: str) -> dict:
     click.echo(f"Plan {plan_id} not found.", err=True)
     if plans:
         click.echo(f"Available plans: {', '.join(p['id'] for p in plans)}", err=True)
+    click.echo("Run 'pm plan list' to see every plan.", err=True)
     raise SystemExit(1)
 
 
@@ -649,29 +658,39 @@ def _validate_tui_owner(
     if problem == "no pidfile":
         return pidfile, None, None, TuiIpcResult(
             False, "no_pidfile",
-            f"No TUI is running for session {session}.")
+            f"No TUI is running for session {session} — start one with: "
+            f"pm session.")
     if problem == "empty pidfile":
         # A TUI is mid-claim (see ``_read_tui_owner``).  Leave the file
         # alone so the starting TUI keeps its claim.  It can also be
         # *permanently* empty if a TUI was killed between its ``O_EXCL``
         # create and its first write, so name the restart fix as well —
-        # "try again in a moment" alone would be a dead end.
+        # "try again in a moment" alone would be a dead end.  Name both
+        # routes: with no TUI running there is nothing to press Ctrl+R in.
         return pidfile, raw, None, TuiIpcResult(
             False, "starting",
             f"The TUI for session {session} has not finished starting up; "
-            f"try again in a moment, otherwise restart the TUI (Ctrl+R).")
+            f"try again in a moment, otherwise restart the TUI (Ctrl+R in "
+            f"the TUI, or `pm session` if none is running).")
     if problem is not None:
         # Unreadable, dead, recycled, or not a TUI: stale.
         tui_pidfile.unlink_if_unchanged(pidfile, raw)
+        # The pidfile is about to be removed, so this session has no usable
+        # owner: "restart the TUI" alone is a dead end for a caller that has
+        # none open (these messages surface from `pm autostart …` in a plain
+        # shell).  Name both routes — Ctrl+R in a live TUI, `pm session` when
+        # there is none — as the capability messages above do.
+        restart = (f"restart the TUI (Ctrl+R in the TUI, or `pm session` "
+                   f"if none is running)")
         if desc is None:
             message = (f"The TUI pidfile for session {session} is "
-                       f"unreadable; restart the TUI.")
+                       f"unreadable; {restart}.")
         elif problem == "process is not running":
             message = (f"The TUI for session {session} is not running; "
-                       f"restart the TUI.")
+                       f"start it with `pm session`.")
         else:
             message = (f"The TUI for session {session} is not available "
-                       f"({problem}); restart the TUI.")
+                       f"({problem}); {restart}.")
         return pidfile, raw, desc, TuiIpcResult(
             False, "stale_pidfile", message)
     return pidfile, raw, desc, None
@@ -978,10 +997,14 @@ def submit_tui_command(session: str, cmd: str) -> TuiIpcResult:
         if problem in _STALE_SIGNAL_REASONS:
             _log.debug("TUI pid %d gone, removing stale pidfile", desc.pid)
             tui_pidfile.unlink_if_unchanged(pidfile, raw)
+            # The owner is gone and its pidfile is removed, so "restart the
+            # TUI" is a dead end for a caller with none open (this surfaces
+            # from `pm autostart …` in a plain shell) — same as the
+            # stale-pidfile messages in `_validate_tui_owner`.
             return TuiIpcResult(
                 False, "stale_pidfile",
                 f"The TUI for session {session} is not running "
-                f"(process disappeared); restart the TUI.")
+                f"(process disappeared); start it with `pm session`.")
         _log.debug("Cannot signal TUI pid %d: %s", desc.pid, problem)
         return TuiIpcResult(
             False, "signal_error",

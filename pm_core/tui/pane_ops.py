@@ -246,6 +246,27 @@ def edit_plan(app) -> None:
     launch_pane(app, f"pm pr edit {pr_id}", "pr-edit", fresh=fresh)
 
 
+def _report_plan_file_missing(app, plan_id: str | None, plan: dict | None,
+                              plan_path: Path | None = None) -> None:
+    """Log the not-found remedy every plan-file action shares.
+
+    Pressing Enter (``launch_plan_activated``) or ``e``
+    (``handle_plan_action``) on a plan whose file is missing used to return
+    silently, so the key read as broken — a live plan (``plan-b6aac3d`` in
+    this project) has no file on disk.  ``v`` (``view_plan``) already named
+    the listing command; all three now say the same thing.
+    """
+    if plan is None:
+        app.log_message(f"Plan {plan_id} not found — run `pm plan list` to "
+                        f"see every plan")
+    elif plan_path is None:
+        app.log_message("Plan file not found — run `pm plan list` to see "
+                        "every plan")
+    else:
+        app.log_message(f"Plan file not found: {plan_path} — run `pm plan "
+                        f"list` to see every plan")
+
+
 def view_plan(app) -> None:
     """Open the plan file associated with the selected PR in a pane."""
     from pm_core.tui.tech_tree import TechTree
@@ -259,15 +280,20 @@ def view_plan(app) -> None:
     pr = store.get_pr(app._data, pr_id)
     plan = app._get_plan_for_pr(pr)
     if not plan:
-        app.log_message("No plan associated with this PR")
+        # Reachable from `v` on a standalone PR (or one whose plan entry was
+        # removed), and the key otherwise reads as broken.  Name the action
+        # that assigns a plan, like the plan-file dead ends below.
+        app.log_message(
+            f"No plan associated with {pr_id} — assign one with `M` "
+            f"(or `pm pr edit {pr_id} --plan <plan-id>`).")
         return
     plan_file = plan.get("file", "")
     if not plan_file or not app._root:
-        app.log_message("Plan file not found")
+        _report_plan_file_missing(app, plan.get("id"), plan)
         return
     plan_path = app._root / plan_file
     if not plan_path.exists():
-        app.log_message(f"Plan file not found: {plan_path}")
+        _report_plan_file_missing(app, plan.get("id"), plan, plan_path)
         return
     launch_pane(app, f"less {plan_path}", "plan", fresh=fresh)
 
@@ -350,7 +376,7 @@ def launch_claude(app) -> None:
     from pm_core.claude_launcher import find_claude, build_claude_shell_cmd
     claude = find_claude()
     if not claude:
-        app.log_message("Claude CLI not found")
+        app.log_message("Claude CLI not found — install Claude Code first")
         return
 
     sess = app._session_name or "default"
@@ -375,11 +401,11 @@ These are safe to run directly — they only read state:
 ## Important: Use the TUI for actions that launch sessions
 
 Do NOT run commands that launch new Claude sessions yourself (e.g. `pm pr start`, \
-`pm pr done`, `pm plan add`, `pm plan breakdown`, `pm plan review`). These must be \
+`pm pr review`, `pm plan add`, `pm plan breakdown`, `pm plan review`). These must be \
 triggered through the TUI so that panes are managed correctly. Instead, tell the \
 user which key to press in the TUI:
 - `s` on a PR — start working on it
-- `d` on a PR — mark it as done and start review
+- `d` on a PR — mark it in_review and start review
 - `p` — toggle plans view, then `a`/`w`/`c`/`l` for plan actions
 
 For plan management, recommend the user switch to the plans pane (`p` key) where \
@@ -400,7 +426,7 @@ def launch_discuss(app) -> None:
     from pm_core.claude_launcher import find_claude, build_claude_shell_cmd
     claude = find_claude()
     if not claude:
-        app.log_message("Claude CLI not found")
+        app.log_message("Claude CLI not found — install Claude Code first")
         return
 
     prompt = """\
@@ -421,24 +447,29 @@ Key concepts:
 
 Common keyboard shortcuts in the TUI:
 - Arrow keys / hjkl: Navigate the PR tree
-- s: Start working on a PR (launches Claude in a new window)
-- d: Review PR (send for review)
-- g: Merge PR
+- s: Start working on a PR (z s: fresh, S: companion pane)
+- d: Review PR (z d: fresh, zz d: loop)
+- g: Merge PR (G: companion pane)
+- i: Sign-off router
 - e: Edit PR details
 - c: Launch Claude session
 - p: Toggle plans view
-- ?: Show help
-- /: Open command bar
+- ?: Show help (including command-bar forms)
+- /: Open command bar (type `help` there for the same screen)
 - b: Rebalance panes
-- q: Toggle QA instructions view
-- t: Start QA on selected PR
+- q: Toggle QA library view
+- t: Start QA on selected PR (z t: fresh, zz t: loop)
+- Y: Cleanup a PR workdir
 
 Common commands:
 - pm pr list: List all PRs
 - pm pr start <id>: Start a PR
 - pm pr review <id>: Send PR for review
+- pm pr qa <id>: Print the QA start command (the full loop runs in the TUI)
+- pm pr merge <id>: Publish a signed-off PR
 - pm plan list: List plans
 - pm plan add <name>: Add a new plan
+- pm tui keys: Print keybindings and command-bar equivalents
 
 Common problems:
 - **Uppercase vs lowercase keys**: Some shortcuts require the Shift modifier. \
@@ -473,7 +504,7 @@ def launch_watcher_review(app) -> None:
 
     claude = find_claude()
     if not claude:
-        app.log_message("Claude CLI not found")
+        app.log_message("Claude CLI not found — install Claude Code first")
         return
 
     # Resolve the meta workdir's pm/ root — that's where the watchers
@@ -594,7 +625,8 @@ def launch_qa_item(app, item_id: str, target_window: str | None = None) -> None:
 
     parts = item_id.split(":", 1)
     if len(parts) != 2:
-        app.log_message(f"Invalid QA item id: {item_id}")
+        app.log_message(f"Invalid QA item id: {item_id} — run `pm qa list` "
+                        f"to see the library")
         return
     category, qa_id = parts
 
@@ -605,7 +637,8 @@ def launch_qa_item(app, item_id: str, target_window: str | None = None) -> None:
 
     item = qa_instructions.get_instruction(app._root, qa_id, category=category)
     if not item:
-        app.log_message(f"QA item not found: {item_id}")
+        app.log_message(f"QA item not found: {item_id} — run `pm qa list` "
+                        f"to see the library")
         return
 
     sess = app._session_name or "default"
@@ -740,11 +773,21 @@ def handle_plan_action(app, action: str, plan_id: str | None) -> None:
     if action == "edit":
         if plan_id:
             plan = store.get_plan(app._data, plan_id)
-            if plan and app._root:
-                plan_path = app._root / plan.get("file", "")
-                if plan_path.exists():
-                    editor = find_editor()
-                    _launch_in_plans_window(app, plan_id, f"{editor} {plan_path}", "plan-edit")
+            if not plan or not app._root:
+                _report_plan_file_missing(app, plan_id, plan)
+                return
+            plan_file = plan.get("file", "")
+            if not plan_file:
+                # `root / ""` is the project root, which exists — without
+                # this guard the editor would open on the whole project.
+                _report_plan_file_missing(app, plan_id, plan)
+                return
+            plan_path = app._root / plan_file
+            if not plan_path.exists():
+                _report_plan_file_missing(app, plan_id, plan, plan_path)
+                return
+            editor = find_editor()
+            _launch_in_plans_window(app, plan_id, f"{editor} {plan_path}", "plan-edit")
     elif action == "breakdown":
         if plan_id:
             _launch_in_plans_window(app, plan_id, f"pm plan breakdown {plan_id}", "plan-breakdown")
@@ -784,10 +827,17 @@ def launch_plan_activated(app, plan_id: str) -> None:
     _log.info("plan activated: %s", plan_id)
     plan = store.get_plan(app._data, plan_id)
     if not plan or not app._root:
+        _report_plan_file_missing(app, plan_id, plan)
         return
-    plan_path = app._root / plan.get("file", "")
-    if plan_path.exists():
-        _launch_in_plans_window(app, plan_id, f"less {plan_path}", "plan")
+    plan_file = plan.get("file", "")
+    if not plan_file:
+        _report_plan_file_missing(app, plan_id, plan)
+        return
+    plan_path = app._root / plan_file
+    if not plan_path.exists():
+        _report_plan_file_missing(app, plan_id, plan, plan_path)
+        return
+    _launch_in_plans_window(app, plan_id, f"less {plan_path}", "plan")
 
 
 # ---------------------------------------------------------------------------
@@ -801,7 +851,12 @@ def show_connect(app) -> None:
         command = f"tmux -S {socket_path} attach"
         app.push_screen(ConnectScreen(command))
     else:
-        app.log_message("Not a shared session")
+        # The `C` key shows the connect command for a shared session; when
+        # this one is not shared, name how to start one (there is no
+        # connect command to show).
+        app.log_message(
+            "Not a shared session — start one with `pm session --global` "
+            "(or `--group <group>`).")
         app.clear_log_message_later(2)
 
 

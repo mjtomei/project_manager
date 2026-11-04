@@ -4,7 +4,7 @@ Provides ``pm watcher`` as a command group with subcommands:
 
 - ``pm watcher`` (bare) — runs a blocking watcher loop (legacy behavior)
 - ``pm watcher start [TYPE]`` — start a watcher by type
-- ``pm watcher stop [TYPE]`` — stop a running watcher
+- ``pm watcher stop [TYPE]`` — explain how to stop a running watcher
 - ``pm watcher list`` — list all registered watcher types and status
 
 Internal mode (``pm watcher --iteration N``) creates a single tmux
@@ -16,6 +16,7 @@ fixing them.  Targets are owned by the running TUI (``pm autostart add``).
 """
 
 import secrets
+import textwrap
 from datetime import datetime
 
 import click
@@ -37,12 +38,13 @@ def _run_user_watcher_loop(wait: int, max_iterations: int) -> None:
     root = state_root()
 
     if not tmux_mod.has_tmux() or not tmux_mod.in_tmux():
-        click.echo("Watcher requires tmux.", err=True)
+        click.echo("Watcher requires tmux. Start a pm session first with: pm session", err=True)
         raise SystemExit(1)
 
     pm_session = _get_pm_session()
     if not pm_session or not tmux_mod.session_exists(pm_session):
-        click.echo(f"Watcher: tmux session '{pm_session}' not found.", err=True)
+        click.echo(f"Watcher: tmux session '{pm_session}' not found — start it "
+                   f"with 'pm session'.", err=True)
         raise SystemExit(1)
 
     watcher = AutoStartWatcher(pm_root=str(root))
@@ -109,7 +111,7 @@ def watcher_cmd(ctx, iteration: int | None, loop_id: str | None,
     \b
     Subcommands:
       start [TYPE]   Start a watcher (default: auto-start)
-      stop [TYPE]    Stop a running watcher
+      stop [TYPE]    Explain how to stop a running watcher
       list           List watcher types and status
 
     \b
@@ -154,7 +156,7 @@ def watcher_start(watcher_type: str, wait: int | None):
                              observation-only when started from the CLI)
       bug-fix-impl           Drive the bug-fix flow (auto-merge on PASS)
       discovery              Schedule regression tests and reconcile filings
-      improvement-fix-impl   Drive plan=ux PRs through auto-sequence (gated at QA PASS)
+      improvement-fix-impl   Drive plan=improvements PRs through auto-sequence (gated at QA PASS)
       regression-loop        Meta: start discovery + bug-fix-impl + improvement-fix-impl
                              together (the canonical "turn on the regression loop" command)
     """
@@ -172,7 +174,7 @@ def watcher_start(watcher_type: str, wait: int | None):
         raise SystemExit(1)
 
     if not tmux_mod.has_tmux() or not tmux_mod.in_tmux():
-        click.echo("Watcher requires tmux.", err=True)
+        click.echo("Watcher requires tmux. Start a pm session first with: pm session", err=True)
         raise SystemExit(1)
 
     root = state_root()
@@ -221,7 +223,7 @@ def _run_regression_loop(wait: int | None) -> None:
     from pm_core.watchers import get_watcher_class
 
     if not tmux_mod.has_tmux() or not tmux_mod.in_tmux():
-        click.echo("Watcher requires tmux.", err=True)
+        click.echo("Watcher requires tmux. Start a pm session first with: pm session", err=True)
         raise SystemExit(1)
 
     root = state_root()
@@ -285,10 +287,28 @@ def _run_regression_loop(wait: int | None) -> None:
 @watcher_cmd.command("stop")
 @click.argument("watcher_type", default="auto-start")
 def watcher_stop(watcher_type: str):
-    """Stop a running watcher (for TUI-managed watchers, use the TUI)."""
+    # "Explain", not "stop": this command only prints how to stop one.  A
+    # TUI-managed watcher is stopped from the TUI (`w` then `s`), and a
+    # CLI-started watcher with Ctrl+C in its terminal.
+    """Explain how to stop a running watcher.
+
+    It cannot stop one itself: the TUI's `ws` chord toggles only the
+    auto-start watcher, and a CLI-started watcher stops with Ctrl+C in its
+    terminal.
+    """
+    if watcher_type == "auto-start":
+        click.echo(
+            "To stop the auto-start watcher running in the TUI, press 'ws'.\n"
+            "For a watcher started from the CLI, use Ctrl+C in its terminal."
+        )
+        return
+    # `ws` toggles only auto-start, so naming it for any other type would
+    # send the operator to a chord that does nothing to this watcher.
     click.echo(
-        f"To stop a watcher running in the TUI, press 'ws' in the TUI.\n"
-        f"For CLI-started watchers, use Ctrl+C in the terminal."
+        f"Only the auto-start watcher is toggled from the TUI ('ws'); there "
+        f"is no key for '{watcher_type}'.\n"
+        f"For a '{watcher_type}' watcher started from the CLI, use Ctrl+C in "
+        f"its terminal."
     )
 
 
@@ -305,6 +325,15 @@ def watcher_list():
     click.echo("Registered watcher types:\n")
     for t in types:
         click.echo(f"  {t['type']:<20} {t['display_name']}")
+        # The description names the plan the watcher drives (e.g.
+        # `plan=improvements`), so `pm watcher list` is a live surface for
+        # the plan name, not just the display name.  Wrapped so a long
+        # description does not run off a narrow terminal.
+        if t.get("description"):
+            click.echo(textwrap.fill(t["description"], width=78,
+                                     initial_indent=" " * 23,
+                                     subsequent_indent=" " * 23,
+                                     break_on_hyphens=False))
         click.echo(f"  {'':20} window: {t['window_name']}, "
                    f"interval: {t['default_interval']}s")
         click.echo()
@@ -325,12 +354,13 @@ def _create_watcher_window(iteration: int, loop_id: str,
     data = store.load(root)
 
     if not tmux_mod.has_tmux() or not tmux_mod.in_tmux():
-        click.echo("Watcher window requires tmux.", err=True)
+        click.echo("Watcher window requires tmux. Start a pm session first with: pm session", err=True)
         raise SystemExit(1)
 
     pm_session = _get_pm_session()
     if not pm_session or not tmux_mod.session_exists(pm_session):
-        click.echo(f"Watcher: tmux session '{pm_session}' not found.", err=True)
+        click.echo(f"Watcher: tmux session '{pm_session}' not found — start it "
+                   f"with 'pm session'.", err=True)
         raise SystemExit(1)
 
     cls = get_watcher_class(watcher_type)

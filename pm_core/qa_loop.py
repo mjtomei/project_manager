@@ -665,11 +665,12 @@ def qa_outcome_detail(state: QALoopState) -> str:
 def qa_error_detail(state: QALoopState) -> str:
     """The full cause+remedy of a run that failed with ``ERROR``, else ``""``.
 
-    A fail-closed launch (e.g. container mode enabled but its runtime
-    unusable) records the actionable message in ``state._error`` while
-    ``latest_output`` stays a single TUI log line.  CLI entry points print
-    this so the remedy reaches the user too; other early-abort ERRORs (no pm
-    session, missing workdir) carry no ``_error`` and print nothing extra.
+    An early abort records the actionable message in ``state._error`` while
+    ``latest_output`` stays a single TUI log line: a fail-closed launch (e.g.
+    container mode enabled but its runtime unusable) and a missing pm session
+    both carry cause+remedy.  CLI entry points print this so the remedy
+    reaches the user too; other early-abort ERRORs (missing workdir) carry no
+    ``_error`` and print nothing extra.
     """
     return state._error if state.latest_verdict == "ERROR" else ""
 
@@ -5534,6 +5535,11 @@ def _run_qa_sync(
         state.running = False
         state.latest_verdict = "ERROR"
         state.latest_output = "No pm session found"
+        # Every QA launch needs the project's tmux session for its windows.
+        # Without one this aborts before anything runs, so name the command
+        # that fixes it: the CLI prints ``_error`` beside ``Result: ERROR``
+        # and the TUI log line alone ("No pm session found") is a dead end.
+        state._error = "No pm session found. Start one with: pm session"
         return state
 
     # Capture the session_tag once from the tmux session name. Every

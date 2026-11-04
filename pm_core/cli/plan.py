@@ -68,7 +68,7 @@ def plan():
 @plan.command("add")
 @click.argument("name")
 @click.option("--description", default="", help="(Deprecated) Description — ignored, kept for backward compat")
-@click.option("--fresh", is_flag=True, default=False, help="Start a fresh session (don't resume)")
+@click.option("--fresh", is_flag=True, default=False, help="Fresh restart: start a new session instead of resuming")
 def plan_add(name: str, description: str, fresh: bool):
     """Create a new plan and launch Claude to develop it.
 
@@ -183,7 +183,7 @@ def plan_list():
 @plan.command("breakdown")
 @click.argument("plan_id", default=None, required=False)
 @click.option("--prs", "initial_prs", default=None, help="Seed the conversation with an initial PR list")
-@click.option("--fresh", is_flag=True, default=False, help="Start a fresh session (don't resume)")
+@click.option("--fresh", is_flag=True, default=False, help="Fresh restart: start a new session instead of resuming")
 def plan_breakdown(plan_id: str | None, initial_prs: str | None, fresh: bool):
     """Launch Claude to break a plan into PRs (written to plan file).
 
@@ -197,7 +197,7 @@ def plan_breakdown(plan_id: str | None, initial_prs: str | None, fresh: bool):
 
     plan_path = root / plan_entry["file"]
     if not plan_path.exists():
-        click.echo(f"Plan file {plan_path} not found.", err=True)
+        click.echo(f"Plan file {plan_path} not found. Run 'pm plan list' to see every plan.", err=True)
         raise SystemExit(1)
 
     existing_prs = data.get("prs") or []
@@ -279,7 +279,7 @@ Let them know it is safe to close this pane — load and review will run in new 
 
 @plan.command("review")
 @click.argument("plan_id", default=None, required=False)
-@click.option("--fresh", is_flag=True, default=False, help="Start a fresh session")
+@click.option("--fresh", is_flag=True, default=False, help="Fresh restart: start a new session instead of resuming")
 def plan_review(plan_id: str | None, fresh: bool):
     """Launch Claude to review plan-PR consistency."""
     root = state_root()
@@ -290,7 +290,7 @@ def plan_review(plan_id: str | None, fresh: bool):
 
     plan_path = root / plan_entry["file"]
     if not plan_path.exists():
-        click.echo(f"Plan file {plan_path} not found.", err=True)
+        click.echo(f"Plan file {plan_path} not found. Run 'pm plan list' to see every plan.", err=True)
         raise SystemExit(1)
 
     # Build PR list for this plan
@@ -624,7 +624,7 @@ def plan_load(plan_id: str | None):
 
     plan_path = root / plan_entry["file"]
     if not plan_path.exists():
-        click.echo(f"Plan file {plan_path} not found.", err=True)
+        click.echo(f"Plan file {plan_path} not found. Run 'pm plan list' to see every plan.", err=True)
         raise SystemExit(1)
 
     plan_content = plan_path.read_text()
@@ -718,7 +718,7 @@ def _run_fix_command(step_name: str, review_path_str: str):
     """Common logic for all fix subcommands."""
     review_path = Path(review_path_str)
     if not review_path.exists():
-        click.echo(f"Review file not found: {review_path}", err=True)
+        click.echo(f"Review file not found: {review_path}. Run 'pm plan fixes' to list pending reviews.", err=True)
         raise SystemExit(1)
 
     root = state_root()

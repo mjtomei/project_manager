@@ -70,14 +70,20 @@ def _resolve_owner(session: str | None) -> tuple[str, int]:
                         "(start one with `pm session`, or pass -s SESSION)")
         sess = _canonical_session(sess)
     pidfile = _tui_pidfile_for_session(sess)
+    # The pidfile cases below are reachable from a plain shell (`pm
+    # autostart add …`), so each names the command that starts the owner —
+    # matching the "no pm session" branch above and the stale-pidfile
+    # messages in `helpers._validate_tui_owner`.
     if not pidfile.exists():
         raise _Fail(EXIT_OWNER, "owner_unavailable",
-                    f"TUI for session {sess} is not running (no pidfile)",
+                    f"TUI for session {sess} is not running (no pidfile) — "
+                    f"start it with `pm session`",
                     session=sess)
     desc = read_pidfile(pidfile)
     if desc is None:
         raise _Fail(EXIT_OWNER, "owner_unavailable",
-                    f"TUI for session {sess} is not running (stale pidfile)",
+                    f"TUI for session {sess} is not running (stale pidfile) — "
+                    f"start it with `pm session`",
                     session=sess)
     pid = desc.pid
     try:
@@ -86,7 +92,8 @@ def _resolve_owner(session: str | None) -> tuple[str, int]:
             raise ProcessLookupError(pid)
     except OSError:
         raise _Fail(EXIT_OWNER, "owner_unavailable",
-                    f"TUI for session {sess} is not running (stale pidfile)",
+                    f"TUI for session {sess} is not running (stale pidfile) — "
+                    f"start it with `pm session`",
                     session=sess)
     return sess, pid
 
@@ -114,10 +121,14 @@ def _validate(ids: tuple[str, ...], *, for_add: bool) -> list[str]:
             resolved.append(pr["id"])
     if unknown:
         raise _Fail(EXIT_INVALID, "unknown_pr",
-                    f"unknown PR id(s): {', '.join(unknown)}", invalid=unknown)
+                    f"unknown PR id(s): {', '.join(unknown)} — run "
+                    f"'pm pr list' to see every PR", invalid=unknown)
     if terminal:
+        # A terminal PR can never be an auto-start target; name how to see
+        # why instead of only the refusal.
         raise _Fail(EXIT_INVALID, "terminal_pr",
-                    f"already merged/closed: {', '.join(terminal)}",
+                    f"already merged/closed: {', '.join(terminal)} — run "
+                    f"'pm pr list' to see every PR and its status",
                     invalid=terminal)
     return resolved
 

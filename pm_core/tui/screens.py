@@ -7,6 +7,8 @@ from textual.geometry import Region
 from textual.widgets import Label, Static
 from textual.screen import ModalScreen
 
+from pm_core import command_surface
+
 
 class MergeLockScreen(ModalScreen):
     """Overlay shown while pm/ files are stashed during merge.
@@ -202,7 +204,12 @@ class HelpScreen(ModalScreen):
         color: $primary;
     }
     .help-row {
-        height: 1;
+        /* Full width + auto height so a long row wraps instead of being
+           clipped at the 50-column container.  The command-bar table's
+           useful half (the CLI and TUI equivalents) sits past column 44,
+           so height:1 silently hid exactly what this screen now documents. */
+        width: 100%;
+        height: auto;
     }
     """
 
@@ -219,6 +226,7 @@ class HelpScreen(ModalScreen):
                 yield Label("  [bold]↑↓[/] or [bold]jk[/]  Move selection", classes="help-row")
                 yield Label("  [bold]Enter[/]  Run selected item", classes="help-row")
                 yield Label("  [bold]e[/]  Edit item", classes="help-row")
+                yield Label("  [bold]d[/]  Debug item", classes="help-row")
                 yield Label("  [bold]a[/]  Add instruction", classes="help-row")
                 yield Label("  [bold]q[/]  Back to tree view", classes="help-row")
             elif self._in_plans:
@@ -246,9 +254,9 @@ class HelpScreen(ModalScreen):
                 yield Label("  [bold]/[/]pr select [dim]<query>[/]  Fuzzy-find PR", classes="help-row")
                 yield Label("  [bold]/[/]plan select [dim]<query>[/]  Fuzzy-find plan", classes="help-row")
                 yield Label("PR Actions", classes="help-section")
-                yield Label("  [bold]s[/]  Start selected PR", classes="help-row")
-                yield Label("  [bold]d[/]  Review (zz d: loop)", classes="help-row")
-                yield Label("  [bold]g[/]  Merge PR", classes="help-row")
+                yield Label("  [bold]s[/]  Start selected PR (z s: fresh, S: companion)", classes="help-row")
+                yield Label("  [bold]d[/]  Review (z d: fresh, zz d: loop)", classes="help-row")
+                yield Label("  [bold]g[/]  Merge PR (G: companion pane)", classes="help-row")
                 yield Label("  [bold]i[/]  Sign-off (router)", classes="help-row")
                 yield Label("  [bold]e[/] / [bold]Enter[/]  Edit selected PR", classes="help-row")
                 yield Label("  [bold]v[/]  View plan file", classes="help-row")
@@ -258,39 +266,80 @@ class HelpScreen(ModalScreen):
                 yield Label("  [bold]a[/]  Auto-start runs popup", classes="help-row")
                 yield Label("  [bold]V[/]  Review oldest pending spec", classes="help-row")
                 yield Label("  [bold]o[/]  Models: PR/project model, effort, command (⇄ = PR has its own)", classes="help-row")
-                yield Label("  [bold]w[/]  Focus watcher window", classes="help-row")
+                yield Label("  [bold]Y[/]  Cleanup PR workdir", classes="help-row")
+                yield Label("  [bold]y[/]  Cleanup, then: ys start, yd review, yt QA", classes="help-row")
+                yield Label("  [bold]w[/]  Watcher prefix: ww list, wf focus, ws start/stop, wr review", classes="help-row")
             yield Label("Panes & Views", classes="help-section")
-            if not self._in_plans:
+            # `c` (launch_claude) is blocked by `check_action` in both the
+            # plans and QA views, so list it only where it works.
+            if not (self._in_plans or self._in_qa):
                 yield Label("  [bold]c[/]  Launch Claude session", classes="help-row")
             yield Label("  [bold]H[/]  Launch guide (setup or assist)", classes="help-row")
-            yield Label("  [bold]/[/]  Open command bar", classes="help-row")
+            yield Label("  [bold]/[/]  Open command bar (type help there for this screen)",
+                        classes="help-row")
             yield Label("  [bold]n[/]  Open notes", classes="help-row")
             yield Label("  [bold]m[/]  Meta: work on pm itself", classes="help-row")
             yield Label("  [bold]L[/]  View TUI log", classes="help-row")
             yield Label("  [bold]p[/]  Toggle plans view", classes="help-row")
-            yield Label("  [bold]t[/]  Start QA on selected PR", classes="help-row")
-            yield Label("  [bold]q[/]  Toggle QA instructions", classes="help-row")
+            # `t` (start_qa_on_pr) is a tree-view action: `check_action`
+            # blocks it in both the plans and QA views.
+            if not (self._in_plans or self._in_qa):
+                yield Label("  [bold]t[/]  Start QA on selected PR", classes="help-row")
+            # Same wording as `pm tui keys`: the pane is the QA library
+            # (instructions, regression tests and artifact recipes), so
+            # "instructions" alone described only one third of it.
+            yield Label("  [bold]q[/]  Toggle QA library view", classes="help-row")
             yield Label("  [bold]b[/]  Rebalance panes", classes="help-row")
-            yield Label("Companion Pane", classes="help-section")
-            yield Label("  [bold]S[/]  Start PR with companion pane", classes="help-row")
-            yield Label("  [bold]G[/]  Merge with companion pane", classes="help-row")
+            # S/G are start_pr_companion/merge_pr_companion, also blocked
+            # outside the tree view.
+            if not (self._in_plans or self._in_qa):
+                yield Label("Companion Pane", classes="help-section")
+                yield Label("  [bold]S[/]  Start PR with companion pane", classes="help-row")
+                yield Label("  [bold]G[/]  Merge with companion pane", classes="help-row")
             yield Label("Other", classes="help-section")
-            yield Label("  [bold]z[/]  Modifier: kill existing before next", classes="help-row")
-            yield Label("  [bold]r[/]  Refresh / sync with GitHub", classes="help-row")
+            # `z` modifies the tree-view pane actions.  In the plans and QA
+            # views the PR chords are blocked by `check_action` and `e`/`d`
+            # are intercepted by the focused pane (edit item, debug item),
+            # so the row is shown only in the tree view.  (The notes / log /
+            # guide chords still work there, but they stay documented here
+            # rather than repeated per view.)
+            if not (self._in_plans or self._in_qa):
+                yield Label("  [bold]z[/]  Prefix: restart the pane instead of focusing it (s S d t e v n L H c, wr; zz d / zz t: loop)", classes="help-row")
+            # `r` reloads state and syncs whatever backend the project uses;
+            # "with GitHub" was only true for one of them.  Same wording as
+            # `pm tui keys`.
+            yield Label("  [bold]r[/]  Refresh / sync", classes="help-row")
+            yield Label("  [bold]R[/]  Reload state from disk (no sync)", classes="help-row")
             yield Label("  [bold]C[/]  Show shared connect command", classes="help-row")
             yield Label("  [bold]Ctrl+R[/]  Restart TUI", classes="help-row")
             yield Label("  [bold]?[/]  Show this help", classes="help-row")
             yield Label("  [bold]ctrl+b d[/]  Detach from session", classes="help-row")
             yield Label("Tmux Prefix Bindings", classes="help-section")
-            yield Label("  [bold]prefix P[/]  PR action picker popup (q/Esc to quit)", classes="help-row")
+            # The z/zz chords exist only in the fzf picker; the no-fzf
+            # fallback is a numbered line menu that ignores `z` (it closes
+            # the popup), so the row names the requirement.
+            yield Label("  [bold]prefix P[/]  PR action picker popup (q/Esc to quit; z s/d/t/i fresh, zz d/t loop — requires fzf)", classes="help-row")
             yield Label("  [bold]prefix M[/]  pm command runner popup (Ctrl+C to quit)", classes="help-row")
             yield Label("  [bold]prefix R[/]  Rebalance panes", classes="help-row")
-            yield Label("Review Loop", classes="help-section")
-            yield Label("  [bold]zz d[/]  Start loop", classes="help-row")
-            yield Label("  [bold]z d[/]   Kill loop, fresh review", classes="help-row")
-            yield Label("QA Loop", classes="help-section")
-            yield Label("  [bold]zz t[/]  Start QA loop", classes="help-row")
-            yield Label("  [bold]z t[/]   Fresh start QA", classes="help-row")
+            # The loop keys run the tree-view PR actions (`review_pr` /
+            # `start_qa_on_pr`), which `check_action` blocks in the plans and
+            # QA views; in the QA view `d` is even intercepted as "debug
+            # item", so `zz d` would debug instead of starting a loop.
+            if not (self._in_plans or self._in_qa):
+                yield Label("Review Loop", classes="help-section")
+                yield Label("  [bold]zz d[/]  Start loop", classes="help-row")
+                yield Label("  [bold]z d[/]   Kill loop, fresh review", classes="help-row")
+                yield Label("QA Loop", classes="help-section")
+                yield Label("  [bold]zz t[/]  Start QA loop", classes="help-row")
+                yield Label("  [bold]z t[/]   Fresh start QA", classes="help-row")
+            # The heading is the shared one, so the `?` screen and
+            # `pm tui keys` render the same section title (the drift this
+            # PR exists to stop).  It is styled like the screen's other
+            # section headings; the rows come from the shared module.
+            yield Label(command_surface.COMMAND_BAR_HEADER,
+                        classes="help-section")
+            for _line in command_surface.command_bar_rows_textual():
+                yield Label(_line, classes="help-row")
             yield Label("")
             yield Label("[dim]Press Esc/? to close  |  h to discuss pm[/]", classes="help-row")
 

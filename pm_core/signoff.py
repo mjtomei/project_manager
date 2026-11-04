@@ -422,12 +422,14 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
     # Background (auto-sequence) launches switch no client: see
     # _launch_review_window.
     if not tmux_mod.has_tmux() or not (background or tmux_mod.in_tmux()):
-        print("Sign-off window requires tmux.")
+        print("Sign-off window requires tmux. Start a pm session first "
+              "with: pm session")
         return
 
     pm_session = session_name or _get_pm_session()
     if not pm_session or not tmux_mod.session_exists(pm_session):
-        print(f"Sign-off window: tmux session '{pm_session}' not found.")
+        print(f"Sign-off window: tmux session '{pm_session}' not found — "
+              f"start it with 'pm session'.")
         return
 
     workdir = pr_entry.get("workdir")
@@ -435,8 +437,8 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
         root = state_root()
         workdir = _ensure_workdir(data, pr_entry, root)
         if not workdir:
-            print(f"Sign-off window: no workdir for {pr_entry['id']}. "
-                  "Start the PR first.")
+            print(f"Sign-off window: no workdir for {pr_entry['id']} — start "
+                  f"the PR first with 'pm pr start {pr_entry['id']}' (TUI: s).")
             return
 
     pr_id = pr_entry["id"]

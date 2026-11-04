@@ -12,6 +12,7 @@ from pathlib import Path
 
 import click
 
+from pm_core import command_surface
 from pm_core import store, guide
 from pm_core import tmux as tmux_mod
 from pm_core import pane_layout
@@ -225,7 +226,10 @@ def _schedule_rebalance(session_name: str) -> None:
 def _session_start(share_global: bool = False, share_group: str | None = None,
                    start_dir: str | None = None,
                    disconnect_others: bool = False):
-    """Start a tmux session with TUI + notes editor.
+    """Start a tmux session with the TUI.
+
+    The notes pane is opened on demand (`n` in the TUI, or `pm notes`); it
+    is not part of the session layout any more.
 
     If no project exists yet, starts pm guide instead of the TUI so
     the guided workflow can initialize the project inside tmux.
@@ -411,7 +415,8 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
     # If --dir was specified, the session must already exist (we're joining, not creating)
     if start_dir:
         click.echo(f"No shared session '{session_name}' found to join.", err=True)
-        click.echo("The session owner must start it first.", err=True)
+        click.echo("The session owner must start it first (with the same "
+                   "--global or --group flag).", err=True)
         raise SystemExit(1)
 
     _log.info("session does not exist or was killed, creating new session")
@@ -711,7 +716,8 @@ def session_home():
 
     session_name = _get_pm_session()
     if not session_name or not tmux_mod.session_exists(session_name):
-        click.echo("Not inside a pm tmux session.", err=True)
+        click.echo("Not inside a pm tmux session — start one with: pm session",
+                   err=True)
         raise SystemExit(1)
 
     provider = home_window.get_active_provider()
@@ -920,7 +926,8 @@ def rebalance_cmd():
     automatic layout management.
     """
     if not tmux_mod.in_tmux():
-        click.echo("Must be run from within a tmux session.", err=True)
+        click.echo("Must be run from within a tmux session — start one with: "
+                   "pm session", err=True)
         raise SystemExit(1)
 
     session = pane_registry.pm_session_name(tmux_mod.get_session_name())
@@ -1463,10 +1470,11 @@ def _parse_tui_action(tui_cmd: str) -> tuple[str | None, str | None, bool]:
     """Best-effort: extract (pr_id, picker_action, fresh) from a tui: cmd.
 
     ``fresh`` indicates the action will kill+recreate its target window
-    (review-loop iteration, ``pr qa fresh``, ``pr qa loop``).  The
-    spinner uses this to wait for a window-id transition rather than
-    just window appearance, so a stale-window snapshot doesn't trigger
-    an immediate switch to the about-to-be-killed window.
+    (review-loop iteration; ``pr qa fresh``/``pr qa loop`` in either the
+    positional or the flag spelling).  The spinner uses this to wait for a
+    window-id transition rather than just window appearance, so a
+    stale-window snapshot doesn't trigger an immediate switch to the
+    about-to-be-killed window.
     """
     parts = shlex.split(tui_cmd) if tui_cmd else []
     if not parts:
@@ -1476,15 +1484,39 @@ def _parse_tui_action(tui_cmd: str) -> tuple[str | None, str | None, bool]:
         # Every review-loop iteration recreates the review window.
         return (rest[0] if rest else None), "review-loop", True
     if len(parts) >= 2 and parts[0] == "pr" and parts[1] == "qa":
-        rest = parts[2:]
-        mode = None
-        if rest and rest[0] in ("fresh", "loop"):
-            mode = rest[0]
-            rest = rest[1:]
-        return (rest[0] if rest else None), "qa", mode in ("fresh", "loop")
+        # The command bar accepts the positional and the flag spellings
+        # (`pr qa fresh <id>` / `pr qa <id> --fresh`); parse both so the
+        # spinner waits for the rebuilt window instead of switching to the
+        # stale one that is about to be killed.  Best-effort: a malformed
+        # command is rejected by the TUI, so there is no window to await.
+        try:
+            mode, pr_id = command_surface.parse_qa_command(parts[2:])
+        except ValueError:
+            return None, None, False
+        return pr_id, "qa", mode in command_surface.QA_MODIFIER_MODES
     if parts[0] == "edit":
         return (parts[1] if len(parts) >= 2 else None), "edit", False
     return None, None, False
+
+
+def _resolve_spinner_ids(data: dict, pr_id: str) -> tuple[str, str | None]:
+    """Map a parsed picker id to ``(internal id, display id)``.
+
+    The command bar (and therefore the picker) accepts the same
+    identifiers as the CLI — ``pr-001``, ``42``, ``#42`` — but the
+    runtime-state and window lookups below are keyed by the internal id
+    and the window name by the display id (``qa-#42``).  Without this,
+    ``pr qa #42 --fresh`` started QA for the right PR while the spinner
+    watched a window that could never appear (it polled state for
+    ``#42`` and matched no window), so the popup sat until dismissal
+    instead of following the rebuilt window.
+    """
+    from pm_core.cli.helpers import _pr_display_id, _resolve_pr_id
+
+    entry = _resolve_pr_id(data, pr_id)
+    if entry is None:
+        return pr_id, None
+    return entry["id"], _pr_display_id(entry)
 
 
 # While the picker spinner runs, re-validate the TUI's pidfile so a TUI
@@ -1534,12 +1566,9 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
     try:
         root = state_root()
         data = store.load(root)
-        from pm_core.cli.helpers import _pr_display_id
-        display_id = None
-        for p in data.get("prs") or []:
-            if p.get("id") == pr_id:
-                display_id = _pr_display_id(p)
-                break
+        # Resolve a display id (`#42` / `42`) to the internal one: the
+        # state and window lookups below are keyed by different spellings.
+        pr_id, display_id = _resolve_spinner_ids(data, pr_id)
     except Exception:
         display_id = None
     pattern = _ACTION_WINDOW_PATTERNS.get(action)

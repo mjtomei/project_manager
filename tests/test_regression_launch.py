@@ -759,14 +759,28 @@ def test_command_bar_regression_checks_the_test_id_first(project):
             ("qa regression --file-prs", "Missing argument 'TEST_ID'"),
             ("qa regression demo --branch", "'--branch' requires an argument"),
             ("qa regression demo --bogus", "No such option '--bogus'"),
-            ("qa regression demo extra", "unexpected extra argument"),
-            # No help text printed to the TUI's stdout.
-            ("qa regression --help", "No such option '--help'")):
+            ("qa regression demo extra", "unexpected extra argument")):
         app, launch, run_cmd = _command_bar(project, cmd)
         launch.assert_not_called()
         run_cmd.assert_not_called()
         msg = app.log_message.call_args.args[0]
         assert why in msg and "Usage: qa regression" in msg, (cmd, msg)
+
+
+def test_command_bar_help_opens_the_help_screen(project):
+    """``--help`` is answered by the HelpScreen, never by a pane or the CLI.
+
+    The command bar used to hand ``--help`` to the command, whose multi-line
+    help was truncated to its last line (and ``qa regression --help`` even
+    reported "No such option").  It now opens the same screen ``help`` does,
+    before any command runs — so nothing is ever handed to a pane that would
+    exit at once.
+    """
+    app, launch, run_cmd = _command_bar(project, "qa regression --help")
+    launch.assert_not_called()
+    run_cmd.assert_not_called()
+    app.action_show_help.assert_called_once()
+    app.log_message.assert_not_called()
 
 
 def test_command_bar_finds_the_test_id_after_value_options(project):

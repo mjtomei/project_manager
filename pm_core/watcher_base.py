@@ -94,6 +94,7 @@ class BaseWatcher(ABC):
     # --- Class-level configuration (override in subclasses) ---
     WATCHER_TYPE: str = ""          # e.g. "auto-start"
     DISPLAY_NAME: str = ""          # e.g. "Auto-Start Watcher"
+    DESCRIPTION: str = ""           # one line: what it drives, incl. its plan
     WINDOW_NAME: str = ""           # tmux window name
     DEFAULT_INTERVAL: float = 120   # seconds between iterations
     VERDICTS: tuple[str, ...] = ("READY", "INPUT_REQUIRED")

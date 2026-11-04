@@ -1143,8 +1143,11 @@ class TestSubmitCommand:
         assert res.reason == "starting"
         assert "starting up" in res.message
         # A TUI killed between O_EXCL create and its first write leaves an
-        # empty file forever; the message must name the way out.
-        assert "restart the TUI (Ctrl+R)" in res.message
+        # empty file forever; the message must name the way out — and a
+        # caller with no TUI cannot press Ctrl+R, so it names `pm session`
+        # too.
+        assert "restart the TUI (Ctrl+R" in res.message
+        assert "pm session" in res.message
         assert pidfile.exists()
         assert pidfile.read_text() == ""
         assert not queue.exists()

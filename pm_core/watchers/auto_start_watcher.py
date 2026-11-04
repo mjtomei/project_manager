@@ -26,6 +26,8 @@ class AutoStartWatcher(BaseWatcher):
 
     WATCHER_TYPE = "auto-start"
     DISPLAY_NAME = "Auto-Start Watcher"
+    DESCRIPTION = ("Monitor auto-start sessions for issues (observation-only "
+                   "when started from the CLI)")
     WINDOW_NAME = "watcher"
     DEFAULT_INTERVAL = 120
     VERDICTS = ("READY", "INPUT_REQUIRED")

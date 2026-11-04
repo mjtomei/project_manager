@@ -1,6 +1,6 @@
 """Improvement-fix implementation watcher.
 
-Picks pending UX-plan PRs and advances them through implementation →
+Picks pending improvements-plan PRs and advances them through implementation →
 review → QA via ``pm pr auto-sequence``.  Unlike the bug-fix watcher,
 PRs that PASS QA are *not* auto-merged — they are held for a human
 taste check.  The human merge cadence is the throttle.
@@ -20,12 +20,14 @@ _log = configure_logger("pm.watchers.improvement_fix_impl")
 
 
 class ImprovementFixImplWatcher(BaseWatcher):
-    """Drives ``plan=ux`` PRs through auto-sequence, gated at QA PASS."""
+    """Drives ``plan=improvements`` PRs through auto-sequence, gated at QA PASS."""
 
     WATCHER_TYPE = "improvement-fix-impl"
     DISPLAY_NAME = "Improvement-Fix Implementation Watcher"
+    DESCRIPTION = ("Drive plan=improvements PRs through auto-sequence "
+                   "(gated at QA PASS)")
     WINDOW_NAME = "improvement-fix-impl"
-    DEFAULT_INTERVAL = 1800  # 30 minutes — UX is taste-driven
+    DEFAULT_INTERVAL = 1800  # 30 minutes — improvements are taste-driven
     VERDICTS = ("READY", "INPUT_REQUIRED")
     KEYWORDS = ("READY", "INPUT_REQUIRED")
 

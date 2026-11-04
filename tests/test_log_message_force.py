@@ -847,7 +847,8 @@ def test_qa_already_running_visible_during_autostart_confirmation():
          patch.object(qa_loop_ui.store, "get_pr",
                       return_value={"id": "pr-001", "status": "qa"}):
         qa_loop_ui.start_qa(app, "pr-001", focus=True)
-    assert shown[-1] == " QA already running for pr-001"
+    assert shown[-1].startswith(" QA already running for pr-001")
+    assert "pr qa fresh pr-001" in shown[-1]
     assert state.focus_on_create is True
 
 
@@ -883,7 +884,8 @@ def test_qa_run_reopened_from_a_hold_reports_running():
          patch.object(qa_loop_ui.store, "get_pr",
                       return_value={"id": "pr-001", "status": "qa"}):
         qa_loop_ui.start_qa(app, "pr-001", focus=True)
-    assert shown[-1] == " QA already running for pr-001"
+    assert shown[-1].startswith(" QA already running for pr-001")
+    assert "pr qa fresh pr-001" in shown[-1]
     assert state.focus_on_create is True
 
 

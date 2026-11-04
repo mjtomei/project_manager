@@ -704,7 +704,11 @@ async def test_other_commands_keep_exact_resolution(project):
         with patch("pm_core.tui.pane_ops.edit_plan") as edit:
             await _cmd(app, pilot, "edit spec")
         edit.assert_not_called()
-        assert app.last == "PR not found: spec"
+        # The id is still refused exactly (never fuzzily retargeted); the
+        # message carries the listing remedy every not-found refusal gained
+        # in the self-documenting-commands sweep.
+        assert app.last.startswith("PR not found: spec")
+        assert "pr list" in app.last
         assert app.tree.selected_pr_id == before
 
 
