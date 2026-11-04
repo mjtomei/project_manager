@@ -1423,6 +1423,11 @@ def _resume_incomplete_qa(app) -> None:
                 _app.call_from_thread(_on_qa_update, _app, s)
 
             app._qa_loops[pr_id] = state
+            # A held run is resumed from disk like any other incomplete run,
+            # so it carries the same resume marker before the held-specific
+            # re-adoption line (QA scenario 88, R15: the resume log is how a
+            # user confirms a restart picked the run back up).
+            _log.info("Resuming incomplete QA from disk: %s", pr_id)
             _log.info("Re-adopting held QA run for %s (waiting=%s, "
                       "processed=%s)", pr_id,
                       sorted(state.waiting_for_input),

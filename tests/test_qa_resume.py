@@ -813,14 +813,26 @@ def _seed_held_run(home, *, completion_processed=False, pr_id="pr-001"):
 
 def test_resume_held_run_keeps_watching(tmp_path):
     """A held run is re-adopted, not processed-and-dropped, and its snapshot
-    is kept so a follow-up that landed during downtime is collected."""
+    is kept so a follow-up that landed during downtime is collected.
+
+    It also carries the generic resume marker: a restart that picks a held
+    run back up logs the same "Resuming incomplete QA from disk" line as any
+    other incomplete run, followed by the held-specific re-adoption line
+    (QA scenario 88, R15)."""
     app = _make_app(tmp_path)
     qa_dir = _seed_held_run(tmp_path, completion_processed=False)
 
-    with patch("pathlib.Path.home", return_value=tmp_path), \
-         patch.object(qa_loop, "resume_qa_background") as resume_bg, \
-         patch.object(qa_loop_ui, "_on_qa_complete") as on_complete:
-        qa_loop_ui._resume_incomplete_qa(app)
+    with patch.object(qa_loop_ui._log, "info") as log_info:
+        with patch("pathlib.Path.home", return_value=tmp_path), \
+             patch.object(qa_loop, "resume_qa_background") as resume_bg, \
+             patch.object(qa_loop_ui, "_on_qa_complete") as on_complete:
+            qa_loop_ui._resume_incomplete_qa(app)
+
+    messages = [str(c.args[0]) % c.args[1:] if c.args else ""
+                for c in log_info.call_args_list]
+    assert any("Resuming incomplete QA from disk: pr-001" in m
+               for m in messages)
+    assert any("Re-adopting held QA run for pr-001" in m for m in messages)
 
     resume_bg.assert_called_once()
     # Unprocessed completion → noted once during adoption.
