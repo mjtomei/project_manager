@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-fc6c29e
+  active_pr: pr-86152a8
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -32988,7 +32988,7 @@ prs:
   title: 'Self-documenting + consistent pm commands: complete --help, actionable errors,
     unified flags'
   branch: pm/pr-fa9f172-self-documenting-consistent-pm-commands-complete-h
-  status: pending
+  status: in_progress
   depends_on: []
   description: 'Make pm''s command surface self-documenting so an operator — human
     OR a driving Claude session — can go from "I know the task" to "I know the exact
@@ -33035,12 +33035,12 @@ prs:
     parsing + errors), keeping CLI / command-bar / TUI in sync. Tests: help lists
     each command''s modes/flags; key error paths include a corrective command; --fresh
     accepted on start/review/qa/merge.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/295
+  gh_pr_number: 295
   created_at: '2026-05-25T23:07:46.493552+00:00'
   updated_at: '2026-11-04T00:08:21.136311+00:00'
-  started_at: null
+  started_at: '2026-11-02T02:25:01.682313+00:00'
   reviewed_at: null
   merged_at: null
   notes:
@@ -33217,6 +33217,34 @@ prs:
       passed, 1 skipped. Captures: /pm-captures/scenarios/15/{cli-help,tui-keys,tui-help,signoff-help,click81,tui-launcher}.'
     created_at: '2026-11-03T08:36:29Z'
     last_edited: '2026-11-03T08:36:29Z'
+  - id: note-aeb85d5
+    text: 'review-loop e4f7 i3 (692008f3) incidental fixes beyond the help/error sweep:
+      (1) plans view: Enter on a plan (launch_plan_activated) and `e` (handle_plan_action
+      edit) returned silently when the plan file was missing — a live plan here (plan-b6aac3d)
+      has no file on disk — and an empty `file` resolved to the project root, so `e`
+      would open the editor on the whole project; both now log the same "Plan file
+      not found — run `pm plan list`" remedy as `v`, via one helper. (2) command bar:
+      every branch restored focus with "plans pane else tech-tree", so in the QA view
+      focus landed on the hidden tree and the QA pane keys (j/k, Enter, e, d, a) went
+      dead until the view was re-entered; one _refocus_active_view helper (mirroring
+      action_unfocus_command) handles all three views. (3) the `z` prefix row names
+      the `wr` watcher-review chord. Full suite (minus the known markdown-module baseline)
+      5556 passed, 1 skipped.'
+    created_at: '2026-11-03T02:25:36Z'
+    last_edited: '2026-11-03T02:25:36Z'
+  - id: note-8f0e257
+    text: 'review-loop e4f7 i5: two stale surfaces the sweep missed. (1) `pm help`''s
+      `pm qa regression` line still said "(replaces `pm tui test`)" — the removed
+      command read as runnable ("No such command"); it now names `pm/qa/regression/`,
+      with a test that HELP_TEXT names neither `pm tui test` nor `pm pr done`. (2)
+      The three TUI pane launchers (launch_claude, launch_discuss, launch_watcher_review)
+      logged a bare "Claude CLI not found" and returned with no fallback (the CLI
+      launchers print a copy-paste prompt); each now says "install Claude Code first",
+      matching claude_launcher''s "install it first", with a parametrized test. Full
+      suite (minus the known markdown-module baseline) 5561 passed, 1 skipped. Commit
+      d7878f78.'
+    created_at: '2026-11-03T04:36:37Z'
+    last_edited: '2026-11-03T04:36:37Z'
   - id: note-d40c323
     text: 'QA S16 (command-bar help — flag spelling, quoting, focus return) PASS.
       Runtime-verified from the TUI at 200x50: `/ pr qa --help` and `/ pr start -h`
@@ -33425,6 +33453,23 @@ prs:
       /pm-captures/scenarios/22/<story>/{cli-recording,tmux-screen-recording}/.'
     created_at: '2026-11-03T22:39:59Z'
     last_edited: '2026-11-03T22:39:59Z'
+  - id: note-1f24f24
+    text: 'QA planning pass for scenarios 24+: spec reconciled with S20-23 (all PASS
+      after efab1f4f8 / 162913959) and R33 corrected (the notes-pane wording landed
+      in `pm help`''s TUI section and `pm getting-started`, not `pm session --help`).
+      Next plan: S24 = the interrupted plans-view / standalone-PR plan remedies (R24/R33)
+      including per-plan window concurrency and the plans-view keys; S25 = the `pm
+      pr qa` diagnostic contract (R15/E1/E6/E8). Verified while planning, for S25
+      to assert: with tmux installed but NO pm session running, `pm pr qa <id>` prints
+      only the command-bar form and keys and omits the "start one with pm session"
+      remedy; that remedy appears only when tmux is absent from PATH (the check tests
+      `_get_pm_session()` truthiness, which returns a computed session name whenever
+      tmux exists). Fixture notes: `pm/project.yaml` is mode 444 (chmod before a bootstrap
+      edit); plan `file` paths resolve against the repo root (`plans/<id>.md`), not
+      `pm/plans/`; an outside-tmux run still sees `TMUX` if the driver shell is inside
+      a session, so unset TMUX/PM_IN_TMUX_SESSION when establishing "no session".'
+    created_at: '2026-11-03T23:19:24Z'
+    last_edited: '2026-11-03T23:19:24Z'
   - id: note-e67016d
     text: 'Refiner scenario 25 (QA diagnostic contract) — corrections and verified
       fixture, at 7c8c3e233:
@@ -33527,10 +33572,11 @@ prs:
       Captures: /pm-captures/scenarios/25/{story1..story10,story11-concurrent-live/{cli-recording,tmux-screen-recording}}.'
     created_at: '2026-11-04T00:08:21Z'
     last_edited: '2026-11-04T00:08:21Z'
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-fa9f172-self-documenting-consistent-pm-comma-0c82d63b
   model: provider:deepseek-flash
   effort: high
   session_models:
-    signoff: provider:claude-main-xhigh-pm
+    signoff: provider:claude-work-xhigh-249
   session_effort:
     signoff: high
 - id: pr-71e9ec7
@@ -51982,6 +52028,46 @@ prs:
   gh_pr_number: null
   created_at: '2026-11-03T00:47:04.527482+00:00'
   updated_at: '2026-11-03T00:47:04.527482+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-86152a8
+  plan: bugs
+  title: 'Bug: the z prefix never expires, so a later s/d/t/e/v/n/L/H/c becomes a
+    destructive fresh restart'
+  branch: pm/pr-86152a8-bug-the-z-prefix-never-expires-so-a-later-s-d-t-e-
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/tui/app.py on_key (the `z` branch) / _consume_z.
+
+
+    Repro (TUI tree view): press `z` (the log line shows `z …`), navigate with `j`/`k`,
+    then press `s` (or `d`, `t`, `e`, `v`, `n`, `L`, `H`, `c`). The action runs as
+    a *fresh* restart — it kills the existing window/pane and starts over instead
+    of focusing it.
+
+
+    Cause: the `w` and `y` prefixes auto-cancel after 2 s (_cancel_w_mode / _cancel_y_mode),
+    but `z` has no timer, and nothing except Escape, `y`, or a third `z` clears `_z_count`.
+    A stray `z` stays armed indefinitely across navigation. `i` (sign-off) does not
+    consume `z` at all, so `z` then `i` leaves it armed for a later key.
+
+
+    Expected: `z` should expire like `w`/`y` (~2 s timer), so a key pressed later
+    cannot silently become destructive. Note the `wr` watcher-review chord relies
+    on `z` surviving the intermediate `w`, so a timer (not clear-on-any-key) is the
+    safe fix; the `z` row in `pm tui keys` and the `?` screen documents the full chord
+    list.
+
+
+    Found during the pr-fa9f172 help/error sweep (review-loop e4f7 i3); deliberately
+    not fixed there because it changes interaction behaviour and needs its own QA.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-03T02:25:44.805983+00:00'
+  updated_at: '2026-11-03T02:25:44.805983+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
