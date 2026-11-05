@@ -5607,10 +5607,13 @@ back to `/tmp/tmux-<uid>/default`.  It now catches
 `TMUX_TMPDIR=<loop> pm session list` returns 0 after the fix).
 
 Validation: the 31 files changed under `tests/` pass twice in one HOME
-(1965 each, `affected-run1.log` / `affected-run2.log`); the new test fails
-1/1 on the pre-fix head and passes after.  Full suite 6190 passed / 12
-failed / 1 skipped, 443.4 s (`full-suite.log`): every failure is
-`test_markdown_render`'s `ModuleNotFoundError: No module named 'markdown'`
-(the dependency is absent from this container, not from the project —
-the 13 tests pass 13/13 once it is installed), so the code baseline is
-6203 passed / 1 skipped.
+(1965 each, `/pm-captures/review-af74-i1/affected-run{1,2}.log`); the new
+test fails 1/1 on the pre-fix head and passes after.  Full suite on the
+final head **6203 passed / 1 skipped**, 447.4 s
+(`/pm-captures/review-af74-i1/full-suite-final.log`).  The first suite run
+(before `markdown` was installed into the test path) showed 6190 passed /
+12 failed / 1 skipped: every failure was `test_markdown_render`'s
+`ModuleNotFoundError: No module named 'markdown'` — the dependency is
+absent from this container, not from the project (the 13 tests pass 13/13
+once it is installed).  pyflakes reports no new warning versus
+`origin/master` (`pyflakes-master.txt` / `pyflakes-head.txt`).
