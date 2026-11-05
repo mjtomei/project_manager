@@ -257,6 +257,29 @@ class TestReviewStep:
     @patch("subprocess.run")
     @patch("pm_core.plans.review.launch_claude_print_background")
     @patch("pm_core.plans.review.find_claude", return_value="/usr/bin/claude")
+    def test_callback_keeps_an_edge_space_in_the_session_name(
+            self, mock_fc, mock_launch, mock_sp_run, tmp_path):
+        """A view may be named with an edge space (S118/S121/S124).
+
+        ``display-message -p`` prints the stored name plus a newline, so
+        ``strip()`` also removed a space that is part of the name: the
+        background pane targeted a session tmux does not know and was
+        never opened (review-loop 9d4c i4).
+        """
+        review_step("plan-add", "ctx", "check", tmp_path)
+        callback = mock_launch.call_args[1]["callback"]
+        mock_sp_run.return_value = MagicMock(returncode=0,
+                                             stdout=" trail x \n")
+        with patch("pm_core.plans.review.tmux_mod") as mock_tmux:
+            mock_tmux.in_tmux.return_value = True
+            mock_tmux._tmux_cmd.return_value = [
+                "tmux", "display-message", "-p", "#{session_name}"]
+            callback("NEEDS_FIX — missing tests", "", 0)
+        assert mock_tmux.split_pane_background.call_args[0][0] == " trail x "
+
+    @patch("subprocess.run")
+    @patch("pm_core.plans.review.launch_claude_print_background")
+    @patch("pm_core.plans.review.find_claude", return_value="/usr/bin/claude")
     def test_callback_pass_in_tmux(self, mock_fc, mock_launch, mock_sp_run, tmp_path):
         """PASS verdict in tmux opens a pane with PASS message."""
         review_step("plan-add", "ctx", "check", tmp_path)

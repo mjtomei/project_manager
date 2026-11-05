@@ -19,6 +19,7 @@ import json
 import os
 import re
 import secrets
+import shlex
 import shutil
 import subprocess
 import sys
@@ -3747,6 +3748,71 @@ def _ensure_scenario_container(
                  scenario.index, cname)
 
 
+def _scenario_worker_pane_alive(session: str, scenario: QAScenario,
+                                pane_id: str | None) -> bool:
+    """True when *pane_id* is a live pane of this scenario's own window.
+
+    A recorded id outlives the session that owned it: a restarted tmux
+    server hands the same ids out again from ``%0``, so a stale id can
+    name an unrelated new pane — in practice the QA window's status
+    dashboard, which a resume splits before it checks the scenarios.
+    Existence alone therefore cannot prove the worker (or its verifier)
+    survived; the pane must still live in the window this scenario owns.
+    """
+    from pm_core import tmux as tmux_mod
+    if not pane_id or not tmux_mod.pane_exists(pane_id):
+        return False
+    if not scenario.window_name:
+        # No window to attribute it to; keep the historical meaning of a
+        # recorded id (exists == alive).
+        return True
+    pane_window = tmux_mod.pane_window_id(pane_id)
+    if pane_window is None:
+        # tmux cannot name the pane's window (no server reachable, or the
+        # query failed): fall back to the historical meaning rather than
+        # call a live worker dead and relaunch a duplicate.
+        return True
+    win = tmux_mod.find_window_by_name(session, scenario.window_name)
+    if win:
+        return pane_window == win["id"]
+    # The scenario's window is gone and the id still names a pane of some
+    # other window: a restarted server handed the id out again.
+    return False
+
+
+def _verifier_pane_alive(session: str, scenario: QAScenario) -> bool:
+    """True when the recorded verifier pane is still this scenario's verifier.
+
+    The window-ownership rule alone accepts any pane of the scenario's own
+    window.  A restarted tmux server hands pane ids out again from ``%0``,
+    and the id a resumed run restored for its verifier can name the worker
+    that was relaunched into that window: the scenario window is recreated
+    with a single pane, and the verifier's id (allocated after the
+    worker's) can coincide with the id the relaunched worker gets — the
+    same arithmetic as QA S81's two-run resume, where a recorded worker id
+    named the recreated dashboard.  The verification follow-up would then
+    be typed into the worker while the run waits on the dead verifier's
+    transcript — a wait with no time limit.
+
+    The verifier's session id is in its pane's start command, so the pane
+    must still run that session (``pane_runs_transcript``).  A pane whose
+    command shows no session id, and a record whose transcript has no
+    recoverable session id (a fake-session caller), count as the verifier,
+    as they always did.
+    """
+    pane_id = scenario.verifier_pane_id
+    if not _scenario_worker_pane_alive(session, scenario, pane_id):
+        return False
+    from pm_core.claude_launcher import (
+        pane_runs_transcript, session_id_from_transcript,
+    )
+    if (not scenario.verifier_transcript
+            or not session_id_from_transcript(scenario.verifier_transcript)):
+        return True
+    return pane_runs_transcript(pane_id, scenario.verifier_cwd or None,
+                                scenario.verifier_transcript)
+
+
 def _relaunch_scenario_window(
     scenario: QAScenario,
     state: QALoopState,
@@ -4010,7 +4076,8 @@ class _WaitingScan:
     changed: bool = False
 
 
-def _scan_waiting_scenarios(state: QALoopState) -> _WaitingScan:
+def _scan_waiting_scenarios(state: QALoopState,
+                            session: str | None = None) -> _WaitingScan:
     """Poll scenarios whose worker emitted INPUT_REQUIRED for a follow-up.
 
     Only the scenario's own transcript is read, and only turns newer than
@@ -4019,6 +4086,20 @@ def _scan_waiting_scenarios(state: QALoopState) -> _WaitingScan:
     PASS/NEEDS_WORK is returned for the caller to record.  Superseded or
     unrecoverable attempts are dropped here (with their provisional verdict)
     so the caller can hand them back to the normal pending path.
+
+    *session* is the pm session the run's windows live in (the callers
+    inside the QA loop have it).  With it, a recorded worker pane must
+    still belong to the scenario's own window
+    (``_scenario_worker_pane_alive``): after a session restart tmux hands
+    the same pane ids out again, and a stale id can name the recreated QA
+    window's dashboard.  Existence alone then kept a held run waiting for
+    a worker that was gone — the same stale-id rule the retry and
+    verification paths apply (QA S81).  Without it (a direct caller that
+    has no session) existence remains the only evidence, as before.
+
+    A dead worker's id is left recorded, as the retry path expects: the
+    attempt is dropped, and that path must see the id is dead rather than
+    fall back to the window's first pane (the refiner) as the worker.
     """
     from pm_core import tmux as tmux_mod
 
@@ -4046,14 +4127,24 @@ def _scan_waiting_scenarios(state: QALoopState) -> _WaitingScan:
             result.changed = True
             continue
 
-        # This attempt's worker pane: a recorded pane id that is gone means
-        # the attempt is over.  No recorded pane id means "unknown", not
-        # dead: relaunching here would duplicate a worker whose window may
-        # still be alive.
+        # This attempt's worker pane: a recorded pane id that is gone — or,
+        # with the run's session known, that now names a pane of another
+        # window (a restarted server reuses ids) — means the attempt is
+        # over.  No recorded pane id means "unknown", not dead: relaunching
+        # here would duplicate a worker whose window may still be alive.
         pane_alive = True
-        if scenario.pane_id and not tmux_mod.pane_exists(scenario.pane_id):
-            scenario.pane_id = None
-            pane_alive = False
+        if scenario.pane_id:
+            if session:
+                alive = _scenario_worker_pane_alive(
+                    session, scenario, scenario.pane_id)
+            else:
+                alive = tmux_mod.pane_exists(scenario.pane_id)
+            if not alive:
+                # Keep the dead id, as the retry path does: clearing it
+                # would make that path fall back to the window's first
+                # pane — in host mode the still-live refiner — and take
+                # it for the worker instead of relaunching one.
+                pane_alive = False
 
         # A dead pane is re-checked every tick, so the stat cache (which
         # would skip the transcript read below) only applies while the
@@ -4128,7 +4219,8 @@ def _scan_waiting_scenarios(state: QALoopState) -> _WaitingScan:
 def _hold_for_follow_up(state: QALoopState, pm_root: Path | None,
                         status_path: Path,
                         use_containers: bool, concurrency_cap: int,
-                        queued_indices: set[int]) -> bool:
+                        queued_indices: set[int],
+                        session: str | None = None) -> bool:
     """Block while a finalized INPUT_REQUIRED run waits for a follow-up.
 
     Returns True when the caller should reopen the run (a follow-up arrived
@@ -4137,6 +4229,10 @@ def _hold_for_follow_up(state: QALoopState, pm_root: Path | None,
     True the state is published as a live run (``running`` set, ``held``
     kept) so the TUI's completion poll cannot mistake the reopen for a
     finished run.
+
+    *session* is the pm session the run's windows live in; the scan uses it
+    to tell a live worker from a stale pane id a restarted server handed to
+    another window (see :func:`_scan_waiting_scenarios`).
     """
     from pm_core import store
 
@@ -4155,7 +4251,7 @@ def _hold_for_follow_up(state: QALoopState, pm_root: Path | None,
                 _log.info("QA hold for %s ended: PR left qa (%s)",
                           state.pr_id, live.get("status"))
                 return False
-        scan = _scan_waiting_scenarios(state)
+        scan = _scan_waiting_scenarios(state, session)
         if scan.follow_ups or scan.dropped:
             # Reopening.  Publish ``running`` *before* clearing ``held``: the
             # TUI's completion poll reads (not running, not held,
@@ -4221,8 +4317,6 @@ def _poll_tmux_verdicts(
     If *queued_scenarios* is provided, queued scenarios are launched as
     running scenarios complete, respecting *concurrency_cap*.
     """
-    from pm_core import tmux as tmux_mod
-
     verify_enabled = _is_verification_enabled()
     state.verify_pass_enabled = verify_enabled
     verify_max_retries = _get_verification_max_retries()
@@ -4513,7 +4607,7 @@ def _poll_tmux_verdicts(
     def _poll_waiting() -> None:
         """Collect follow-ups from scenarios whose worker asked for input."""
         nonlocal verdicts_changed
-        scan = _scan_waiting_scenarios(state)
+        scan = _scan_waiting_scenarios(state, session)
         if scan.changed:
             verdicts_changed = True
         if scan.follow_ups or scan.dropped:
@@ -4653,7 +4747,8 @@ def _poll_tmux_verdicts(
                     pane_id = scenario.pane_id
                     if pane_id is None:
                         pane_id = _get_scenario_pane(session, scenario.window_name)
-                    elif not tmux_mod.pane_exists(pane_id):
+                    elif not _scenario_worker_pane_alive(
+                            session, scenario, pane_id):
                         pane_id = None
                     followup_sent = False
                     if pane_id:
@@ -4749,12 +4844,18 @@ def _poll_tmux_verdicts(
                 _launch_next_queued()
                 continue
 
-            pane_id = scenario.pane_id or _get_scenario_pane(session, scenario.window_name)
-            if pane_id and not tmux_mod.pane_exists(pane_id):
-                # Keep the dead id: clearing it would make the next tick
-                # fall back to the window's first pane, which in host mode
-                # is the still-live refiner, and take that for the worker.
-                pane_id = None
+            pane_id = scenario.pane_id
+            if pane_id:
+                if not _scenario_worker_pane_alive(session, scenario, pane_id):
+                    # Keep the dead id: clearing it would make the next
+                    # tick fall back to the window's first pane, which in
+                    # host mode is the still-live refiner, and take that
+                    # for the worker.  A restarted server reuses ids, so
+                    # the recorded id may name a new pane of another
+                    # window; that is not this scenario's worker either.
+                    pane_id = None
+            else:
+                pane_id = _get_scenario_pane(session, scenario.window_name)
             if pane_id is None:
                 if state.stop_requested:
                     # A stop (e.g. ``z t`` fresh start) killed the window
@@ -5228,16 +5329,22 @@ def _verify_single_scenario(
         captures_scenario_dir=captures_scenario_dir,
     )
 
-    pane_alive = bool(scenario.verifier_pane_id) and tmux_mod.pane_exists(
-        scenario.verifier_pane_id)
-    if not pane_alive:
+    verifier_alive = _verifier_pane_alive(session, scenario)
+    if not verifier_alive:
         # First verification of this scenario — split its window and
         # start a Claude session with the verification prompt.
         scenario.verifier_pane_id = None
         scenario.verifier_session_id = None
         scenario.verifier_transcript = None
-        scenario_pane = scenario.pane_id or _get_scenario_pane(
-            session, scenario.window_name)
+        scenario_pane = scenario.pane_id
+        if scenario_pane and not _scenario_worker_pane_alive(
+                session, scenario, scenario_pane):
+            # A recorded worker id a restarted server handed to another
+            # window is not this scenario's pane: split from the window
+            # rather than into that one.
+            scenario_pane = None
+        if not scenario_pane:
+            scenario_pane = _get_scenario_pane(session, scenario.window_name)
         if not scenario_pane:
             _log.warning("Verification: cannot find scenario %d pane, "
                          "marking unverified", scenario.index)
@@ -5466,10 +5573,15 @@ def _add_status_pane(session: str, planner_pane: str, status_path) -> None:
     # also retry a failed early registration without duplicating an existing one.
     _register_qa_planner(session, planner_pane)
     try:
-        # Use the script path directly (avoids PYTHONPATH issues)
+        # Use the script path directly (avoids PYTHONPATH issues).  tmux runs
+        # this through the shell, and both the install path and the session
+        # name (derived from the repo directory) may contain a space; the
+        # script takes exactly two arguments, so an unquoted split made it
+        # exit with its usage line and no dashboard (review-loop 9d4c i2).
         _qa_status_script = Path(__file__).parent / "qa_status.py"
         status_cmd = (
-            f"python3 {_qa_status_script} {status_path} {session}"
+            f"python3 {shlex.quote(str(_qa_status_script))} "
+            f"{shlex.quote(str(status_path))} {shlex.quote(session)}"
         )
         status_pane = tmux_mod.split_pane_at(
             planner_pane, "h", status_cmd, background=True,
@@ -5483,6 +5595,56 @@ def _add_status_pane(session: str, planner_pane: str, status_path) -> None:
             ])
     except Exception:
         _log.exception("Failed to create status pane")
+
+
+def _qa_status_pane_live(session: str, window_name: str) -> bool:
+    """True when *window_name* already has a live status dashboard pane.
+
+    The dashboard is recognised by the command it runs, not by its pane
+    registry entry: ``_add_status_pane`` swallows a failed split, but it
+    also swallows a failed *registration* of a split that did happen, and
+    a second dashboard must not be added beside that one.  Per window, not
+    per session: another PR's QA run in the same session has its own
+    dashboard in its own window.
+    """
+    from pm_core import tmux as tmux_mod
+
+    win = tmux_mod.find_window_by_name(session, window_name)
+    if not win:
+        return False
+    return any("qa_status.py" in cmd for cmd in
+               tmux_mod.window_pane_start_commands(session, win["index"]))
+
+
+def _recreate_qa_window_if_missing(session: str, window_name: str,
+                                   workdir_path: str | None,
+                                   status_path) -> None:
+    """Restore a resumed run's main QA window and its dashboard (QA S78).
+
+    A run is resumed in this session when the session that launched it is
+    gone, so its windows went with that server.  ``_poll_tmux_verdicts``
+    relaunches the dead scenario windows, but nothing recreated the main QA
+    window: the run came back with no planner slot and no status dashboard.
+    ``_ensure_qa_main_pane`` already exists for exactly this ("windows
+    recreated after the previous one was killed"), so create the window and
+    split the dashboard beside its main pane.
+
+    An ordinary restart keeps both, and splitting the dashboard into a
+    window that already has one would leave two.  The check is therefore
+    per *pane*, not per window: a window whose dashboard split failed gets
+    one on the next resume, while a live dashboard is left alone.
+    """
+    try:
+        if _qa_status_pane_live(session, window_name):
+            return
+        main_pane = _ensure_qa_main_pane(session, window_name, workdir_path)
+        if main_pane:
+            _add_status_pane(session, main_pane, status_path)
+    except Exception:
+        # Never fail the resumed run because its window could not be drawn;
+        # the verdict polling below still drives it.
+        _log.exception("Failed to recreate QA window %s for %s",
+                       window_name, session)
 
 
 def run_qa_sync(
@@ -6139,6 +6301,7 @@ def _execute_and_finalize(
     concurrency_cap: int,
     queued_scenarios: list[QAScenario],
     notify: Callable[[], None],
+    ensure_window: bool = False,
 ) -> QALoopState:
     """Poll scenarios for verdicts, aggregate, persist, and finalize.
 
@@ -6161,6 +6324,17 @@ def _execute_and_finalize(
     new result instead of leaving the run dead.
     """
     queued_indices = {s.index for s in queued_scenarios}
+
+    if ensure_window:
+        # A run is resumed here because the session that launched it is gone
+        # (its windows went with that server) or its window was killed: the
+        # main QA window is then missing, and nothing else recreates it —
+        # ``_poll_tmux_verdicts`` only relaunches the scenario windows — so
+        # the user loses the planner slot and the status dashboard.  An
+        # ordinary restart keeps the window, so this must not split a second
+        # dashboard into it.
+        _recreate_qa_window_if_missing(session, window_name, workdir_path,
+                                       status_path)
 
     # Snapshot resumable state before the blocking poll so an early
     # restart can pick the run back up.
@@ -6341,7 +6515,8 @@ def _execute_and_finalize(
 
         if not _hold_for_follow_up(
                 state, pm_root, status_path,
-                use_containers, concurrency_cap, queued_indices):
+                use_containers, concurrency_cap, queued_indices,
+                session=session):
             # Stopped, the PR left qa, or nothing is waiting any more.
             # Persist the settled wait (e.g. the last attempt dropped) so a
             # restart does not re-adopt a hold that is already over.
@@ -6410,7 +6585,10 @@ def _resume_session(state: QALoopState) -> str | None:
     its PR arrives by a pull (S41).  Its workers, planner window and any
     relaunch, verifier or finalizer pane belong in that session: looking
     for its qa window in this one skipped the finalizer.  This TUI's
-    session is used when the run's session is gone (its windows with it).
+    session is used when the run's session is gone (its windows with it);
+    a session alive on *another* server never reaches here — the TUI scan
+    leaves that run to the clone hosting it (see
+    :func:`run_session_live_elsewhere`).
     """
     own = get_pm_session()
     run_session = _live_other_session(state.session_tag)
@@ -6423,12 +6601,61 @@ def _resume_session(state: QALoopState) -> str | None:
 
 def _live_other_session(session_tag: str | None) -> str | None:
     """``pm-<session_tag>`` when it is a live tmux session other than this
-    process's pm session (a run launched from another clone), else None."""
+    process's pm session (a run launched from another clone), else None.
+
+    Only a session on *this* process's server can be driven from here; a
+    session on another server is handled by
+    :func:`run_session_live_elsewhere` (the TUI leaves that run alone).
+    """
     if not session_tag or not launched_elsewhere(session_tag):
         return None
     from pm_core import tmux as tmux_mod
     run_session = f"pm-{session_tag}"
     return run_session if tmux_mod.session_exists(f"={run_session}") else None
+
+
+def run_session_live_elsewhere(session_tag: str | None) -> bool:
+    """True when the run's pm session is alive on a server this one cannot drive.
+
+    Every pm session has its own tmux server (pr-073910f), so a run
+    launched from another clone's session is invisible to
+    :func:`_live_other_session`, which asks the *current* server.  The
+    run's scenario panes still exist over there: resuming it here would
+    poll this session for windows that are not here and end the other
+    clone's run with a bogus result, and re-launching them would run the
+    scenarios twice.  The clone whose session hosts the run resumes it
+    when its TUI restarts.
+
+    A session that is gone everywhere is *not* "elsewhere": its windows
+    went with it, so the run is resumed here (see :func:`_resume_session`).
+
+    The lookup is implicit (the name comes from the snapshot's tag), so it
+    requires a socket this user owns (``find_session_server``'s
+    *owned_only*), like every other implicit lookup.  The run was launched
+    by this user's pm, whose server binds a socket this user owns, and
+    that holds for a shared session too: its sharing user is the one whose
+    ``~/.pm`` holds the snapshot.  Without the check, a socket another user
+    planted under the run's deterministic name in the world-writable socket
+    directory was connected to, and its answer made this TUI leave the run
+    alone instead of resuming it (review-loop b48f i20).
+    """
+    if not session_tag:
+        return False
+    from pm_core import tmux as tmux_mod
+    run_session = f"pm-{session_tag}"
+    try:
+        # Reachable from this process: the same server (a legacy
+        # pre-isolation session, or this TUI's own).
+        if tmux_mod.session_exists(f"={run_session}"):
+            return False
+        socket_path, _on_private = tmux_mod.find_session_server(
+            run_session, owned_only=True)
+    except OSError:
+        # tmux missing/unexecutable: nothing can be driven, and the resume
+        # degrades to this TUI's own session as it did before (the same
+        # contract every other probe in this area follows).
+        return False
+    return socket_path is not None
 
 
 def launched_elsewhere(session_tag: str | None) -> bool:
@@ -6575,6 +6802,7 @@ def _resume_qa_sync(
         concurrency_cap=concurrency_cap,
         queued_scenarios=queued_scenarios,
         notify=_notify,
+        ensure_window=True,
     )
 
 

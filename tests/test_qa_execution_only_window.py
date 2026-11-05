@@ -8,8 +8,10 @@ its pane — no status pane, no qa-planner registration, and the window was
 gone again by the time the run finished.
 """
 
+import shlex
 import subprocess
 import time
+from pathlib import Path
 from unittest.mock import patch
 
 
@@ -73,3 +75,87 @@ class TestExecutionOnlyMainPane:
             for pane, role, _cmd in call.args[2]
         ]
         assert registered == [("%9", "qa-planner"), ("%10", "qa-status")]
+
+    def test_status_command_survives_a_space_in_the_session_name(self):
+        """A repo directory may contain a space, and qa_status takes 2 args.
+
+        The command runs through ``sh -c``; unquoted, ``pm-my repo-<hash>``
+        split into extra argv elements and the script exited with its usage
+        line, so no dashboard appeared for such a project.
+        """
+        session = "pm-my repo-abc123"
+        with patch("pm_core.tmux.split_pane_at", return_value="%10") as split, \
+                patch("pm_core.tmux.pane_window_id", return_value="@5"), \
+                patch("pm_core.pane_registry.prune_dead_windows",
+                      return_value=[]), \
+                patch("pm_core.pane_registry.load_registry", return_value={}), \
+                patch("pm_core.pane_layout.register_and_rebalance"):
+            qa_loop._add_status_pane(session, "%9", "/qa/status.json")
+
+        cmd = split.call_args.args[2]
+        assert shlex.split(cmd) == [
+            "python3",
+            str(Path(qa_loop.__file__).parent / "qa_status.py"),
+            "/qa/status.json",
+            session,
+        ]
+
+
+class TestResumedRunWindow:
+    """QA S78: a run resumed because its session is gone gets its window back.
+
+    The scenario windows are relaunched by the verdict poll, but nothing
+    recreated the main QA window, so a resumed run had no planner slot and
+    no status dashboard.
+    """
+
+    @patch("pm_core.qa_loop._add_status_pane")
+    @patch("pm_core.qa_loop._ensure_qa_main_pane", return_value="%9")
+    @patch("pm_core.tmux.find_window_by_name", return_value=None)
+    def test_missing_window_is_recreated_with_the_dashboard(
+            self, mock_find, mock_main, mock_status):
+        qa_loop._recreate_qa_window_if_missing(
+            "pm-test", "qa-pr-001", "/wd", "/qa/status.json")
+
+        mock_main.assert_called_once_with("pm-test", "qa-pr-001", "/wd")
+        mock_status.assert_called_once_with(
+            "pm-test", "%9", "/qa/status.json")
+
+    @patch("pm_core.qa_loop._add_status_pane")
+    @patch("pm_core.qa_loop._ensure_qa_main_pane")
+    @patch("pm_core.tmux.window_pane_start_commands",
+           return_value=["python3 /workspace/pm_core/qa_status.py "
+                         "/qa/status.json pm-test"])
+    @patch("pm_core.tmux.find_window_by_name",
+           return_value={"id": "@5", "index": "3", "name": "qa-pr-001"})
+    def test_existing_window_with_a_dashboard_is_left_alone(
+            self, mock_find, mock_commands, mock_main, mock_status):
+        """An ordinary TUI restart keeps the window and its dashboard; a
+        second dashboard split into it would be wrong."""
+        qa_loop._recreate_qa_window_if_missing(
+            "pm-test", "qa-pr-001", "/wd", "/qa/status.json")
+
+        mock_main.assert_not_called()
+        mock_status.assert_not_called()
+
+    @patch("pm_core.qa_loop._add_status_pane")
+    @patch("pm_core.qa_loop._ensure_qa_main_pane", return_value="%9")
+    @patch("pm_core.tmux.window_pane_start_commands",
+           return_value=["echo 'QA execution'; exec sleep infinity",
+                         "claude --session-id x"])
+    @patch("pm_core.tmux.find_window_by_name",
+           return_value={"id": "@5", "index": "3", "name": "qa-pr-001"})
+    def test_existing_window_without_a_dashboard_gets_one(
+            self, mock_find, mock_commands, mock_main, mock_status):
+        """A failed dashboard split must not be permanent: the window
+        survived, but its dashboard did not, so the next resume adds one."""
+        qa_loop._recreate_qa_window_if_missing(
+            "pm-test", "qa-pr-001", "/wd", "/qa/status.json")
+
+        # Scoped to the QA window: another PR's run has its own dashboard
+        # in its own window, so a window-wide (or session-wide) scan would
+        # see it and skip this window's missing dashboard.
+        mock_commands.assert_called_once_with("pm-test", "3")
+        mock_main.assert_called_once_with("pm-test", "qa-pr-001", "/wd")
+        mock_status.assert_called_once_with(
+            "pm-test", "%9", "/qa/status.json")

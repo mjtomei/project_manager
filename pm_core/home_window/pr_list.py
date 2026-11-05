@@ -12,13 +12,15 @@ from __future__ import annotations
 
 import hashlib
 import os
+import shlex
 import signal
 import sys
 import time
-import unicodedata
 from pathlib import Path
 
 from pm_core import tmux as tmux_mod
+from pm_core.paths import char_width as _char_width
+from pm_core.paths import display_width as _display_width
 from pm_core.paths import pm_home
 from pm_core.pr_utils import TERMINAL_PR_STATES
 
@@ -30,7 +32,8 @@ DEFAULT_SIZE = (80, 24)
 
 def _refresh_sentinel(session: str) -> Path:
     """Per-base-session sentinel file: touched by refresh(), polled by the loop."""
-    base = session.split("~")[0]
+    from pm_core.paths import base_session_name
+    base = base_session_name(session)
     runtime = pm_home() / "runtime"
     runtime.mkdir(parents=True, exist_ok=True)
     return runtime / f"home-refresh-{base}"
@@ -52,9 +55,15 @@ class PrListProvider:
             project_root = Path.cwd()
 
         py = sys.executable or "python3"
+        # Both the interpreter path and the session name are shell words:
+        # tmux runs this command through the shell, and the session name is
+        # derived from the repo directory, so it may contain a space.  An
+        # unquoted one split into extra argv entries, argparse rejected
+        # them, and the home window showed its usage line instead of the
+        # PR list.  ``shlex.quote`` leaves ordinary values bare.
         cmd = (
-            f"{py} -m pm_core.home_window.pr_list "
-            f"--session {session}"
+            f"{shlex.quote(py)} -m pm_core.home_window.pr_list "
+            f"--session {shlex.quote(session)}"
         )
         tmux_mod.new_window(
             session, WINDOW_NAME, cmd, str(project_root), switch=False,
@@ -82,19 +91,6 @@ def _terminal_size() -> tuple[int, int]:
         return (ts.columns, ts.lines)
     except OSError:
         return DEFAULT_SIZE
-
-
-def _char_width(ch: str) -> int:
-    # Display columns a single character occupies in a terminal.
-    # Combining marks add nothing; East-Asian Wide/Fullwidth glyphs
-    # (including the PR status emoji like ⏳/🔨/👀) take two cells.
-    if unicodedata.combining(ch):
-        return 0
-    return 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
-
-
-def _display_width(s: str) -> int:
-    return sum(_char_width(c) for c in s)
 
 
 def _truncate(line: str, width: int) -> str:

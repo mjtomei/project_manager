@@ -1,6 +1,7 @@
 """QA instruction library CLI commands."""
 
 import os
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -315,14 +316,18 @@ def qa_edit(instruction_id: str, category: str | None):
 # ``PM_SHARE_MODE`` comes from a ``pm session --global``/``--group`` session:
 # ``get_session_tag`` mixes it into every project's hash, so ``pm tui view``
 # (and other cwd lookups) in the test's own project would miss that
-# project's session and fall back to the user's TUI (QA S16, R7/R34).  Host
-# mode still shares the user's tmux server (``PM_TMUX_SOCKET`` is kept); the
-# session's own pm commands just behave as they do outside tmux.  Without
-# ``TMUX`` a plain ``tmux`` command ignores that socket and reaches the
-# default server, so the prompt names the socket (``tmux_socket``).
+# project's session and fall back to the user's TUI (QA S16, R7/R34).
+#
+# ``PM_TMUX_SOCKET`` names the tmux server of the user's live pm session.
+# Every pm session has its own server (pr-073910f), so keeping that pointer
+# would hand the run an ambient address for a session it must never drive
+# (a plain ``tmux -S $PM_TMUX_SOCKET`` would reach the user's panes).  The
+# run's own ``pm`` commands resolve each session's socket from its name,
+# and filing with ``pm -C <registry> pr add`` still finds the user's TUI
+# (``_project_sessions``/``_select_session_socket``) and reloads it.
 _REGRESSION_SCRUBBED_ENV = ("PM_PROJECT", "PM_SESSION", "TMUX", "TMUX_PANE",
                             "PM_POPUP_SESSION", "PM_IN_TMUX_SESSION",
-                            "PM_SHARE_MODE")
+                            "PM_SHARE_MODE", "PM_TMUX_SOCKET")
 
 # Push URL given to a regression clone's ``origin``.  The QA scenario clone
 # helper points ``origin`` at the real upstream, and on the host (container
@@ -545,10 +550,6 @@ def qa_regression(test_id: str, file_prs: bool, branch: str | None,
             captures_dir=captures_in,
             file_findings=file_prs,
             registry=registry_in if file_prs else None,
-            # Host mode keeps it (and drops TMUX): name it so the
-            # session's plain tmux commands reach the same server as pm.
-            tmux_socket=(None if use_containers
-                         else os.environ.get("PM_TMUX_SOCKET")),
         )
         if use_containers:
             # This run's captures dir mounts at /pm-captures (creating it
@@ -1031,10 +1032,26 @@ def qa_launch(item_id: str, target_window: str | None):
         click.echo("pm qa launch requires tmux.", err=True)
         raise SystemExit(1)
 
-    session = tmux_mod.get_session_name()
-    if not session:
+    raw_session = tmux_mod.get_session_name()
+    if not raw_session:
         click.echo("No tmux session detected.", err=True)
         raise SystemExit(1)
+    # tmux reports the most recently created session of a shared window for
+    # a pane, so inside a pm session this is normally the grouped
+    # ``base~1`` (and a user's own view, however it is named, while that
+    # view's client is the most recently active one — S118/S121/S124).
+    # The prompt names the session for ``pm tui view/send -s`` and for the
+    # pane-registry path, and both are keyed by the *base* pm session: a
+    # view name resolved to no registry (and `pm tui view -s <view>`
+    # failed), while ``base~1`` pointed at a registry file that does not
+    # exist.  Same resolution as ``_get_current_pm_session``.
+    from pm_core import pane_registry
+    try:
+        session = pane_registry.pm_session_name(raw_session)
+    except OSError:
+        # tmux vanished between the two probes; the plain base name is the
+        # best answer available (same degrade as helpers._pm_session_of).
+        session = pane_registry.base_session_name(raw_session)
 
     env: dict[str, str] = {}
     if category == "regression":
@@ -1046,16 +1063,22 @@ def qa_launch(item_id: str, target_window: str | None):
         sess_label = os.environ.get("PM_SESSION") or session
         title = item.get("title", qa_id)
         body = item.get("body", "")
+        # Same shell-quoting rule as the regression builder: the session
+        # name is derived from the repo directory, so the copyable example
+        # commands must quote it as one shell word (a space would otherwise
+        # split it into extra arguments).  shlex.quote leaves ordinary
+        # names bare; ``~`` stays outside the quotes.
+        q_session = shlex.quote(sess_label)
         full_prompt = f"""\
 ## Session Context
 
 You are running a QA instruction against tmux session: {sess_label}
 
 To interact with this session, use commands like:
-- pm tui view -s {sess_label}
-- pm tui send <keys> -s {sess_label}
-- tmux list-panes -t {sess_label} -F "#{{pane_id}} #{{pane_width}}x#{{pane_height}} #{{pane_current_command}}"
-- cat ~/.pm/pane-registry/{sess_label}.json
+- pm tui view -s {q_session}
+- pm tui send <keys> -s {q_session}
+- tmux list-panes -t {q_session} -F "#{{pane_id}} #{{pane_width}}x#{{pane_height}} #{{pane_current_command}}"
+- cat ~/.pm/pane-registry/{q_session}.json
 
 ## QA Instruction: {title}
 

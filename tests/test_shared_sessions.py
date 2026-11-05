@@ -209,8 +209,11 @@ class TestRunShellLogged:
 # ---------------------------------------------------------------------------
 
 class TestTmuxCmd:
-    def test_basic_command(self):
+    def test_basic_command(self, monkeypatch):
         """Without socket, builds plain tmux command."""
+        # Every pm pane exports PM_TMUX_SOCKET, so tests run from one would
+        # otherwise see a -S flag here.
+        monkeypatch.delenv("PM_TMUX_SOCKET", raising=False)
         cmd = tmux._tmux_cmd("has-session", "-t", "mysess")
         assert cmd == ["tmux", "has-session", "-t", "mysess"]
 
@@ -614,6 +617,95 @@ class TestConnectScreen:
         assert s1._command != s2._command
 
 
+def _render_connect_modal(command: str, width: int):
+    """Render ``ConnectScreen`` at ``width`` columns.
+
+    Returns ``(container content width, command label width, rendered command
+    lines)``.  The modal is a real Textual screen driven headlessly, so this
+    exercises the CSS that decides whether the command fits or wraps.
+    """
+    import asyncio
+
+    from textual.app import App
+    from textual.widgets import Label
+
+    from pm_core.tui.screens import ConnectScreen
+
+    class _App(App):
+        def on_mount(self) -> None:
+            self.push_screen(ConnectScreen(command))
+
+    async def run():
+        app = _App()
+        async with app.run_test(size=(width, 24)) as pilot:
+            await pilot.pause()
+            container = app.screen.query_one("#connect-container")
+            label = app.screen.query_one("#connect-command", Label)
+            lines = [label.render_line(i).text for i in range(label.size.height)]
+            return container.size.width, label.size.width, lines
+
+    return asyncio.run(run())
+
+
+class TestConnectScreenLayout:
+    """The popup must show the whole command, not clip it at the border.
+
+    The socket-addressed form (``tmux -S /tmp/pm-sessions/pm-<tag> attach``) is
+    longer than the old ``tmux attach -t <session>``; with the fixed 70-cell
+    modal it was cut off two characters from the end for an ordinary session
+    name, so the popup did not show the command it told the user to run.
+    """
+
+    CMD = "tmux -S /tmp/pm-sessions/pm-qa12-a-1793500549-56403dbe attach"
+
+    @staticmethod
+    def _squashed(text: str) -> str:
+        # Wrapping breaks at (or drops) the single separating spaces; compare
+        # the characters themselves.
+        return text.replace(" ", "")
+
+    def _assert_fully_visible(self, container_width, label_width, lines):
+        """The label's whole box fits inside the container — nothing clips.
+
+        ``#connect-command`` carries ``padding: 1 2``, which sits outside its
+        content box; when content + padding is wider than the container the
+        compositor cuts the tail off the command.
+        """
+        assert lines, "the modal rendered no command line"
+        assert label_width + 4 <= container_width, (label_width, container_width, lines)
+        assert self._squashed("".join(lines)) == self._squashed(self.CMD)
+
+    def test_shows_the_whole_socket_addressed_command(self):
+        container, label, lines = _render_connect_modal(self.CMD, 80)
+        assert len(lines) == 1, lines
+        self._assert_fully_visible(container, label, lines)
+
+    def test_wraps_instead_of_clipping_on_a_narrow_terminal(self):
+        container, label, lines = _render_connect_modal(self.CMD, 60)
+        assert len(lines) > 1, lines
+        self._assert_fully_visible(container, label, lines)
+
+    def test_short_command_keeps_the_historical_width(self):
+        # 70 cells outside the border (2) and the container padding (4).
+        container, label, lines = _render_connect_modal("tmux -S /tmp/x attach", 120)
+        assert container == 64
+        assert label <= container
+        assert lines == ["tmux -S /tmp/x attach"]
+
+    def test_shows_brackets_in_the_command_verbatim(self):
+        """A repo directory name may contain ``[`` — the popup must show it.
+
+        The command label rendered markup by default, so a ``[repo]`` in
+        the socket path was parsed as a style tag and silently dropped:
+        the popup displayed ``pm-my-repo-abc12345`` for the session
+        ``pm-my[repo]-abc12345``, i.e. a command that attaches to (and, for
+        a missing socket, creates) a different session.
+        """
+        cmd = "tmux -S /tmp/pm-sessions/pm-my[repo]-abc12345 attach"
+        container, label, lines = _render_connect_modal(cmd, 120)
+        assert lines == [cmd]
+
+
 # ---------------------------------------------------------------------------
 # tmux: grant_server_access
 # ---------------------------------------------------------------------------
@@ -698,7 +790,7 @@ class TestListClientsInGroup:
     def test_returns_clients_in_group(self, _mock_grouped, mock_run):
         mock_run.return_value = MagicMock(
             returncode=0,
-            stdout="/dev/pts/0 base~1\n/dev/pts/1 base~2\n/dev/pts/2 other-session\n",
+            stdout="/dev/pts/0:base~1\n/dev/pts/1:base~2\n/dev/pts/2:other-session\n",
         )
         clients = tmux.list_clients_in_group("base")
         assert len(clients) == 2
@@ -710,7 +802,7 @@ class TestListClientsInGroup:
     def test_includes_base_session_clients(self, _mock_grouped, mock_run):
         mock_run.return_value = MagicMock(
             returncode=0,
-            stdout="/dev/pts/0 base\n",
+            stdout="/dev/pts/0:base\n",
         )
         clients = tmux.list_clients_in_group("base")
         assert len(clients) == 1
@@ -728,7 +820,7 @@ class TestListClientsInGroup:
     def test_excludes_unrelated_sessions(self, _mock_grouped, mock_run):
         mock_run.return_value = MagicMock(
             returncode=0,
-            stdout="/dev/pts/0 unrelated\n/dev/pts/1 base~1\n",
+            stdout="/dev/pts/0:unrelated\n/dev/pts/1:base~1\n",
         )
         clients = tmux.list_clients_in_group("base")
         assert len(clients) == 1
@@ -750,6 +842,52 @@ class TestListClientsInGroup:
         clients = tmux.list_clients_in_group("base")
         assert clients == []
 
+    @patch("pm_core.tmux.subprocess.run")
+    @patch("pm_core.tmux.sessions_in_group",
+           return_value=["base", "base~1", "myview"])
+    def test_includes_a_users_own_view(self, _mock_members, mock_run):
+        """A view of the session is part of the group, whatever its name.
+
+        ``pm session --disconnect-others`` detaches these clients to
+        reclaim the shared window size; a view client left attached still
+        constrains it, so enumerating only ``base~N`` by name is not enough
+        (S118/S121/S124).
+        """
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="/dev/pts/0:myview\n/dev/pts/1:unrelated\n",
+        )
+        clients = tmux.list_clients_in_group("base")
+        assert clients == [{"tty": "/dev/pts/0", "session": "myview"}]
+
+    @patch("pm_core.tmux.subprocess.run")
+    @patch("pm_core.tmux.sessions_in_group",
+           return_value=["base", " base-lead", "base-trail "])
+    def test_keeps_edge_spaces_in_the_session_name(
+            self, _mock_members, mock_run):
+        """A whitespace split (or a ``strip``) lost the edge space and the client.
+
+        A repo directory may be named with a leading or trailing space, so
+        the session name keeps one (``paths.tmux_safe_name`` only rewrites
+        what tmux rewrites).  ``split(None, 1)`` collapsed a leading space
+        away, and stripping the output trimmed a trailing one, so the
+        client was never matched to the group and ``--disconnect-others``
+        left it attached — the field separator is ``:`` and the rows are
+        split without ``strip()`` for that reason.
+        """
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="/dev/pts/0: base-lead\n"
+                   "/dev/pts/1:base\n"
+                   "/dev/pts/2:base-trail \n",
+        )
+        clients = tmux.list_clients_in_group("base")
+        assert clients == [
+            {"tty": "/dev/pts/0", "session": " base-lead"},
+            {"tty": "/dev/pts/1", "session": "base"},
+            {"tty": "/dev/pts/2", "session": "base-trail "},
+        ]
+
 
 # ---------------------------------------------------------------------------
 # tmux: detach_client
@@ -759,7 +897,8 @@ class TestDetachClient:
     """Verify detach_client sends the correct tmux command."""
 
     @patch("pm_core.tmux.subprocess.run")
-    def test_detaches_by_tty(self, mock_run):
+    def test_detaches_by_tty(self, mock_run, monkeypatch):
+        monkeypatch.delenv("PM_TMUX_SOCKET", raising=False)
         tmux.detach_client("/dev/pts/3")
         cmd = mock_run.call_args[0][0]
         assert cmd == ["tmux", "detach-client", "-t", "/dev/pts/3"]

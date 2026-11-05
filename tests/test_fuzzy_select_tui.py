@@ -208,6 +208,7 @@ async def test_pr_select_via_command_bar_typing(project):
 
 @pytest.mark.parametrize("query, expected", [
     ("pr-942aa21", "pr-942aa21"),
+    ("942aa21", "pr-942aa21"),
     ("#125", "pr-942aa21"),
     ("125", "pr-942aa21"),
     ("PR-333CCCC", "pr-333cccc"),

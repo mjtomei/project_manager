@@ -7,24 +7,25 @@ enables testing changes in PR workdirs without reinstalling.
 The wrapper also checks ~/.pm/sessions/ for session overrides, allowing
 pm meta sessions to redirect the installation to their working directory.
 """
-import hashlib
 import os
 import sys
 from pathlib import Path
 
 
 def _get_session_tag() -> str | None:
-    """Generate session tag from current git repository."""
-    from pm_core.git_ops import get_git_root, get_github_repo_name
+    """Session tag for the current git repository.
 
-    git_root = get_git_root()
-    if not git_root:
-        return None
+    Delegates to ``paths.get_session_tag``: the override and pm_root
+    lookups must use exactly the tag ``pm session`` and ``pm meta`` wrote
+    them under (tmux-safe repo name, share-mode hash and all).  Importing
+    it here is no earlier than before: ``git_ops`` already imports
+    ``pm_core.paths`` from the same copy, and ``_run_cli`` purges both
+    once another pm_core is chosen.  A hand copy here drifted once
+    (review-loop 68bd i1: it left PM_SHARE_MODE out of the hash).
+    """
+    from pm_core.paths import get_session_tag
 
-    repo_name = get_github_repo_name(git_root) or git_root.name
-    path_hash = hashlib.md5(str(git_root).encode()).hexdigest()[:8]
-
-    return f"{repo_name}-{path_hash}"
+    return get_session_tag()
 
 
 def _find_active_override() -> str | None:
@@ -83,6 +84,35 @@ def _mark_tmux_session(env: dict) -> None:
         env["PM_IN_TMUX_SESSION"] = "1"
 
 
+def _mark_tmux_socket(env: dict) -> None:
+    """Export the private pm tmux socket when running under one.
+
+    Panes inherit ``PM_TMUX_SOCKET`` from the session environment, but
+    ``run-shell`` hooks and ``display-popup`` bodies only reliably inherit
+    ``$TMUX``.  Resolving it here — before any pm command runs — makes
+    every tmux call inside hooks/popups target the session's own server.
+    Ordinary (non-pm) tmux sessions are left alone.
+
+    The socket directory comes from ``paths`` like the session tag does
+    (see ``_get_session_tag``; ``_run_cli`` purges it once another pm_core
+    is chosen).  The ``$TMUX`` parse repeats
+    ``tmux.socket_path_from_tmux_env`` rather than importing it: importing
+    ``pm_core.tmux`` configures its ``pm.tmux`` logger, and the purge drops
+    modules but not ``logging``'s loggers, so the chosen pm_core would
+    inherit a handler set up by the copy it replaced.
+    """
+    if env.get("PM_TMUX_SOCKET"):
+        return
+    raw = env.get("TMUX")
+    if not raw:
+        return
+    from pm_core.paths import SHARED_SOCKET_DIR
+
+    path = raw.rsplit(",", 2)[0]
+    if path and os.path.dirname(path) == str(SHARED_SOCKET_DIR):
+        env["PM_TMUX_SOCKET"] = path
+
+
 def _is_session_ipc_command(argv: list[str]) -> bool:
     """Return True for hidden commands that drive session-level IPC.
 
@@ -110,7 +140,14 @@ def _ipc_session_tag(argv: list[str]) -> str | None:
     if len(pos) < 2:
         return None
     session = pos[1]
-    base = session.split("~", 1)[0]
+    # Only a *numeric* ``~N`` is a grouped suffix: a session name derived
+    # from a repo directory may contain ``~`` itself, and splitting at the
+    # first one would resolve another session's tag.  The shared
+    # definition is used, not a copy: ``main`` has already imported
+    # ``pm_core.paths`` (through ``_find_active_override``) by now.
+    from pm_core.paths import base_session_name
+
+    base = base_session_name(session)
     if base.startswith("pm-"):
         return base[3:]
     return None
@@ -176,6 +213,7 @@ def main():
     4. Installed pm_core.
     """
     _mark_tmux_session(os.environ)
+    _mark_tmux_socket(os.environ)
     is_ipc = _is_session_ipc_command(sys.argv)
 
     selected_root: str | None = None
@@ -221,6 +259,7 @@ def main_for_session(session_tag: str):
     every other invocation goes through :func:`main`.
     """
     _mark_tmux_session(os.environ)
+    _mark_tmux_socket(os.environ)
 
     selected_root: str | None = None
     chosen_via: str = "dispatcher"

@@ -126,7 +126,11 @@ def test_views_named_like_pm_or_with_tilde_resolve_through_their_group(tmux_serv
 
 def _view_registry(t, tmp_path, monkeypatch, view):
     """pm-proj-abc with a two-pane window registered, plus a grouped *view*
-    that is the session pm sees (PM_POPUP_SESSION, as from a key binding)."""
+    that is the session pm sees (PM_POPUP_SESSION, as from a key binding).
+
+    The kept pane is registered as the TUI, as every pm session has one:
+    a pane close in a session whose registry lists no TUI and that runs
+    none respawns it (QA S50)."""
     import json
     from pm_core import pane_registry
     monkeypatch.setenv("HOME", str(tmp_path))
@@ -137,7 +141,7 @@ def _view_registry(t, tmp_path, monkeypatch, view):
     t("new-session", "-d", "-t", "pm-proj-abc", "-s", view)
     pane_registry.registry_path("pm-proj-abc").write_text(json.dumps({
         "session": "pm-proj-abc", "windows": {wid: {"panes": [
-            {"id": keep, "role": "review-claude", "order": 0, "cmd": "x"},
+            {"id": keep, "role": "tui", "order": 0, "cmd": "pm _tui"},
             {"id": gone, "role": "review-diff", "order": 1, "cmd": "y"}],
             "user_modified": False}}}))
     monkeypatch.setenv("TMUX", "/x,1,0")
@@ -162,6 +166,27 @@ def test_pane_closed_from_a_grouped_view_updates_the_pm_registry(
     assert [p["id"] for p in data["windows"][wid]["panes"]] == [keep]
     assert sorted(p.name for p in pane_registry.registry_dir().glob("*.json")) == [
         "pm-proj-abc.json"]
+
+
+def test_pane_closed_uses_the_hook_session_name_over_a_stale_tmux_pane(
+        tmux_server, monkeypatch, tmp_path):
+    """The after-kill-pane hook passes ``#{session_name}``; ``$TMUX_PANE``
+    can name a pane that is not on this server — the pane the hook reports
+    has just been killed, and a server started from inside an ambient tmux
+    inherits that tmux's pane id.  A targeted ``display-message`` then
+    returns an empty name, so the hook's own session name must win."""
+    from click.testing import CliRunner
+    from pm_core import pane_registry
+    from pm_core.cli import cli
+    wid, keep, gone = _view_registry(tmux_server, tmp_path, monkeypatch, "myview")
+    monkeypatch.setenv("TMUX_PANE", "%999")  # no such pane on this server
+    assert tmux_server("display-message", "-p", "-t", "%999",
+                       "#{session_name}") == ""
+    tmux_server("kill-pane", "-t", gone)
+    r = CliRunner().invoke(cli, ["_pane-closed", "myview"])
+    assert r.exit_code == 0, r.output
+    data = pane_registry.load_registry("pm-proj-abc")
+    assert [p["id"] for p in data["windows"][wid]["panes"]] == [keep]
 
 
 @pytest.mark.parametrize("view", ["myview", "pm-laptop", "my~view"])

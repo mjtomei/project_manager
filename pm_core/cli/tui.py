@@ -128,9 +128,15 @@ TUI_MAX_FRAMES = 50
 
 
 def _tui_history_file(session: str) -> Path:
-    """Get the TUI history file for a specific session."""
+    """Get the TUI history file for a specific session.
+
+    Keyed by the base session (``paths.base_session_name``: only a numeric
+    ``~N`` is a grouped suffix), so a session name containing ``~`` is not
+    truncated onto another session's history file.
+    """
+    from pm_core.paths import base_session_name
     TUI_HISTORY_DIR.mkdir(parents=True, exist_ok=True)
-    return TUI_HISTORY_DIR / f"{session.split('~')[0]}.json"
+    return TUI_HISTORY_DIR / f"{base_session_name(session)}.json"
 
 
 def _capture_tui_frame(pane_id: str) -> str:

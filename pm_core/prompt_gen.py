@@ -1,5 +1,7 @@
 """Claude prompt generation for PR work sessions."""
 
+import shlex
+
 from pm_core import store, notes
 from pm_core.backend import get_backend
 from pm_core.paths import get_global_setting
@@ -98,13 +100,18 @@ def tui_section(session_name: str) -> str:
     Used by prompt_gen internally and by other modules (guide, plan, meta)
     that construct prompts for Claude sessions running alongside the TUI.
     """
+    # The copyable commands below must survive a session name with a space
+    # (it comes from the repo directory): quote it as one shell word.
+    # shlex.quote leaves ordinary names bare, so the section is unchanged
+    # for them.
+    q_session = shlex.quote(session_name)
     return f"""
 ## Interacting with the TUI
 
-The base pm tmux session is `{session_name}`. Use `-s {session_name}` with pm tui \
+The base pm tmux session is `{session_name}`. Use `-s {q_session}` with pm tui \
 commands so they target the correct session even from workdir clones:
-- `pm tui view -s {session_name}` — capture and view the current TUI screen
-- `pm tui send <keys> -s {session_name}` — send keystrokes to the TUI (e.g. `pm tui send j` to move down)
+- `pm tui view -s {q_session}` — capture and view the current TUI screen
+- `pm tui send <keys> -s {q_session}` — send keystrokes to the TUI (e.g. `pm tui send j` to move down)
 
 **Do not** run commands that spawn new Claude sessions yourself (e.g. `pm pr start`, \
 `pm pr done`, `pm plan add`, `pm plan breakdown`, `pm plan review`). These must be \
@@ -1728,6 +1735,12 @@ def generate_discovery_supervisor_prompt(data: dict, session_name: str | None = 
     base_branch = data.get("project", {}).get("base_branch", "master")
 
     tui_block = tui_section(session_name) if session_name else ""
+    # Copyable ``tmux list-panes`` target: the session name comes from the
+    # repo directory and may contain a space, so quote the whole
+    # ``session:window`` target as one shell word, as ``tui_section`` does
+    # for its ``-s`` examples (shlex.quote leaves ordinary names bare).
+    discovery_target = (shlex.quote(f"{session_name}:discovery")
+                        if session_name else "<session>:discovery")
 
     general_notes_block = ""
     watcher_specific_block = ""
@@ -1792,7 +1805,7 @@ launched from this watcher run as additional panes in that same window. List
 panes:
 
 ```
-tmux list-panes -t {session_name or "<session>"}:discovery -F "#{{pane_id}} #{{pane_current_command}} #{{pane_start_command}}"
+tmux list-panes -t {discovery_target} -F "#{{pane_id}} #{{pane_current_command}} #{{pane_start_command}}"
 ```
 
 A regression-test pane's start command contains `qa regression <id>`, naming

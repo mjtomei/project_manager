@@ -15,9 +15,11 @@ import pwd
 import logging
 import os
 import shlex
+import stat
 import subprocess
 import tempfile
 import time
+import unicodedata
 from pathlib import Path
 
 # Cache for session tags to avoid repeated subprocess calls
@@ -225,11 +227,91 @@ def sessions_dir() -> Path:
     return d
 
 
+# A ``$`` that tmux escapes when the next character is one of these.
+_TMUX_DOLLAR_ESCAPED_BEFORE = frozenset(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_{")
+
+# Characters ``str.splitlines()`` treats as a line boundary but that are not
+# ASCII control characters, so the check below would keep them.  tmux keeps
+# them in a session name too, but every tmux listing is read back line by
+# line (``list-sessions``, ``list-panes -a``, …) with ``splitlines``, so a
+# name containing one would be parsed as two records: ``pm session list``
+# dropped a live session, and the group/pane scans mis-parsed their rows.
+# Made ``_`` like the characters tmux itself rewrites.
+_SPLITLINES_SEPARATORS = frozenset("\x85\u2028\u2029")
+
+
+def tmux_safe_name(name: str) -> str:
+    """Return *name* with every character tmux rewrites in a session name made ``_``.
+
+    tmux does not store a session name as given.  ``new-session -s``
+    expands it as a format (``#S``, ``#{...}``, ``##``; ``#(cmd)`` even
+    runs *cmd*), then ``session_check_name`` turns ``.`` and ``:`` into
+    ``_``, and its vis encoding backslash-escapes ``\\``, ASCII control
+    characters, invalid UTF-8 and a ``$`` followed by an ASCII letter,
+    ``_`` or ``{`` (so ``$HOME`` is stored as ``\\$HOME``; ``$$``, ``$(``
+    and ``$1`` are kept).  A session name pm
+    computed from a repo directory such as ``my $HOME repo`` or ``next.js``
+    then never matched the name tmux reported: ``pm session`` created the
+    server, failed with "Failed to detect TUI pane after session
+    creation." and a second ``pm session`` died with "duplicate session"
+    (QA S28).  Deriving the tag through this function keeps the name pm
+    computes identical to the one tmux stores, everywhere the tag is used.
+
+    The Unicode line separators ``U+0085``, ``U+2028`` and ``U+2029`` are
+    replaced too, although tmux stores them unchanged: pm reads every tmux
+    listing back with ``str.splitlines()``, which treats them as record
+    boundaries, so such a session would vanish from ``pm session list``
+    and from the cross-server TUI scan (the same "a name must survive the
+    round trip" rule; measured on tmux 3.2a and Python 3.10).
+
+    Valid non-ASCII text (``日本語``, ``²``) is kept: tmux keeps it.  The
+    ``$`` pass runs right to left, so each ``$`` is judged on its
+    successor's final text: ``$$HOME`` becomes ``__HOME``, not ``$_HOME``
+    (which tmux would escape again).  Rules measured on tmux 3.2a.
+    """
+    chars = [
+        "_" if (c in "#.:\\" or ord(c) < 0x20 or c == "\x7f"
+                or 0xDC80 <= ord(c) <= 0xDCFF  # surrogateescape'd bytes
+                or c in _SPLITLINES_SEPARATORS)
+        else c
+        for c in name
+    ]
+    for i in range(len(chars) - 2, -1, -1):
+        if chars[i] == "$" and chars[i + 1] in _TMUX_DOLLAR_ESCAPED_BEFORE:
+            chars[i] = "_"
+    return "".join(chars)
+
+
+def char_width(ch: str) -> int:
+    """Display columns a single character occupies in a terminal.
+
+    Combining marks add nothing; East-Asian Wide/Fullwidth glyphs take two
+    cells.  pm keeps valid non-ASCII text in a session tag
+    (:func:`tmux_safe_name`), so a table that pads by ``len()`` misaligns
+    every row whose name contains such text.
+    """
+    if unicodedata.combining(ch):
+        return 0
+    return 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+
+
+def display_width(text: str) -> int:
+    """Return the number of terminal cells *text* occupies.
+
+    The one definition of display width: ``pm session list`` pads its
+    columns with it, and the home-window renderer truncates with it.
+    """
+    return sum(char_width(ch) for ch in text)
+
+
 def get_session_tag(start_path: Path | None = None, use_github_name: bool = True) -> str | None:
     """Generate session tag from the current git repository.
 
     Format: {repo_name}-{hash} where:
-    - repo_name is GitHub repo name (without org/user) or directory name
+    - repo_name is GitHub repo name (without org/user) or directory name,
+      passed through :func:`tmux_safe_name` so ``pm-{tag}`` is a session
+      name tmux stores unchanged
     - hash is MD5 of the git root path (8 chars)
 
     Works from any subdirectory of the repo.
@@ -266,7 +348,7 @@ def get_session_tag(start_path: Path | None = None, use_github_name: bool = True
         hash_input += "\0" + share_mode
     path_hash = hashlib.md5(hash_input.encode()).hexdigest()[:8]
 
-    tag = f"{repo_name}-{path_hash}"
+    tag = tmux_safe_name(f"{repo_name}-{path_hash}")
     _session_tag_cache[cache_key] = tag
     return tag
 
@@ -800,25 +882,196 @@ def bench_cache_dir() -> Path:
 
 SHARED_SOCKET_DIR = Path("/tmp/pm-sessions")
 
+# Unix domain sockets are limited to ~108 bytes including the NUL.  Keep a
+# little headroom for callers that append nothing but tmux internals.
+# Compared against the *encoded* length (see ``session_socket_path``).
+_SOCKET_PATH_MAX = 100
+
+
+def default_socket_path() -> Path:
+    """Return the socket path of the user's default tmux server.
+
+    tmux puts its default server at ``$TMUX_TMPDIR`` (or ``/tmp``)
+    ``/tmux-<uid>/default``.  Addressing it explicitly is what "the default
+    server" has to mean for pm: the tmux *binary* prefers the socket named
+    by ``$TMUX`` whenever no ``-S`` is given, and inside a pm pane that
+    names the session's private server instead.  Legacy pre-isolation pm
+    sessions are the ones still living on this server.
+
+    A user who starts tmux with ``-L <name>`` keeps the default server
+    unused; pm has no way to guess that name, so those sessions are simply
+    not found (the same as before this change).
+    """
+    base = os.environ.get("TMUX_TMPDIR")
+    # Mirror tmux's own resolution (verified on tmux 3.2a): it realpaths
+    # $TMUX_TMPDIR — so a *relative* value is taken against the client's
+    # cwd — and uses the result only when it is an existing directory.  A
+    # missing value, or one that resolves to nothing or to a non-directory,
+    # makes tmux put the default server at /tmp/tmux-<uid>/default; an
+    # existing non-directory makes it refuse to start a default server at
+    # all ("couldn't create directory … Not a directory"), so the /tmp
+    # answer can only ever find a server started before that value was
+    # exported.  Computing the value verbatim would look for legacy
+    # sessions where no server ever lives — the session would be invisible
+    # to `pm session`, `pm session kill` and `pm session list` (review-loop
+    # b48f i7; the relative case corrected in b48f i9).
+    if base:
+        try:
+            resolved = Path(base).resolve()
+        except (OSError, RuntimeError):
+            # A symlink loop (``RuntimeError`` on Python < 3.13, where
+            # ``Path.resolve`` reports ELOOP that way) or an unreadable
+            # component (``OSError``): treat it like any other value tmux
+            # cannot use.  Catching only ``OSError`` let a loop escape as a
+            # traceback out of `pm session`, `pm session list` and
+            # `pm session kill`.
+            resolved = None
+        if resolved is not None and resolved.is_dir():
+            return resolved / f"tmux-{os.getuid()}" / "default"
+    return Path("/tmp") / f"tmux-{os.getuid()}" / "default"
+
+
+def base_session_name(session: str) -> str:
+    """Strip a grouped-session ``~N`` suffix from *session*.
+
+    The single definition of "the pm base session a tmux session name
+    belongs to".  pm names grouped sessions ``<base>~<number>``
+    (``tmux.next_grouped_session_name`` is the only producer), so only a
+    *numeric* suffix is a grouped session; anything else is part of the
+    name itself.  A session name is derived from the repo directory name,
+    which may contain ``~`` — ``pm-my~repo-abc123`` — and splitting at the
+    first ``~`` truncated it to ``pm-my``.  Every consumer keyed by that
+    name then addressed a different session: the pane registry and pidfile
+    collided, and since every session has its own server, two unrelated
+    projects were also given the *same* socket (``/tmp/pm-sessions/pm-my``)
+    and `pm session list` collapsed them into one row (review-loop b48f
+    i11).
+
+    Idempotent: a base name without a numeric suffix is returned unchanged,
+    so passing an already-resolved name is always safe.
+
+    Only *ASCII* digits count.  ``str.isdigit`` is true for characters such
+    as ``²`` whose ``int()`` raises, and pm never produces a non-ASCII
+    grouped suffix — treating one as grouped would make a hand-made session
+    (or a view) collide with a real base name, and the matching
+    ``int()`` in ``tmux._grouped_suffix`` would crash (review-loop b48f
+    i13).
+    """
+    base, sep, suffix = session.rpartition("~")
+    if sep and suffix.isascii() and suffix.isdigit():
+        return base
+    return session
+
+
+def session_socket_path(session_tag: str) -> Path:
+    """Return the deterministic tmux server socket path for a pm session.
+
+    Every pm session gets its own tmux server.  The path is derived from
+    the session tag so the creating process and any later CLI invocation
+    (``pm session kill``, ``pm session list``, ``pm tui …``) compute the
+    same location without consulting ambient tmux state.
+
+    Very long repo names would exceed the Unix socket path limit, so those
+    fall back to a deterministic hash of the tag.  Discovery never depends
+    on the filename: session names are read from the server itself.
+
+    The limit is in *bytes* (``sun_path``), so the length is measured on
+    the encoded path.  A repo directory named in a non-ASCII script takes
+    two to four bytes per character: counting characters left a
+    30-character Japanese name unhashed at 119 bytes, and tmux refused the
+    socket ("File name too long"), so `pm session` could not start that
+    project at all (review-loop b48f i21).
+    """
+    path = SHARED_SOCKET_DIR / f"pm-{session_tag}"
+    if len(os.fsencode(path)) > _SOCKET_PATH_MAX:
+        digest = hashlib.md5(session_tag.encode()).hexdigest()
+        path = SHARED_SOCKET_DIR / f"pm-{digest}"
+    return path
+
 
 def shared_socket_path(session_tag: str) -> Path:
-    """Return the deterministic socket path for a shared session.
+    """Return the deterministic socket path for a session.
 
-    Both the creating user and joining users compute the same path
-    from the session tag, so they find each other's tmux server.
+    Kept as an alias for :func:`session_socket_path`; shared sessions use
+    the same per-session server scheme as private sessions.
     """
-    return SHARED_SOCKET_DIR / f"pm-{session_tag}"
+    return session_socket_path(session_tag)
 
 
-def ensure_shared_socket_dir() -> None:
+def shared_socket_dir_is_usable() -> bool:
+    """True when ``SHARED_SOCKET_DIR`` is absent or a real directory.
+
+    The read-path counterpart of :func:`ensure_socket_dir`'s refusals: a
+    caller that only *resolves* a socket (discovery, ``pm tui view``,
+    ``pm session kill``) must not follow a symbolic link — or any other
+    non-directory — planted at the well-known path.  ``/tmp`` is
+    world-writable, so another local user can create ``/tmp/pm-sessions``
+    as a link to a directory they own and run a server there under a pm
+    session's own deterministic socket name; probing through the link
+    would then adopt their session, TUI pane included.
+
+    A missing directory is the normal first-run state (nothing has been
+    created yet), so it counts as usable.  An entry that cannot be
+    ``lstat``-ed counts as *not* usable: fail closed rather than connect
+    on a guess.
+    """
+    try:
+        entry = SHARED_SOCKET_DIR.lstat()
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    return stat.S_ISDIR(entry.st_mode)
+
+
+def ensure_socket_dir() -> None:
     """Create /tmp/pm-sessions/ with sticky world-writable permissions.
 
     Uses 1777 (sticky + rwx for all) so any user can create sockets
     but only the owner can delete their own.
+
+    A symbolic link at the path is refused, whatever it resolves to: pm
+    always creates a real directory, so a link was planted there by
+    someone else.  ``/tmp`` is world-writable, so another local user can
+    create ``/tmp/pm-sessions`` as a link to a 1777 directory they own;
+    our ``chmod`` then fails (we are not the target's owner) and the mode
+    fallback below would see *their* directory's mode and accept it.
+    Everything pm binds there would live in a directory whose owner can
+    unlink it — the sticky bit only protects a file from users other than
+    the directory's owner — so a later connection can be hijacked.
+    Inspect the entry itself (``lstat``), like the per-socket ownership
+    check in ``pm session`` does.
     """
+    try:
+        entry = SHARED_SOCKET_DIR.lstat()
+    except FileNotFoundError:
+        entry = None
+    if entry is not None and stat.S_ISLNK(entry.st_mode):
+        raise OSError(
+            f"{SHARED_SOCKET_DIR} is a symbolic link, not a directory")
     SHARED_SOCKET_DIR.mkdir(mode=0o1777, parents=True, exist_ok=True)
-    # Ensure permissions are correct even if directory already existed
-    SHARED_SOCKET_DIR.chmod(0o1777)
+    # Ensure permissions are correct even if directory already existed.
+    try:
+        SHARED_SOCKET_DIR.chmod(0o1777)
+    except OSError:
+        # Another user may own the shared dir, which is fine only when it
+        # already has the mode we need: 1777, i.e. world-writable *and*
+        # sticky.  Without the sticky bit any user could unlink another
+        # user's socket (the uid check in `pm session` cannot defend
+        # against that: it runs once, before tmux binds); without
+        # world-write we cannot create our socket at all, and proceeding
+        # would surface as an opaque "couldn't create socket" out of tmux
+        # instead of the actionable message `pm session` prints for this
+        # refusal.  Refuse rather than proceed on either.  ``lstat`` again:
+        # a link planted between the check above and here reports its own
+        # mode (0777, never sticky), not its target's.
+        mode = SHARED_SOCKET_DIR.lstat().st_mode
+        if not (mode & stat.S_ISVTX and mode & stat.S_IWOTH):
+            raise
+
+
+# Backwards-compatible alias (shared sessions historically owned this dir).
+ensure_shared_socket_dir = ensure_socket_dir
 
 
 def set_shared_socket_permissions(socket_path: Path, group_name: str | None = None) -> None:

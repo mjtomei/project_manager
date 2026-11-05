@@ -5,6 +5,7 @@ Each session has a registry file in ~/.pm/pane-registry/<session>.json
 containing per-window pane IDs, roles, and ordering information.
 """
 
+import contextlib
 import fcntl
 import json
 import os
@@ -23,8 +24,15 @@ def _ensure_logging():
 
 
 def base_session_name(session: str) -> str:
-    """Strip grouped-session suffix (~N) to get the base session name."""
-    return session.split("~")[0]
+    """Strip grouped-session suffix (~N) to get the base session name.
+
+    Delegates to :func:`pm_core.paths.base_session_name`, the one
+    definition shared with the socket derivation: only a *numeric* suffix
+    is a grouped session, so a name that itself contains ``~`` (a repo
+    directory may) is not truncated.
+    """
+    from pm_core.paths import base_session_name as _base_session_name
+    return _base_session_name(session)
 
 
 def pm_session_name(session: str) -> str:
@@ -119,12 +127,78 @@ def locked_read_modify_write(path: Path, modifier_fn, *, timeout: float = 5.0):
     return result
 
 
+@contextlib.contextmanager
+def tui_respawn_lock(session: str, *, timeout: float = 10.0):
+    """Hold the per-session lock under which a missing TUI is started.
+
+    Two pm processes can find a session's TUI gone at the same moment: the
+    ``after-kill-pane`` hook (``pm _pane-closed``) that respawns a killed
+    TUI, and a ``pm session`` attach that checks for the TUI before it
+    attaches.  Each used to look, see no TUI, and split a new one, so the
+    session ran two TUIs until the second one's pidfile refusal (with a
+    traceback in the debug log) — and when the attach looked just after
+    the hook's split, it adopted the hook's pane and the hook then listed
+    it a second time (QA scenario 42).  Both now look for a running TUI
+    and start one while holding this lock, so the second of them sees the
+    first one's TUI.
+
+    The lock is a sidecar of the registry, ``<registry>.respawn.lock``,
+    separate from the read-modify-write lock (``locked_read_modify_write``
+    takes that one for every write the holder makes).  Yields whether the
+    lock was taken.  It waits only while another holder has it
+    (``store.bounded_flock``).  If it is still held after *timeout*
+    seconds, or the file cannot be opened or locked at all, the caller goes
+    ahead without it — the behaviour before the lock existed — rather than
+    leave the session without a TUI.
+
+    Like the registry, the lock lives in the user's own ``~/.pm``.  A user
+    who joined someone else's shared session takes their own lock, not
+    the owner's, so their ``pm session`` is not serialised with the
+    owner's hook.  That race falls back on the TUI pidfile guard against a
+    second TUI, as every race did before this lock.
+    """
+    from pm_core.store import bounded_flock
+
+    path = registry_path(session)
+    lock_path = path.with_suffix(path.suffix + ".respawn.lock")
+    with contextlib.ExitStack() as stack:
+        try:
+            lock_path.parent.mkdir(parents=True, exist_ok=True)
+            locked = stack.enter_context(bounded_flock(lock_path, timeout))
+        except OSError as e:
+            _logger.warning("tui_respawn_lock: cannot lock %s (%s); going "
+                            "ahead without it", lock_path, e)
+            locked = False
+        else:
+            if not locked:
+                _logger.warning("tui_respawn_lock: %s still held after "
+                                "%.0fs; going ahead without it",
+                                lock_path, timeout)
+        yield locked
+
+
 def get_window_data(data: dict, window: str) -> dict:
     """Return the window entry for *window*, creating it if absent."""
     windows = data.setdefault("windows", {})
     if window not in windows:
         windows[window] = {"panes": [], "user_modified": False}
     return windows[window]
+
+
+def register_tui_pane(data: dict, window: str, pane_id: str) -> bool:
+    """Record *pane_id* as the TUI of *window* unless it is listed there.
+
+    Returns whether *data* changed.  The entry sorts first (order 0), the
+    shape the TUI's own ``heal_registry`` writes; ``pm session`` adopting a
+    TUI the registry does not list yet writes the same one, so whichever
+    of the two runs second under the registry lock is a no-op.
+    """
+    wdata = get_window_data(data, window)
+    if any(p["id"] == pane_id for p in wdata["panes"]):
+        return False
+    wdata["panes"].insert(0, {"id": pane_id, "role": "tui", "order": 0,
+                              "cmd": "tui"})
+    return True
 
 
 def _iter_all_panes(data: dict):

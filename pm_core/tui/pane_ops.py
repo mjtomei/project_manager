@@ -8,12 +8,11 @@ import os
 import shlex
 from pathlib import Path
 
-from pm_core.paths import configure_logger, command_log_file
+from pm_core.paths import configure_logger, command_log_file, default_socket_path
 from pm_core import tmux as tmux_mod
 from pm_core import pane_layout, pane_registry
 from pm_core import store, guide, notes
 from pm_core.prompt_gen import tui_section
-from pm_core.tui._shell import _run_shell
 from pm_core.tui.screens import ConnectScreen
 
 _log = configure_logger("pm.tui.pane_ops")
@@ -110,18 +109,12 @@ def heal_registry(session: str | None) -> None:
 
             # Ensure TUI pane is registered in the current window
             cur_live_ids = window_live_ids.get(window, set())
-            if tui_pane_id in cur_live_ids:
-                wdata = pane_registry.get_window_data(data, window)
-                if not any(p["id"] == tui_pane_id for p in wdata["panes"]):
-                    wdata["panes"].insert(0, {
-                        "id": tui_pane_id,
-                        "role": "tui",
-                        "order": 0,
-                        "cmd": "tui",
-                    })
-                    _log.info("heal_registry: re-registered TUI pane %s in window %s",
-                              tui_pane_id, window)
-                    changed = True
+            if (tui_pane_id in cur_live_ids
+                    and pane_registry.register_tui_pane(data, window,
+                                                        tui_pane_id)):
+                _log.info("heal_registry: re-registered TUI pane %s in window %s",
+                          tui_pane_id, window)
+                changed = True
 
             if changed:
                 _log.info("heal_registry: saved corrected registry")
@@ -139,13 +132,54 @@ def heal_registry(session: str | None) -> None:
 # Core pane infrastructure
 # ---------------------------------------------------------------------------
 
+def _pm_session_for(app, raw_session: str | None = None) -> str | None:
+    """Return the pm base session this TUI belongs to, or ``None``.
+
+    tmux reports the most recently created session of a shared window for a
+    pane, so while a user's own view of the session exists
+    (``tmux new-session -t pm-x -s myview``, S118/S121/S124) — or a grouped
+    session ``pm-x~N`` was created — the raw ``get_session_name()`` is the
+    view's / grouped session's name.  The pane registry, pidfile and layout
+    files are keyed by the *base* session, so a pane launch or rebalance
+    through the raw name registers it in a phantom registry (``myview.json``)
+    and the TUI never sees its own pane.  ``app._session_name`` is the
+    canonical base name (``_session_for_claim`` derives it from
+    ``current_session_name()``, which resolves the session group); fall back
+    to tmux only when the app has no session yet.
+    """
+    session = getattr(app, "_session_name", None)
+    if isinstance(session, str) and session:
+        return session
+    if raw_session is None:
+        try:
+            raw_session = tmux_mod.get_session_name()
+        except OSError:
+            # tmux missing/unexecutable: no session can be resolved.
+            return None
+    if not raw_session:
+        return None
+    try:
+        return pane_registry.pm_session_name(raw_session)
+    except OSError:
+        # Same degrade as ``pm_core.cli.helpers._pm_session_of``: without a
+        # group query the plain base name is the best answer available.
+        return pane_registry.base_session_name(raw_session)
+
+
 def get_session_and_window(app) -> tuple[str, str] | None:
-    """Get tmux session name and window ID. Returns None if not in tmux."""
+    """Get the pm session name and the viewing window ID.
+
+    The session is the *base* pm session (registry files are keyed by it);
+    the window is the current window of the tmux session that reports the
+    pane (a grouped session or a user's view keeps its own current window,
+    which is the one the user is looking at).  Returns None if not in tmux.
+    """
     if not tmux_mod.in_tmux():
         app.log_message("Not in tmux. Use 'pm session' to start a tmux session.")
         return None
-    session = tmux_mod.get_session_name()
-    window = tmux_mod.get_window_id(session)
+    raw_session = tmux_mod.get_session_name()
+    session = _pm_session_for(app, raw_session) or raw_session
+    window = tmux_mod.get_window_id(raw_session)
     return session, window
 
 
@@ -187,8 +221,7 @@ def launch_pane(app, cmd: str, role: str, fresh: bool = False,
 
     data = pane_registry.load_registry(session)
     gen = data.get("generation", "0")
-    escaped = cmd.replace("'", "'\\''")
-    wrap = f"bash -c 'trap \"pm _pane-exited {session} {window} {gen} $TMUX_PANE\" EXIT; {escaped}'"
+    wrap = tmux_mod.wrap_with_exit_trap(cmd, session, window, gen)
     try:
         direction = pane_layout.preferred_split_direction(session, window)
         pane_id = tmux_mod.split_pane(session, direction, wrap, window=window,
@@ -614,16 +647,20 @@ def launch_qa_item(app, item_id: str, target_window: str | None = None) -> None:
     body = item.get("body", "")
     title = item.get("title", qa_id)
 
+    # Copyable example commands: the session name may contain a space
+    # (it comes from the repo directory), so quote it as one shell word.
+    # shlex.quote leaves ordinary names bare.
+    q_sess = shlex.quote(sess)
     full_prompt = f"""\
 ## Session Context
 
 You are running a QA instruction against tmux session: {sess}{pane_line}
 
 To interact with this session, use commands like:
-- pm tui view -s {sess}
-- pm tui send <keys> -s {sess}
-- tmux list-panes -t {sess} -F "#{{pane_id}} #{{pane_width}}x#{{pane_height}} #{{pane_current_command}}"
-- cat ~/.pm/pane-registry/{sess}.json
+- pm tui view -s {q_sess}
+- pm tui send <keys> -s {q_sess}
+- tmux list-panes -t {q_sess} -F "#{{pane_id}} #{{pane_width}}x#{{pane_height}} #{{pane_current_command}}"
+- cat ~/.pm/pane-registry/{q_sess}.json
 
 ## QA Instruction: {title}
 
@@ -659,7 +696,10 @@ def _focus_plans_window(app, plan_id: str | None) -> None:
     if not tmux_mod.in_tmux():
         return
     try:
-        session = tmux_mod.get_session_name()
+        # The pm base, not the view/grouped name tmux reports for the pane:
+        # select_window resolves the attached client's session from the
+        # group, which it can only do from a real session name.
+        session = _pm_session_for(app)
         if session:
             tmux_mod.select_window(session, _plans_window_name(plan_id))
     except Exception:
@@ -667,12 +707,15 @@ def _focus_plans_window(app, plan_id: str | None) -> None:
 
 
 def _wrap_pane_cmd(session: str, window: str, cmd: str) -> str:
-    """Wrap a pane command with the EXIT trap that notifies pm of pane death."""
+    """Wrap a pane command with the EXIT trap that notifies pm of pane death.
+
+    Delegates to ``tmux.wrap_with_exit_trap``, which escapes the session
+    name and window for the trap's double-quoted context (a repo directory
+    may contain a space or shell metacharacters; review-loop b48f i17).
+    """
     data = pane_registry.load_registry(session)
     gen = data.get("generation", "0")
-    escaped = cmd.replace("'", "'\\''")
-    return (f"bash -c 'trap \"pm _pane-exited {session} {window} {gen} "
-            f"$TMUX_PANE\" EXIT; {escaped}'")
+    return tmux_mod.wrap_with_exit_trap(cmd, session, window, gen)
 
 
 def _launch_in_plans_window(app, plan_id: str | None, cmd: str, role: str,
@@ -688,9 +731,11 @@ def _launch_in_plans_window(app, plan_id: str | None, cmd: str, role: str,
         launch_pane(app, cmd, role, fresh=fresh)
         return
     try:
-        session = tmux_mod.get_session_name()
+        # Base session: the registry and the EXIT trap are keyed by it, and
+        # a view name (S118/S121/S124) would create a phantom registry.
+        session = _pm_session_for(app)
     except Exception:
-        _log.exception("_launch_in_plans_window: get_session_name failed")
+        _log.exception("_launch_in_plans_window: session resolution failed")
         launch_pane(app, cmd, role, fresh=fresh)
         return
     if not session:
@@ -795,22 +840,59 @@ def launch_plan_activated(app, plan_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 def show_connect(app) -> None:
-    """Show the tmux connect command for shared sessions."""
+    """Show the tmux connect command for this session's server."""
     socket_path = os.environ.get("PM_TMUX_SOCKET")
+    session = getattr(app, "_session_name", None)
+    target = ""
+    if not socket_path and session:
+        # No socket in the environment: a legacy (pre-isolation) session on
+        # the default server, or a TUI started outside tmux.  Ask tmux which
+        # server actually hosts it, and name the session explicitly for the
+        # default server: a bare `tmux attach` follows $TMUX (the wrong
+        # server when pasted into another pm pane), and one default server
+        # can host several legacy pm sessions.  The lookup requires a
+        # socket this user owns: the printed command is pasted into a
+        # shell, and a socket another user planted under this session's
+        # deterministic name would attach them to that server (a joiner's
+        # shared session always has PM_TMUX_SOCKET in its environment, so
+        # it never reaches this branch).
+        hosting, on_private = tmux_mod.find_session_server(session,
+                                                           owned_only=True)
+        if hosting is not None:
+            socket_path = hosting
+            target = "" if on_private else f" -t {shlex.quote(session)}"
+    elif socket_path and session:
+        # The rollout path exports the *default* server's socket for a
+        # legacy session, so the branch above never runs for one.  Name the
+        # session there for the same reason: attaching to the default
+        # server without `-t` picks whichever legacy session tmux considers
+        # current.
+        if socket_path == str(default_socket_path()):
+            target = f" -t {shlex.quote(session)}"
     if socket_path:
-        command = f"tmux -S {socket_path} attach"
-        app.push_screen(ConnectScreen(command))
+        # Quoted: the command is meant to be pasted into a shell, and a
+        # session tag derived from a repo directory name may contain a
+        # space.  Normal paths are unchanged (shlex.quote leaves them bare).
+        command = f"tmux -S {shlex.quote(socket_path)} attach{target}"
+    elif session:
+        command = f"tmux attach -t {shlex.quote(session)}"
     else:
-        app.log_message("Not a shared session")
+        app.log_message("Not in a pm session")
         app.clear_log_message_later(2)
+        return
+    app.push_screen(ConnectScreen(command))
 
 
 def quit_app(app) -> None:
     """Detach from tmux session instead of killing the TUI."""
     _log.info("quit_app")
     if tmux_mod.in_tmux():
-        # Detach from tmux, leaving session running
-        _run_shell(tmux_mod._tmux_cmd("detach-client"), check=False)
+        # Detach only the client viewing this pane's window, leaving the
+        # session running.  Never use bare `detach-client`: it targets the
+        # server's most recently active client and once detached the user
+        # from a different pm session (pr-073910f).
+        if not tmux_mod.detach_current_client():
+            _log.info("quit_app: no attached client to detach")
     else:
         # Not in tmux, just exit normally
         app.exit()

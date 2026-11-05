@@ -107,6 +107,26 @@ Timestamp: {datetime.now().isoformat()}
     return path
 
 
+def _current_session_name() -> str:
+    """Return the current tmux session name, verbatim, or ``""``.
+
+    ``display-message -p`` prints the stored name plus a newline, so the
+    result is read with ``rstrip("\\n")`` and never ``strip()``: tmux
+    keeps a session name exactly as given, and a user's own view of a pm
+    session may be named with a leading or trailing space (S118/S121/
+    S124).  Trimming it here named a session tmux does not know, so the
+    background pane was never opened (review-loop 9d4c i4; the same
+    round-trip rule as ``tmux.get_session_name``).
+    """
+    import subprocess
+
+    result = subprocess.run(
+        tmux_mod._tmux_cmd("display-message", "-p", "#{session_name}"),
+        capture_output=True, text=True,
+    )
+    return result.stdout.rstrip("\n") if result.returncode == 0 else ""
+
+
 def review_step(step_name: str, goal_description: str, check_prompt: str, root: Path, cwd: str | None = None) -> None:
     """Launch a background review of a completed step.
 
@@ -126,11 +146,7 @@ def review_step(step_name: str, goal_description: str, check_prompt: str, root: 
         if verdict == "PASS":
             if tmux_mod.in_tmux():
                 try:
-                    import subprocess
-                    session_name = subprocess.run(
-                        tmux_mod._tmux_cmd("display-message", "-p", "#{session_name}"),
-                        capture_output=True, text=True,
-                    ).stdout.strip()
+                    session_name = _current_session_name()
                     tmux_mod.split_pane_background(
                         session_name, "v",
                         f"echo {shell_quote(f'pm review: {step_name} — PASS')} && sleep 5"
@@ -144,11 +160,7 @@ def review_step(step_name: str, goal_description: str, check_prompt: str, root: 
 
         if tmux_mod.in_tmux():
             try:
-                import subprocess
-                session_name = subprocess.run(
-                    tmux_mod._tmux_cmd("display-message", "-p", "#{session_name}"),
-                    capture_output=True, text=True,
-                ).stdout.strip()
+                session_name = _current_session_name()
                 # Show a summary in a background pane
                 summary = output[:200].replace("\n", " ")
                 fix_cmd = f"pm plan fix --review {shell_quote(str(review_path))}"

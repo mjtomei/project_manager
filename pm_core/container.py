@@ -1355,8 +1355,10 @@ def wrap_claude_cmd(
     # "$(cat <host_workdir>/pm_prompt_*.txt)" in the command.  Inside the
     # container that host path doesn't exist — the workdir is mounted at
     # _CONTAINER_WORKDIR — so replace the prefix now.
-    host_prefix = f"$(cat {workdir}/"
-    container_prefix = f"$(cat {_CONTAINER_WORKDIR}/"
+    # build_claude_shell_cmd shell-quotes that directory on its own, so the
+    # prefix to match is the quoted form (identical for an ordinary path).
+    host_prefix = f"$(cat {shlex.quote(str(workdir))}/"
+    container_prefix = f"$(cat {shlex.quote(_CONTAINER_WORKDIR)}/"
     if host_prefix in claude_cmd:
         claude_cmd = claude_cmd.replace(host_prefix, container_prefix)
         _log.debug("wrap_claude_cmd: rewrote prompt-file path to container path")

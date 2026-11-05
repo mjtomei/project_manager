@@ -3,22 +3,45 @@
 import os
 import re
 import shlex
+import stat
 import subprocess
+from collections.abc import Iterable
+from pathlib import Path
 
-from pm_core.paths import configure_logger, write_env_file
+from pm_core.paths import base_session_name, configure_logger, write_env_file
 
 _log = configure_logger("pm.tmux")
 
 
-def _tmux_cmd(*args: str, socket_path: str | None = None) -> list[str]:
+def format_literal(text: str) -> str:
+    """Escape *text* for a tmux argument that tmux expands as a format.
+
+    tmux runs ``new-session -s``, ``-c`` start directories and
+    ``display-popup -d`` through format expansion: ``#{...}``, ``#S`` and
+    ``##`` are rewritten, and ``#(cmd)`` runs *cmd* in a shell.  A repo
+    directory named ``a#(touch X)b`` therefore ran ``touch X`` on every
+    ``pm session`` and window start, and the pane opened in the wrong
+    directory (QA S28).  ``##`` is tmux's escape for a literal ``#``.
+    """
+    return text.replace("#", "##")
+
+
+def _tmux_cmd(*args: str, socket_path: str | None = None,
+              use_env: bool = True) -> list[str]:
     """Build a tmux command with optional custom socket.
 
-    If socket_path is given, uses it.  Otherwise checks PM_TMUX_SOCKET env var.
-    This ensures all tmux calls route to the correct server when using shared
-    multi-user sessions.
+    If socket_path is given, uses it.  Otherwise, when *use_env* is true,
+    checks PM_TMUX_SOCKET.  This ensures all tmux calls route to the
+    session's own server.  ``use_env=False`` with no ``socket_path`` drops
+    that override, which is only half of "the default server": the tmux
+    *binary* still falls back to the socket named by ``$TMUX`` whenever no
+    ``-S`` is given, so callers that mean the user's default server pass
+    its socket explicitly (``paths.default_socket_path()``).
     """
     cmd = ["tmux"]
-    sp = socket_path or os.environ.get("PM_TMUX_SOCKET")
+    sp = socket_path
+    if sp is None and use_env:
+        sp = os.environ.get("PM_TMUX_SOCKET")
     if sp:
         cmd.extend(["-S", sp])
     cmd.extend(args)
@@ -36,6 +59,67 @@ class TmuxCommandError(subprocess.CalledProcessError):
         err = (err or "").strip() if isinstance(err, str) else ""
         base = super().__str__()
         return f"{base} tmux: {err}" if err else base
+
+
+def socket_path_from_tmux_env(environ: dict | None = None, *,
+                              pm_only: bool = True) -> str | None:
+    """Return the socket named by ``$TMUX``, if there is one.
+
+    tmux exposes ``$TMUX`` as ``<socket>,<server-pid>,<session-id>`` inside
+    panes, popups and ``run-shell`` commands.  By default only sockets under
+    the pm socket directory qualify, so commands run inside an ordinary tmux
+    session keep targeting the default server.  *pm_only=False* returns any
+    server's socket — for callers that have already established the current
+    pane's session is a pm session, which a legacy pre-isolation one on the
+    default server (or one on a ``tmux -L`` server) is.
+    """
+    env = os.environ if environ is None else environ
+    raw = env.get("TMUX")
+    if not raw:
+        return None
+    # The pid and session id are numeric, so the last two commas are the
+    # separators even if the socket path itself contains a comma.
+    path = raw.rsplit(",", 2)[0]
+    if not path:
+        return None
+    if not pm_only:
+        return path
+    # Imported here rather than at module scope so the value is read when
+    # the function runs: callers (and tests) may re-point
+    # ``paths.SHARED_SOCKET_DIR``, and a top-level ``from … import`` would
+    # freeze the original Path object.
+    from pm_core.paths import SHARED_SOCKET_DIR
+    if Path(path).parent != SHARED_SOCKET_DIR:
+        return None
+    return path
+
+
+def resolve_ambient_socket(environ: dict | None = None, *,
+                           pm_only: bool = True) -> str | None:
+    """Return the tmux socket the current process should talk to.
+
+    *pm_only* is forwarded to :func:`socket_path_from_tmux_env`: discovery
+    that has already identified a pm session from the current pane passes
+    ``False`` so a legacy session's default-server socket is found too
+    (its panes carry no ``PM_TMUX_SOCKET``).
+    """
+    env = os.environ if environ is None else environ
+    return env.get("PM_TMUX_SOCKET") or socket_path_from_tmux_env(
+        env, pm_only=pm_only)
+
+
+def export_ambient_socket(environ: dict | None = None) -> str | None:
+    """Resolve the ambient socket and store it in ``PM_TMUX_SOCKET``.
+
+    Called once at CLI/wrapper startup so hooks, popups and subprocesses
+    that only inherit ``$TMUX`` still route every ``_tmux_cmd`` call to the
+    session's own server.
+    """
+    env = os.environ if environ is None else environ
+    sp = resolve_ambient_socket(env)
+    if sp:
+        env["PM_TMUX_SOCKET"] = sp
+    return sp
 
 
 def _run(*args, **kwargs) -> subprocess.CompletedProcess:
@@ -83,6 +167,64 @@ def _wrap_cmd_env(cmd: str, env: dict[str, str]) -> tuple[str, str]:
     return f"{head}sh -c {shlex.quote(prefix + body)}", path
 
 
+def shell_double_quote(value: str) -> str:
+    """Escape *value* for interpolation inside a double-quoted shell string.
+
+    A pm session name is derived from the repo directory name, which may
+    contain a space, a quote, a dollar sign or a backtick.  Where such a
+    name has to sit inside ``"…"`` in a command that a shell expands later
+    (the pane EXIT traps), it must be escaped for *that* context:
+    ``shlex.quote`` is the wrong tool there, because the single quotes it
+    emits are literal characters inside double quotes (``"pm-my\\ repo"``
+    reaches the command as ``pm-my\\ repo``, with the backslash kept).
+
+    Only the four characters bash still honours inside double quotes need
+    escaping: backslash, double quote, dollar and backtick.  A newline is
+    literal inside double quotes, so a name containing one stays a single
+    argument.
+    """
+    return (value.replace("\\", "\\\\")
+                 .replace('"', '\\"')
+                 .replace("$", "\\$")
+                 .replace("`", "\\`"))
+
+
+def _single_quote(value: str) -> str:
+    """Escape *value* for embedding inside a single-quoted shell string."""
+    return value.replace("'", "'\\''")
+
+
+def wrap_with_exit_trap(cmd: str, session: str, window: str,
+                        generation: str) -> str:
+    """Wrap *cmd* so its pane reports its own death to pm.
+
+    The wrapper is a ``bash -c`` whose EXIT trap runs ``pm _pane-exited``
+    with the session, window, registry generation and ``$TMUX_PANE``.  The
+    session name (and the window) are escaped for the trap's double-quoted
+    context: unescaped, a repo directory containing a space split the name
+    into extra arguments (the pane-exited handler never ran, so the pane
+    stayed registered and the layout was not rebalanced) and one containing
+    a dollar or a backtick was expanded by the shell — command injection
+    through the directory name (review-loop b48f i17).  ``$TMUX_PANE`` is
+    left unescaped on purpose: it is expanded by the pane's shell, not
+    interpolated here.
+
+    Two quoting layers apply to the interpolated values.  The trap command
+    is *re-parsed by the shell when it fires*, so each value is first
+    quoted as a shell word (``shlex.quote``) for that re-parse; the result
+    then sits inside the trap's double quotes (``shell_double_quote``), and
+    the whole ``bash -c`` argument is single-quoted (``_single_quote``).
+    Escaping only the double-quoted layer is not enough: the spaces it
+    leaves alone split the stored command when the trap runs.
+    """
+    def _value(v: str) -> str:
+        return _single_quote(shell_double_quote(shlex.quote(v)))
+
+    trap = (f"pm _pane-exited {_value(session)} {_value(window)} "
+            f"{_value(generation)} $TMUX_PANE")
+    return f"bash -c 'trap \"{trap}\" EXIT; {_single_quote(cmd)}'"
+
+
 def _run_with_env(args: list[str], env: dict[str, str] | None,
                   **kwargs) -> subprocess.CompletedProcess:
     """Run a tmux command whose last argument is the pane's shell command.
@@ -117,20 +259,249 @@ def in_tmux() -> bool:
     return bool(os.environ.get("TMUX"))
 
 
-def session_exists(name: str, socket_path: str | None = None) -> bool:
-    """Check if a tmux session with the given name exists."""
+def session_exists(name: str, socket_path: str | None = None,
+                   use_env: bool = True) -> bool:
+    """Check if a tmux session with the given name exists.
+
+    With ``socket_path=None, use_env=False`` this queries the default
+    server explicitly, which is how legacy pre-isolation sessions are
+    detected.  The default server's socket is passed as ``-S`` because
+    tmux would otherwise follow ``$TMUX`` and reach the private server
+    this process happens to run on.
+    """
+    if socket_path is None and not use_env:
+        from pm_core.paths import default_socket_path
+        socket_path = str(default_socket_path())
     result = _run(
         _tmux_cmd("has-session", "-t", name, socket_path=socket_path),
     )
     return result.returncode == 0
 
 
-def session_group(name: str) -> str:
+def server_alive(socket_path: str) -> bool:
+    """Return True when a tmux server answers on *socket_path*.
+
+    Tells a stale socket file (server gone, safe to unlink) from a live
+    one whose session set simply no longer contains the name being looked
+    for: a live server can still host grouped sessions after its base
+    session was killed elsewhere, and removing its socket would strand it.
+
+    An unprobeable socket (tmux cannot be run) counts as alive, so nothing
+    is ever deleted on a guess.
+    """
+    try:
+        result = _run(
+            _tmux_cmd("list-sessions", "-F", "#{session_name}",
+                      socket_path=socket_path),
+            text=True,
+        )
+    except OSError:
+        return True
+    return result.returncode == 0
+
+
+def find_session_server(session_name: str, *,
+                        owned_only: bool = False) -> tuple[str | None, bool]:
+    """Return ``(socket_path, is_private)`` for the server hosting a session.
+
+    Single source of truth for "which tmux server is this pm session on":
+    the per-session socket is checked first, then the user's default server
+    (legacy pre-isolation sessions).  The private check runs first so a
+    live private session is never shadowed by a same-named legacy one.
+
+    The default server's socket is returned explicitly rather than as
+    ``None``: with no ``-S`` the tmux binary follows ``$TMUX``, which from
+    inside a pm pane names that session's private server.
+
+    Returns ``(None, False)`` when the session is running on neither
+    server, or when tmux cannot be run at all (callers degrade to "no
+    session" instead of crashing).  The private socket is never probed
+    when the shared socket directory is not a real directory (a symlink
+    or a planted file): see ``paths.shared_socket_dir_is_usable``.
+    ``session_name`` may carry a grouped-session ``~N`` suffix.
+
+    *owned_only* restricts the private probe to a socket the current user
+    owns.  Implicit discovery (the cwd-derived session, a command that
+    acts on "the project's session") passes it: the socket directory is
+    world-writable, a real socket is not a symlink (so the entry-type
+    check above passes), and tmux < 3.3 has no ``server-access`` ACL — an
+    attacker can plant a 0777 socket under a pm session's deterministic
+    name and a victim's lookup would adopt it, driving or creating panes
+    on the attacker's server.  A private session's server binds a socket
+    it owns, so ownership is the evidence.  Explicit ``-s`` lookups and
+    shared/joiner contexts keep the default: joining another user's
+    ``--global``/``--group`` session is a documented flow, and there the
+    socket belongs to the sharing user by design.
+
+    A prefix match is accepted only when the exact session, its base, or a
+    session in tmux's session *group* is really there.  That is what TUI
+    discovery wants (the panes are shared, so `pm tui view -s pm-x` should
+    still reach the TUI after the base was killed elsewhere), while a
+    *different* session whose name merely starts with ``pm-x~`` — another
+    project on the legacy default server, or a hand-made session — is not
+    the session (review-loop b48f i16; see ``_session_or_group_alive``).
+    Exact matching is the rule for `pm session kill` — see
+    ``find_exact_session_server``.
+    """
+    return _find_session_server(session_name, exact=False,
+                                owned_only=owned_only)
+
+
+def find_exact_session_server(
+        session_name: str, *,
+        owned_only: bool = False) -> tuple[str | None, bool]:
+    """Like ``find_session_server`` but matches the session name exactly.
+
+    A bare ``tmux -t <name>`` is resolved by tmux as a *prefix*, so
+    ``has-session -t pm-x`` also succeeds for a surviving grouped session
+    ``pm-x~1``.  Prefix matching made ``pm session kill`` treat a session
+    whose base had been killed elsewhere as running: it killed the grouped
+    session (detaching its client) and unlinked a live server's socket.
+    R8 requires "No session found" there, with the server left alone.
+
+    Used only by the destructive path; discovery keeps prefix matching.
+    *owned_only* has the same meaning as in :func:`find_session_server`;
+    ``pm session kill`` passes it for a private kill so the teardown can
+    never target another user's server.
+    """
+    return _find_session_server(session_name, exact=True,
+                                owned_only=owned_only)
+
+
+def session_socket_for(session_name: str) -> str:
+    """Return the deterministic private socket path for a pm session *name*.
+
+    Single definition of "the socket of this session": callers hold a
+    session name (``pm-<tag>``, possibly with a grouped ``~N`` suffix) and
+    the socket is derived from its tag, exactly as ``pm session`` derives
+    it when creating the server.  Only meaningful for pm session names;
+    callers check the ``pm-`` prefix first.
+    """
+    from pm_core.paths import session_socket_path
+
+    # ``base_session_name`` (module level) is the shared definition: only a
+    # *numeric* ``~N`` suffix is grouped, so a tag containing ``~`` is not
+    # truncated onto another session's socket.
+    base = base_session_name(session_name)
+    return str(session_socket_path(base.removeprefix("pm-")))
+
+
+def _session_or_group_alive(session_name: str, base: str,
+                            socket_path: str) -> bool:
+    """True when *session_name* or a surviving member of its group runs here.
+
+    ``session_exists`` uses tmux's *prefix* target matching.  That is what
+    discovery wants for a surviving grouped session (``pm-x~1`` after the
+    base was killed elsewhere — the windows are shared, so the session is
+    alive; R8.1), but it is also true for a *different* session whose name
+    merely starts with the base: a repo directory may contain ``~``, so on
+    the legacy default server another project's ``pm-x~foo-<hash>`` starts
+    with ``pm-x~``.  Treating that as the base made ``pm session`` attach
+    to the other project's session (and inject a TUI into it) and
+    ``pm session --print-connect`` print a command that attaches there
+    (review-loop b48f i16).  A prefix match is therefore accepted only
+    when the exact name, its base, or a session in tmux's session *group*
+    is really there — the same membership rule ``list_grouped_sessions``
+    and ``sessions_in_group`` follow (b48f i13).
+
+    The caller has already established (with the cheap prefix probe) that
+    *some* session with a related name exists, so the group query here
+    only runs in that case.
+    """
+    if session_exists(f"={session_name}", socket_path=socket_path):
+        return True
+    if session_name != base and session_exists(f"={base}",
+                                               socket_path=socket_path):
+        # A grouped name was asked for and its base is running: the group
+        # (and therefore the session's windows) is alive.
+        return True
+    return any(member != base
+               for member in sessions_in_group(base, socket_path=socket_path))
+
+
+def _find_session_server(session_name: str, *, exact: bool,
+                         owned_only: bool = False) -> tuple[str | None, bool]:
+    from pm_core.paths import (default_socket_path,
+                               shared_socket_dir_is_usable)
+
+    # Only a numeric ``~N`` suffix is a grouped session, so a session name
+    # that contains ``~`` (a repo directory may) keeps its own socket
+    # instead of sharing one with an unrelated project (review-loop b48f
+    # i11).
+    base = base_session_name(session_name)
+    # ``=name`` is tmux's exact-match target syntax; a bare name is a
+    # prefix match.
+    target = f"={session_name}" if exact else base
+    try:
+        # A symbolic link (or other non-directory) at the well-known socket
+        # path was planted by someone else: probing through it would adopt
+        # their server — under *our* deterministic socket name if they
+        # chose it — and hand its TUI pane to `pm tui view`/`pm tui send`.
+        # `pm session` refuses the same state on the create path
+        # (``ensure_socket_dir``); discovery fails closed the same way and
+        # still falls through to the default server, where a legacy
+        # pre-isolation session legitimately lives.
+        if base.startswith("pm-") and shared_socket_dir_is_usable():
+            sock = session_socket_for(base)
+            # Probe only a real socket file (or nothing, the normal
+            # before-the-first-start state).  The directory is
+            # world-writable, so another user can plant a symlink — or any
+            # other entry — at the deterministic path before our server
+            # exists, and ``tmux -S <link>`` follows it.  Discovery,
+            # ``--print-connect`` and ``pm session kill`` all resolve
+            # through here, so probing a link would adopt their server
+            # (and hand its TUI pane to ``pm tui send``).  Same rule as
+            # ``list_pm_sessions``' scan; the create path refuses it
+            # outright (review-loop b48f i7).
+            try:
+                entry = os.lstat(sock)
+            except OSError:
+                entry = None
+            # A *real* socket is not a link, so the check above does not
+            # stop a server another user planted: tmux < 3.3 has no
+            # server-access ACL, so a 0777 socket there is connectable, and
+            # the deterministic name is derivable (or visible in the
+            # listing).  Implicit lookups therefore require the socket to
+            # be ours; an absent entry is not probed either, because the
+            # attacker could create it between this lstat and the connect —
+            # and our own running server always has its socket file bound.
+            if owned_only:
+                probe = (entry is not None
+                         and stat.S_ISSOCK(entry.st_mode)
+                         and entry.st_uid == os.getuid())
+            else:
+                probe = entry is None or stat.S_ISSOCK(entry.st_mode)
+            if (probe and session_exists(target, socket_path=sock)
+                    and (exact or _session_or_group_alive(
+                        session_name, base, sock))):
+                return sock, True
+        default_sock = str(default_socket_path())
+        # The prefix probe is what finds a surviving grouped session; the
+        # group check then rejects a *different* session whose name merely
+        # starts with the base (review-loop b48f i16).  ``exact`` needs no
+        # confirmation: the probe already used ``=name``.
+        if (session_exists(target, use_env=False)
+                and (exact or _session_or_group_alive(
+                    session_name, base, default_sock))):
+            return default_sock, False
+    except OSError:
+        # tmux is not installed or not executable; no server can host it.
+        return None, False
+    return None, False
+
+
+def session_group(name: str, socket_path: str | None = None) -> str:
     """The group of session *name* (named after the session it was
-    grouped with), or '' when it is not grouped or does not exist."""
+    grouped with), or '' when it is not grouped or does not exist.
+
+    Resolves a user's own view of a pm session (``tmux new-session -t
+    pm-x -s myview``) to the pm base it was grouped with, whatever the
+    view is called — the same resolution ``pane_registry.pm_session_name``
+    builds on (S118/S121/S124).
+    """
     result = _run(
         _tmux_cmd("display-message", "-p", "-t", f"={name}:",
-                  "#{session_group}"),
+                  "#{session_group}", socket_path=socket_path),
         text=True,
     )
     return result.stdout.strip() if result.returncode == 0 else ""
@@ -155,18 +526,36 @@ def create_session(name: str, cwd: str, cmd: str, socket_path: str | None = None
 
     *env* is exported into the new session's panes through a private file
     (see ``_wrap_cmd_env``).
+
+    Two ``pm session`` starts for the same project race between the
+    caller's existence check and this call; the loser's ``new-session``
+    fails with "duplicate session".  Converge on the winner's session
+    instead of raising — a genuine failure leaves no session behind, so
+    it is still re-raised.
     """
-    _run_with_env(
-        _tmux_cmd("new-session", "-d", "-s", name, "-n", "main", "-c", cwd,
-                  cmd, socket_path=socket_path),
-        env,
-        check=True,
-    )
+    try:
+        _run_with_env(
+            _tmux_cmd("new-session", "-d", "-s", format_literal(name),
+                      "-n", "main", "-c", format_literal(cwd),
+                      cmd, socket_path=socket_path),
+            env,
+            check=True,
+        )
+    except subprocess.CalledProcessError:
+        if not session_exists(f"={name}", socket_path=socket_path):
+            raise
+        _log.info("create_session: %s created concurrently; converging", name)
+
+
+# A ``-c`` start directory that tmux expands against the target session:
+# the directory the session was created in (``new-session -c``).
+SESSION_START_DIR = "#{session_path}"
 
 
 def split_pane(session: str, direction: str, cmd: str,
                window: str | None = None,
-               env: dict[str, str] | None = None) -> str:
+               env: dict[str, str] | None = None,
+               start_dir_format: str | None = None) -> str:
     """Split a pane and run cmd. Returns new pane ID.
 
     direction: 'h' for horizontal (left/right), 'v' for vertical (top/bottom)
@@ -174,12 +563,18 @@ def split_pane(session: str, direction: str, cmd: str,
         the active pane of the session's active window.
     env: environment variables for the new pane, exported via a private
         file (see ``_wrap_cmd_env``).
+    start_dir_format: the new pane's start directory as a tmux *format*
+        (passed to ``-c`` unescaped, e.g. ``SESSION_START_DIR``).  Without
+        it, tmux starts the pane in the cwd of the client that ran the
+        command.
     """
     flag = "-h" if direction == "h" else "-v"
     target = f"{session}:{window}" if window else session
+    args = ["split-window", flag, "-t", target, "-P", "-F", "#{pane_id}"]
+    if start_dir_format:
+        args += ["-c", start_dir_format]
     result = _run_with_env(
-        _tmux_cmd("split-window", flag, "-t", target, "-P", "-F",
-                  "#{pane_id}", cmd),
+        _tmux_cmd(*args, cmd),
         env,
         text=True,
         check=True,
@@ -211,11 +606,29 @@ def attach(name: str, socket_path: str | None = None) -> None:
     )
 
 
-def kill_session(name: str, socket_path: str | None = None) -> None:
-    """Kill a tmux session."""
-    _run(
-        _tmux_cmd("kill-session", "-t", name, socket_path=socket_path),
-    )
+def kill_session(name: str, socket_path: str | None = None, *,
+                 exact: bool = False) -> bool:
+    """Kill a tmux session.  Returns whether tmux killed it.
+
+    *exact* addresses the session with tmux's ``=name`` target, i.e. no
+    prefix fallback.  ``pm session kill`` passes it for every session it
+    tears down: the lookup is already exact (``find_exact_session_server``),
+    but a bare ``-t`` is a *prefix* match, so a session that vanished
+    between the lookup and this call would make tmux kill whichever
+    remaining session starts with the name — on the legacy default server,
+    which hosts every pre-isolation pm session, that can be another pm
+    session's TUI (verified on tmux 3.2a: with only ``pm-xyz`` running,
+    ``kill-session -t pm-x`` kills ``pm-xyz``).  R8: tearing down a session
+    affects only that session.
+
+    The return value lets the destructive path tell a real failure from a
+    session that was already gone (tmux answers "can't find session" for
+    both; the caller re-checks existence only when this is false).
+    """
+    target = f"={name}" if exact else name
+    return _run(
+        _tmux_cmd("kill-session", "-t", target, socket_path=socket_path),
+    ).returncode == 0
 
 
 def kill_window(session: str, window: str) -> None:
@@ -243,8 +656,8 @@ def new_window(session: str, name: str, cmd: str, cwd: str,
     # Use session: format to explicitly target session, not window index
     target = f"{session}:"
     _run_with_env(
-        _tmux_cmd("new-window", "-d", "-t", target, "-n", name, "-c", cwd,
-                  cmd),
+        _tmux_cmd("new-window", "-d", "-t", target, "-n", name,
+                  "-c", format_literal(cwd), cmd),
         env,
         check=True,
     )
@@ -278,7 +691,7 @@ def new_window_get_pane(session: str, name: str, cmd: str, cwd: str,
     result = _run_with_env(
         _tmux_cmd("new-window", "-d", "-P", "-F",
                   "#{pane_id} #{window_id} #{window_index}",
-                  "-t", target, "-n", name, "-c", cwd, cmd),
+                  "-t", target, "-n", name, "-c", format_literal(cwd), cmd),
         env,
         check=True, text=True,
     )
@@ -318,16 +731,27 @@ def new_window_get_pane(session: str, name: str, cmd: str, cwd: str,
 
 
 def create_window(session: str, cmd: str,
-                  env: dict[str, str] | None = None) -> tuple[str, str]:
+                  env: dict[str, str] | None = None,
+                  start_dir_format: str | None = None) -> tuple[str, str]:
     """Create a new window in *session* running *cmd*.
 
     Returns ``(pane_id, window_id)`` of the newly created window.
     *env* is exported into the new pane through a private file (see
-    ``_wrap_cmd_env``).
+    ``_wrap_cmd_env``).  *start_dir_format* is the pane's start directory
+    as a tmux format, as for ``split_pane``.
+
+    ``-d``: the new window does not become the target session's current
+    window.  Without it tmux switches every client attached to that
+    session — ``_respawn_tui``'s ``select=False`` (``pm session``'s
+    attach) must not move another client, and its ``select=True`` path
+    selects the window for the caller's own client explicitly.
     """
+    args = ["new-window", "-d", "-t", f"{session}:", "-P", "-F",
+            "#{pane_id} #{window_id}"]
+    if start_dir_format:
+        args += ["-c", start_dir_format]
     result = _run_with_env(
-        _tmux_cmd("new-window", "-t", f"{session}:",
-                  "-P", "-F", "#{pane_id} #{window_id}", cmd),
+        _tmux_cmd(*args, cmd),
         env,
         text=True, check=True,
     )
@@ -371,7 +795,7 @@ def split_pane_at(pane_id: str, direction: str, cmd: str,
     flag = "-h" if direction == "h" else "-v"
     args = ["split-window", flag, "-t", pane_id, "-P", "-F", "#{pane_id}"]
     if cwd:
-        args += ["-c", cwd]
+        args += ["-c", format_literal(cwd)]
     args.append(cmd)
     if background:
         args.insert(2, "-d")
@@ -465,7 +889,14 @@ def get_session_name() -> str:
             _tmux_cmd("display-message", "-p", "#{session_name}"),
             text=True,
         )
-    return result.stdout.strip()
+    # ``rstrip("\n")``, not ``strip()``: tmux stores a session name as
+    # given, and a user's own view of a pm session may be named with a
+    # leading or trailing space (S118/S121/S124: "however it is named").
+    # Trimming it here made the name differ from the one tmux reports
+    # everywhere else — the group query then failed and a pm session was
+    # not recognised from inside such a view (the same round-trip rule as
+    # ``list_clients_in_group``, review-loop 9d4c i3).
+    return result.stdout.rstrip("\n")
 
 
 def get_pane_indices(session: str, window: str = "0") -> list[tuple[str, int]]:
@@ -535,8 +966,16 @@ def list_windows(session: str) -> list[dict]:
     if result.returncode != 0:
         return []
     windows = []
-    for line in result.stdout.strip().splitlines():
-        parts = line.split(None, 2)
+    # No ``.strip()`` on the output and an explicit single-space
+    # separator: tmux stores a window name as given (it rewrites only
+    # control characters, verified on tmux 3.2a), so a name with a
+    # leading or trailing space must round-trip.  ``split(None, 2)``
+    # treats the run of separator + leading space as one separator and
+    # ``.strip()`` trims the last row's trailing space — and both drop a
+    # window with an empty name entirely (review-loop 1346 i1; the same
+    # round-trip rule as the session-name listings).
+    for line in result.stdout.splitlines():
+        parts = line.split(" ", 2)
         if len(parts) >= 3:
             windows.append({"id": parts[0], "index": parts[1], "name": parts[2]})
     return windows
@@ -630,7 +1069,46 @@ def set_session_option(session: str, option: str, value: str, socket_path: str |
     )
 
 
-def set_shared_window_size(session: str, window: str) -> None:
+def session_is_shared(session: str, socket_path: str | None = None) -> bool:
+    """True when *session* was created as a shared (``--global``/``--group``) session.
+
+    ``PM_SHARE_MODE`` in the process environment is authoritative when it
+    is set: panes created in the base session have it, and so do the
+    subprocesses they start.  The session's own environment is the
+    fallback, and it is what makes the remaining contexts correct:
+
+    - a plain ``pm session`` that adopts an already-shared ambient session
+      clears the variable in its own environment (``_set_share_mode_env``)
+      yet still operates on the shared session;
+    - ``run-shell`` commands run from a *global* hook (``pm _pane-closed``,
+      ``pm _window-resized``) see the server's *global* environment, which
+      normally carries ``PM_SHARE_MODE`` because the server was started by
+      the ``pm session --global`` process.  It is absent when that
+      variable was not in the environment of whatever client started the
+      server (a joiner's plain ``tmux -S … attach`` after the owner's
+      server exited), and then only the session environment has it;
+    - a grouped session (``base~N``) has an empty *session* environment
+      (tmux copies none into a grouped session), so a pane there sees the
+      server global environment rather than the base session's variables —
+      again present only when the server inherited it.
+
+    In short: the process variable is the fast path, and the session
+    environment is the authoritative record of how the session was
+    created.
+
+    An empty value counts as unset, like every other reader of the
+    variable.  A session that cannot be queried (no such session, tmux
+    missing) counts as private, which is also what a private session is:
+    pm records the variable only for shared sessions.
+    """
+    if os.environ.get("PM_SHARE_MODE"):
+        return True
+    return bool(get_session_environment(session, "PM_SHARE_MODE",
+                                        socket_path=socket_path))
+
+
+def set_shared_window_size(session: str, window: str,
+                           socket_path: str | None = None) -> None:
     """For shared sessions, set per-window window-size to smallest.
 
     New tmux windows inherit ``window-size=latest`` by default, which
@@ -638,13 +1116,19 @@ def set_shared_window_size(session: str, window: str) -> None:
     explicitly sets ``window-size=smallest`` on the window so that it
     fits the smallest connected client in multi-user sessions.
 
-    No-op when ``PM_SHARE_MODE`` is not set (i.e. non-shared sessions).
+    Shared-ness comes from :func:`session_is_shared`, not from the
+    process environment alone: the respawn paths that need this option
+    most are exactly the ones whose environment lacks ``PM_SHARE_MODE``
+    (the global ``after-kill-pane`` hook that respawns a killed TUI, and a
+    plain ``pm session`` that adopted a shared ambient session).  With the
+    env-only test those windows kept ``window-size=latest``, so the
+    smallest client saw a clipped layout.  No-op for a private session.
     """
-    if os.environ.get("PM_SHARE_MODE"):
+    if session_is_shared(session, socket_path=socket_path):
         _run(
             _tmux_cmd(
                 "set-window-option", "-t", f"{session}:{window}",
-                "window-size", "smallest",
+                "window-size", "smallest", socket_path=socket_path,
             ),
         )
 
@@ -656,13 +1140,23 @@ def current_or_base_session(base: str) -> str:
     1. Current session (from $TMUX_PANE) if it's in the same group
     2. Any attached grouped session (user is watching it)
     3. The base session as fallback
+
+    Membership is tmux's ``#{session_group}``, never a ``base~`` name
+    prefix: a repo directory may contain ``~``, so the project ``x~foo``
+    runs the session ``pm-x~foo-<hash>``, which starts with ``pm-x~``
+    without being part of ``pm-x``'s group.  On the legacy default server
+    (where two unrelated bases can run side by side) the prefix test
+    returned that session whenever it had a client attached, so
+    ``get_window_id``/``select_window`` and the layout sizing acted on
+    another project's session (review-loop b48f i14; the same rule
+    ``list_grouped_sessions``/``sessions_in_group`` follow since b48f i13).
     """
     if in_tmux():
         current = get_session_name()
         # A user's own view grouped with *base* under any name counts
-        # as the same group (S124).
-        if current and (current == base or current.startswith(base + "~")
-                        or session_group(current) == base):
+        # as the same group (S124); a *grouped* session's group is its
+        # base.
+        if current and (current == base or session_group(current) == base):
             # Only return current if it has attached clients — otherwise
             # fall through to find an attached grouped session.
             result = _run(
@@ -673,7 +1167,24 @@ def current_or_base_session(base: str) -> str:
                 return current
     # Current pane is in a different group (or not in tmux).
     # The base session may have no clients; prefer an attached grouped session.
-    for name in list_grouped_sessions(base):
+    grouped = list_grouped_sessions(base)
+    for name in grouped:
+        result = _run(
+            _tmux_cmd("display-message", "-t", name, "-p", "#{session_attached}"),
+            text=True,
+        )
+        if result.returncode == 0 and result.stdout.strip() != "0":
+            return name
+    # No attached ``base~N``: a user's own view of the session, grouped
+    # with it under any name (S118/S121/S124), is a client of this session
+    # too — its client is the one the caller must target (the same rule the
+    # first branch applies when the current pane is in that view).  The
+    # candidates come from tmux's group, not from a ``base~`` name prefix,
+    # which on the legacy default server would also match another project
+    # whose directory name contains ``~`` (review-loop b48f i13).
+    for name in sessions_in_group(base):
+        if name == base or name in grouped:
+            continue
         result = _run(
             _tmux_cmd("display-message", "-t", name, "-p", "#{session_attached}"),
             text=True,
@@ -685,16 +1196,46 @@ def current_or_base_session(base: str) -> str:
 
 
 def create_grouped_session(base: str, name: str, socket_path: str | None = None) -> None:
-    """Create a grouped session sharing windows with the base session."""
-    _run(
-        _tmux_cmd("new-session", "-d", "-t", base, "-s", name,
-                   socket_path=socket_path),
-        check=True,
-    )
+    """Create a grouped session sharing windows with the base session.
+
+    Concurrent starts can pick the same ``~N`` suffix and both call this;
+    the loser gets "duplicate session".  Converge on the existing grouped
+    session instead of raising (same race as ``create_session``).
+    """
+    try:
+        _run(
+            _tmux_cmd("new-session", "-d", "-t", base,
+                      "-s", format_literal(name), socket_path=socket_path),
+            check=True,
+        )
+    except subprocess.CalledProcessError:
+        if not session_exists(f"={name}", socket_path=socket_path):
+            raise
+        _log.info("create_grouped_session: %s created concurrently; converging", name)
 
 
 def list_grouped_sessions(base: str, socket_path: str | None = None) -> list[str]:
-    """List grouped sessions matching base~*, sorted by suffix number."""
+    """List pm grouped sessions of *base* (``base~<number>``), sorted.
+
+    pm names its grouped sessions ``<base>~<N>``
+    (``next_grouped_session_name`` is the only producer, and it is always
+    given the base), so only a name whose *whole* remainder after
+    ``base~`` is a number is a grouped session of *base*.  A *different*
+    session whose name merely starts with ``base~`` is not one, and
+    treating it as one is a cross-session hazard: a repo directory may
+    contain ``~``, so the project ``x~foo`` runs session ``pm-x~foo-<hash>``
+    on the legacy default server, and the old name prefix made ``pm session
+    kill``/detach/attach for ``pm-x`` act on that other project's session
+    (review-loop b48f i13).  Testing only the part after the *last* ``~``
+    still let that project's own grouped sessions in: ``pm-x~foo-<hash>~1``
+    ends in a number, so ``pm session`` could attach to it as an unattached
+    ``pm-x`` view, ``pm session kill pm-x`` killed it, Ctrl-Q's group
+    fallback could detach its client, and discovery accepted the other
+    project as ``pm-x`` (review-loop b48f i19).  A user's own *view* of the
+    session is grouped with it too, but its name says nothing about that;
+    the authoritative membership test is tmux's session group, which
+    ``sessions_in_group`` queries.
+    """
     result = _run(
         _tmux_cmd("list-sessions", "-F", "#{session_name}",
                    socket_path=socket_path),
@@ -704,11 +1245,79 @@ def list_grouped_sessions(base: str, socket_path: str | None = None) -> list[str
         return []
     prefix = base + "~"
     grouped = []
-    for line in result.stdout.strip().splitlines():
-        if line.startswith(prefix):
+    # No ``.strip()``: it trims the leading space off the first row's name
+    # and the trailing space off the last row's, so a user's own view named
+    # `` pm-x~1`` / ``pm-x~1 `` was reported under the name ``pm-x~1`` —
+    # a session tmux does not know.  ``splitlines`` already drops the final
+    # newline (the same round-trip rule as ``list_clients_in_group``,
+    # review-loop 9d4c i4).
+    for line in result.stdout.splitlines():
+        if not line.startswith(prefix):
+            continue
+        # The whole remainder must be the number, not just the part after
+        # the last ``~`` (ASCII digits only, see ``_grouped_suffix``).
+        rest = line[len(prefix):]
+        if rest.isascii() and rest.isdigit():
             grouped.append(line)
-    grouped.sort(key=lambda s: int(s.split("~")[1]) if s.split("~")[1].isdigit() else 0)
+    # The suffix is the part after the *last* ``~``: the base name is
+    # derived from the repo directory and may itself contain ``~``
+    # (``pm-my~repo-abc~1``), where splitting at the first one read the
+    # tag for a number and left the ordering at 0.
+    grouped.sort(key=lambda s: _grouped_suffix(s) or 0)
     return grouped
+
+
+def _grouped_suffix(name: str) -> int | None:
+    """Return the ``N`` of a ``<base>~N`` grouped-session name, or None.
+
+    Only ASCII digits count: ``str.isdigit`` is true for characters such
+    as ``²`` whose ``int()`` raises, which crashed every caller of
+    ``list_grouped_sessions`` on a session whose name ends in one
+    (review-loop b48f i13).
+    """
+    suffix = name.rpartition("~")[2]
+    return int(suffix) if suffix.isascii() and suffix.isdigit() else None
+
+
+def sessions_in_group(base: str, socket_path: str | None = None) -> list[str]:
+    """Return every session in *base*'s tmux session group, by any name.
+
+    ``list_grouped_sessions`` matches ``base~N`` by name, which is what the
+    grouped-session lifecycle needs (naming the next ``~N``, reusing an
+    unattached one).  A user's own view created with ``tmux new-session -t
+    base -s myview`` (S118/S121/S124) is grouped with *base* as well — it
+    shares the windows, so its client sees the same panes and can press
+    the same keys — but its name says nothing about it.  tmux's
+    ``#{session_group}`` is the authoritative membership test, so callers
+    that must act on every client of the session (the TUI quit key)
+    enumerate through here.
+
+    The name-prefix list is unioned in so the answer is complete even when
+    the group query fails (older tmux, or a server that cannot be queried):
+    it never loses the ``~N`` sessions the lifecycle created.
+    """
+    members = {base}
+    try:
+        members.update(
+            list_grouped_sessions(base, socket_path=socket_path))
+        # ``:`` separates the fields: tmux forbids it in session names
+        # (rewriting it to ``_``), while a session name — derived from the
+        # repo directory name — may contain ``|`` or spaces.
+        result = _run(
+            _tmux_cmd("list-sessions", "-F",
+                      "#{session_name}:#{session_group}",
+                      socket_path=socket_path),
+            text=True,
+        )
+    except OSError:
+        # tmux missing/unexecutable: the session itself is all we know.
+        return sorted(members)
+    if result.returncode == 0:
+        for line in result.stdout.splitlines():
+            name, sep, group = line.partition(":")
+            if sep and group == base:
+                members.add(name)
+    return sorted(members)
 
 
 def find_unattached_grouped_session(base: str, socket_path: str | None = None) -> str | None:
@@ -731,9 +1340,8 @@ def next_grouped_session_name(base: str, socket_path: str | None = None) -> str:
         return f"{base}~1"
     max_n = 0
     for name in existing:
-        suffix = name.split("~")[1]
-        if suffix.isdigit():
-            max_n = max(max_n, int(suffix))
+        # Last ``~``, not first: the base name may contain ``~`` itself.
+        max_n = max(max_n, _grouped_suffix(name) or 0)
     return f"{base}~{max_n + 1}"
 
 
@@ -767,6 +1375,22 @@ def live_pane_start_commands(session: str) -> list[str]:
             if line.startswith("0 ")]
 
 
+def window_pane_start_commands(session: str, window: str) -> list[str]:
+    """Start commands of the live (not dead) panes of one window.
+
+    Used to recognise a pane by the command it runs when the pane
+    registry may not list it (a split whose registration failed): the
+    QA status dashboard is identified this way, so a resume cannot split
+    a second one beside it.
+    """
+    result = _run(_tmux_cmd("list-panes", "-t", f"{session}:{window}", "-F",
+                            "#{pane_dead} #{pane_start_command}"), text=True)
+    if result.returncode != 0:
+        return []
+    return [line[2:] for line in result.stdout.splitlines()
+            if line.startswith("0 ")]
+
+
 def capture_pane(pane_id: str, full_scrollback: bool = False) -> str:
     """Capture the contents of a tmux pane.
 
@@ -792,10 +1416,12 @@ def pane_exists(pane_id: str) -> bool:
     return result.returncode == 0
 
 
-def pane_window_id(pane_id: str) -> str | None:
+def pane_window_id(pane_id: str,
+                   socket_path: str | None = None) -> str | None:
     """Return the window ID (e.g. ``@1``) that contains *pane_id*, or ``None``."""
     result = _run(
-        _tmux_cmd("display", "-t", pane_id, "-p", "#{window_id}"),
+        _tmux_cmd("display", "-t", pane_id, "-p", "#{window_id}",
+                  socket_path=socket_path),
         text=True,
     )
     return result.stdout.strip() or None
@@ -813,14 +1439,21 @@ def attached_group_active_windows(base: str, socket_path: str | None = None) -> 
     The separator must be printable: tmux rewrites control characters in
     format output to ``_`` when the server runs under a non-UTF-8 locale
     (``LC_ALL=C``), which silently turned a tab-separated query into one
-    unparsable field.  The session name comes last (``maxsplit=3``) so it
-    may itself contain the separator.  A user's own view grouped with
-    *base* under another name (``tmux new-session -t base -s myview``)
-    belongs to the group too (S121).
+    unparsable field.  ``:`` is used because tmux forbids it in session
+    names (it rewrites ``:`` and ``.`` to ``_``), while a session name —
+    derived from the repo directory name — may contain ``|`` or spaces
+    (a ``|`` in the group field used to shift the fields and drop the
+    row).  The session name comes last (``maxsplit=3``) so it is taken
+    whole.  A user's own view grouped with *base* under another name
+    (``tmux new-session -t base -s myview``) belongs to the group too
+    (S121).  Membership is tmux's ``#{session_group}``, not a ``base~``
+    name prefix: a repo directory may contain ``~``, so on the legacy
+    default server another project's ``pm-x~foo-<hash>`` session starts
+    with ``pm-x~`` without being part of ``pm-x`` (review-loop b48f i13).
     """
     result = _run(
         _tmux_cmd("list-sessions", "-F",
-                  "#{session_attached}|#{window_id}|#{session_group}|#{session_name}",
+                  "#{session_attached}:#{window_id}:#{session_group}:#{session_name}",
                   socket_path=socket_path),
         text=True,
     )
@@ -828,29 +1461,39 @@ def attached_group_active_windows(base: str, socket_path: str | None = None) -> 
         return {}
     active = {}
     for line in result.stdout.splitlines():
-        parts = line.split("|", 3)
+        parts = line.split(":", 3)
         if len(parts) != 4:
             continue
         attached, wid, group, name = parts
-        if (name == base or name.startswith(base + "~") or group == base) \
-                and attached.isdigit():
+        if (name == base or group == base) and attached.isdigit():
             if int(attached) > 0 and wid:
                 active[name] = wid
     return active
 
 
-def sessions_on_window(base: str, window_id: str) -> list[str]:
+def sessions_on_window(base: str, window_id: str,
+                       socket_path: str | None = None,
+                       members: list[str] | None = None) -> list[str]:
     """Return all sessions in the group (base + grouped) whose active window matches *window_id*.
 
     Used by the review loop to determine which sessions need to be
-    switched to the replacement window after the old one is killed.
+    switched to the replacement window after the old one is killed, and by
+    ``detach_current_client`` to find the sessions whose clients are
+    looking at a given window.
+
+    *members* overrides the candidate sessions (default: the session
+    group from ``sessions_in_group`` — the base, its ``base~N`` grouped
+    sessions and a user's own view of the session under any name).
+    ``detach_current_client`` passes the same group explicitly.
     """
-    candidates = [base] + list_grouped_sessions(base)
+    candidates = (list(members) if members is not None
+                  else sessions_in_group(base, socket_path=socket_path))
     _log.info("sessions_on_window: base=%s window_id=%s candidates=%s", base, window_id, candidates)
     result = []
     for name in candidates:
         r = _run(
-            _tmux_cmd("display", "-t", name, "-p", "#{window_id}"),
+            _tmux_cmd("display", "-t", name, "-p", "#{window_id}",
+                      socket_path=socket_path),
             text=True,
         )
         cur_wid = r.stdout.strip() if r.returncode == 0 else f"<err:{r.returncode}>"
@@ -871,6 +1514,12 @@ def switch_sessions_to_window(sessions: list[str], session: str, window_name: st
     ``select-window`` alone does NOT update tmux's client tracking.
     ``switch-client`` to the same session is a visible no-op but
     triggers tmux to recalculate the window size for the correct display.
+
+    Fields are separated by ``:``, which tmux forbids in session names
+    (it rewrites ``:`` and ``.`` to ``_``), while a session name — derived
+    from the repo directory name — may contain a space or ``|``.  The old
+    space-separated query truncated such a name, so its client was never
+    found and never switched to the replacement window.
     """
     _log.info("switch_sessions_to_window: sessions=%s session=%s window_name=%s",
                sessions, session, window_name)
@@ -886,12 +1535,15 @@ def switch_sessions_to_window(sessions: list[str], session: str, window_name: st
     # Map session names → client TTYs for switch-client.
     client_map: dict[str, str] = {}
     r = _run(
-        _tmux_cmd("list-clients", "-F", "#{session_name} #{client_tty}"),
+        _tmux_cmd("list-clients", "-F", "#{session_name}:#{client_tty}"),
         text=True,
     )
     if r.returncode == 0:
-        for line in r.stdout.strip().splitlines():
-            parts = line.split(None, 1)
+        # No ``.strip()``: it trims the leading space off the first row's
+        # session name, so a view named with one never matched ``sessions``
+        # and its client was not switched (review-loop 9d4c i3).
+        for line in r.stdout.splitlines():
+            parts = line.split(":", 1)
             if len(parts) == 2:
                 client_map[parts[0]] = parts[1]
     _log.info("switch_sessions_to_window: client_map=%s", client_map)
@@ -921,24 +1573,67 @@ def set_environment(session: str, key: str, value: str, socket_path: str | None 
     )
 
 
+def get_session_environment(session: str, key: str,
+                            socket_path: str | None = None) -> str | None:
+    """Return *key* from a tmux session's environment, or ``None``.
+
+    ``None`` covers both "the variable is not set" (tmux reports that as a
+    non-zero exit) and "the session/server cannot be queried", so callers
+    treat an unknown value the same as an absent one.
+    """
+    try:
+        result = _run(
+            _tmux_cmd("show-environment", "-t", session, key,
+                      socket_path=socket_path),
+            text=True,
+        )
+    except OSError:
+        return None
+    if result.returncode != 0:
+        return None
+    # Output is ``KEY=value``; tmux prints ``-KEY`` for a variable marked
+    # for removal, which counts as unset.
+    line = result.stdout.strip()
+    prefix = f"{key}="
+    return line[len(prefix):] if line.startswith(prefix) else None
+
+
 def list_clients_in_group(base: str, socket_path: str | None = None) -> list[dict]:
-    """List all clients attached to any session in the group (base + base~*).
+    """List all clients attached to any session in the group.
+
+    The group is ``sessions_in_group``: the base, its ``base~N`` grouped
+    sessions **and a user's own view however it is named** (S118/S121/S124).
+    Enumerating only ``base~N`` by name missed a view's client, so
+    ``pm session --disconnect-others`` left it attached — and a view client
+    still constrains the shared window's size, which is exactly what the
+    flag exists to reclaim.
 
     Returns list of dicts with keys: tty, session.
+
+    ``:`` separates the fields, like every other session listing here: a
+    session name is derived from the repo directory and may contain
+    spaces, and a whitespace split drops a *leading* one (``split(None,
+    1)`` collapses the run), so a session whose name starts with a space
+    was never matched against the group and its client stayed attached.
+    tmux rewrites ``:`` in a session name to ``_``, so it cannot collide
+    with the separator (the client tty never contains one either).
     """
     result = _run(
-        _tmux_cmd("list-clients", "-F", "#{client_tty} #{session_name}",
+        _tmux_cmd("list-clients", "-F", "#{client_tty}:#{session_name}",
                    socket_path=socket_path),
         text=True,
     )
     if result.returncode != 0:
         return []
-    group_sessions = {base} | set(list_grouped_sessions(base, socket_path=socket_path))
+    group_sessions = set(sessions_in_group(base, socket_path=socket_path))
     clients = []
-    for line in result.stdout.strip().splitlines():
-        parts = line.split(None, 1)
-        if len(parts) == 2 and parts[1] in group_sessions:
-            clients.append({"tty": parts[0], "session": parts[1]})
+    # No ``.strip()``: it would also trim a trailing space off the last
+    # session name (the names may contain one), while ``splitlines``
+    # already drops the final newline.
+    for line in result.stdout.splitlines():
+        tty, sep, session = line.partition(":")
+        if tty and sep and session in group_sessions:
+            clients.append({"tty": tty, "session": session})
     return clients
 
 
@@ -947,3 +1642,321 @@ def detach_client(tty: str, socket_path: str | None = None) -> None:
     _run(
         _tmux_cmd("detach-client", "-t", tty, socket_path=socket_path),
     )
+
+
+def set_global_environment(key: str, value: str,
+                           socket_path: str | None = None) -> None:
+    """Set a variable in the server's global environment.
+
+    ``run-shell`` hooks and popups inherit the server environment; setting
+    PM_TMUX_SOCKET there makes the routing contract explicit rather than
+    relying solely on ``$TMUX`` being present.
+    """
+    _run(
+        _tmux_cmd("set-environment", "-g", key, value,
+                  socket_path=socket_path),
+    )
+
+
+def _int_or_zero(value: str) -> int:
+    """Parse a tmux numeric format field, tolerating empty/garbage output."""
+    try:
+        return int(value or 0)
+    except ValueError:
+        return 0
+
+
+def detach_current_client(socket_path: str | None = None) -> bool:
+    """Detach the client that is viewing the current pane's window.
+
+    ``detach-client`` with no target detaches the most recently active
+    client on the *server*, which is how a QA session once detached the
+    user from an unrelated pm session (pr-073910f).  Resolve the client
+    precisely instead:
+
+    1. Find the current pane's window from ``$TMUX_PANE``.
+    2. Keep clients attached to the sessions in the pm session's tmux
+       *group* (base, ``base~N``, and a user's own view however it is
+       named) whose active window is that window.
+    3. Detach the most recently active one by TTY.  When no client views
+       that window (the session's current window is a shell/review
+       window), fall back to the group's most recently active client —
+       still one TTY: ``detach-client -s <session>`` would drop every
+       client attached to the session.
+
+    Returns True when a client was detached.  Never issues a bare
+    ``detach-client``.  Returns False (rather than raising) when tmux
+    cannot be run: ``quit_app`` calls this from the TUI's key handler, and
+    a missing/unexecutable tmux must degrade to "nothing to detach" like
+    every other probe in this module.
+    """
+    try:
+        return _detach_current_client(socket_path)
+    except OSError:
+        _log.warning("detach_current_client: tmux cannot be run; "
+                     "leaving clients attached")
+        return False
+
+
+def _detach_current_client(socket_path: str | None) -> bool:
+    """Implementation of :func:`detach_current_client` (may raise OSError)."""
+    pane = os.environ.get("TMUX_PANE")
+    if not pane:
+        return False
+
+    pane_win = pane_window_id(pane, socket_path=socket_path) or ""
+
+    session_r = _run(
+        _tmux_cmd("display-message", "-p", "-t", pane, "#{session_name}",
+                  socket_path=socket_path),
+        text=True,
+    )
+    # ``rstrip("\n")``, not ``strip()``: the name is a session's, and a
+    # view may carry an edge space (see ``get_session_name``); trimming it
+    # made the group lookup and the client filter miss, so Ctrl-Q from
+    # such a view detached nothing (review-loop 9d4c i3).
+    session = (session_r.stdout.rstrip("\n")
+               if session_r.returncode == 0 else "")
+    if not session:
+        return False
+    # Resolve the pm base through the session *group*: tmux reports the
+    # most recently active view's name for a pane in a shared window, and
+    # a user's own view need not be named ``pm-<base>~N`` (S118/S121/S124).
+    # Splitting at ``~`` would then take the view's name for the base and
+    # narrow the candidate set to that view's client, so Ctrl-Q could
+    # detach a different client of the same session than the one that
+    # pressed it (R5.2 defines the candidates as the whole session group).
+    base = (session_group(session, socket_path=socket_path)
+            or base_session_name(session))
+    # Every session in the group, whatever it is called.  A user's own view
+    # shares the windows, so its client is a client of this pm session and
+    # must be a candidate: with only the ``base~N`` names, Ctrl-Q pressed
+    # while viewing the TUI through such a view detached nothing (or a
+    # different client of the same session).
+    group = set(sessions_in_group(base, socket_path=socket_path))
+    # Clients viewing the TUI's window: the group's sessions whose active
+    # window is that window (a grouped session has its own current window,
+    # so this is per session, not per client).  With no resolvable pane
+    # window, any session in the group counts.
+    viewing = (set(sessions_on_window(base, pane_win, socket_path=socket_path,
+                                      members=sorted(group)))
+               if pane_win else group)
+
+    result = _run(
+        _tmux_cmd("list-clients", "-F",
+                  "#{client_tty}|#{client_activity}|#{client_created}"
+                  "|#{client_session}",
+                  socket_path=socket_path),
+        text=True,
+    )
+    clients: list[tuple[int, int, str, str]] = []
+    if result.returncode == 0:
+        for line in result.stdout.splitlines():
+            parts = line.split("|", 3)
+            if len(parts) != 4:
+                continue
+            tty, activity, created, client_session = parts
+            clients.append((_int_or_zero(activity), _int_or_zero(created),
+                            tty, client_session))
+
+    # Prefer a client actually viewing the TUI's window; if none does (the
+    # session's current window is a shell/review window, or the window id
+    # went stale), fall back to the group's most recently active client.
+    # Either way detach exactly one TTY: ``detach-client -s <session>``
+    # detaches *every* client attached to that session, so two clients on
+    # the base session lost both on one Ctrl-Q.
+    for scope in (viewing, group):
+        candidates = [(activity, created, tty)
+                      for activity, created, tty, client_session in clients
+                      if client_session in scope]
+        if not candidates:
+            continue
+        tty = max(candidates)[2]
+        detached = _run(_tmux_cmd("detach-client", "-t", tty,
+                                  socket_path=socket_path), text=True)
+        if detached.returncode == 0:
+            _log.info(
+                "detach_current_client: detached %s (session %s, window %s)",
+                tty, session, pane_win)
+            return True
+        # Report failure rather than claiming a detach that did not happen
+        # (the client may have exited between list-clients and
+        # detach-client).  ``quit_app`` uses the result only for logging.
+        _log.warning("detach_current_client: detach of %s failed: %s",
+                     tty, detached.stderr)
+        return False
+
+    _log.info("detach_current_client: no attached client for %s", session)
+    return False
+
+
+def list_pm_sessions(*, extra_sockets: Iterable[str | Path] = (),
+                     read_errors: list[OSError] | None = None) -> list[dict]:
+    """List pm sessions across every pm tmux server.
+
+    Scans the per-session sockets under ``/tmp/pm-sessions/`` plus the
+    default server (legacy pre-isolation sessions).  Grouped sessions are
+    collapsed into their base session; ``attached`` is the sum of clients
+    across the group.  A user's own view of a session (``tmux new-session
+    -t base -s myview``, S118/S121/S124) is not a session of its own and is
+    not listed, whatever it is called.  Unreadable/stale sockets are
+    skipped, and so is a socket directory that is not a real directory
+    (a symlink or a file planted in world-writable ``/tmp`` — ``pm
+    session`` refuses the same path, so its contents are never ours).
+
+    *extra_sockets* are socket paths inside the socket directory that are
+    probed even when the scan does not report them — a caller that knows
+    a session's socket without enumerating the directory (``pm session
+    list`` passes the cwd project's deterministic one and the one the
+    command runs in) can still list it when the directory cannot be read.
+    When the directory exists but cannot be read (EACCES on a root-owned
+    ``1733`` directory, which ``pm session`` accepts), the error is
+    appended to *read_errors* so the caller can say so instead of
+    reporting that nothing runs.
+
+    Each row: ``{"name", "socket", "attached", "shared"}`` where ``socket``
+    is None for sessions on the default server and ``shared`` is true when
+    the socket is group/world accessible (``--global``/``--group``
+    sessions chmod it; private servers are 0600).
+    """
+    from pm_core.paths import (SHARED_SOCKET_DIR, default_socket_path,
+                               shared_socket_dir_is_usable)
+
+    def is_shared(sock: Path | None) -> bool:
+        if sock is None:
+            return False
+        try:
+            # lstat for the same reason as the scan below: never read a
+            # symlink's target as if it were this entry's mode.
+            return bool(sock.lstat().st_mode & 0o077)
+        except OSError:
+            return False
+
+    rows: list[dict] = []
+
+    def collect(socket_path: str | None) -> None:
+        """Collect one server; ``socket_path=None`` means the default one."""
+        # Address the default server explicitly: tmux would otherwise
+        # follow $TMUX and list the private server this process runs on.
+        cmd_socket = socket_path or str(default_socket_path())
+        # ``:`` separates the fields: tmux forbids it in session names
+        # (rewriting it to ``_``), while a session name — derived from the
+        # repo directory name — may contain ``|`` or spaces.  (A ``|``
+        # separator silently dropped such a session from the listing.)
+        try:
+            result = _run(
+                _tmux_cmd("list-sessions", "-F",
+                          "#{session_name}:#{session_group}:#{session_attached}",
+                          socket_path=cmd_socket),
+                text=True,
+            )
+        except OSError:
+            # tmux missing/unexecutable: nothing to report, and discovery
+            # must degrade rather than crash (see find_session_server).
+            _log.debug("list_pm_sessions: tmux cannot run, skipping %s",
+                       cmd_socket)
+            return
+        if result.returncode != 0:
+            # Stale socket (server exited), another user's socket, or no
+            # default server running: not fatal, just nothing to report.
+            _log.debug("list_pm_sessions: skipping %s: %s",
+                       cmd_socket, result.stderr.strip())
+            return
+        groups: dict[str, int] = {}
+        for line in result.stdout.splitlines():
+            parts = line.split(":", 2)
+            if len(parts) != 3:
+                continue
+            name, group, attached = parts
+            if not name.startswith("pm-"):
+                continue
+            # Only a numeric ``~N`` is a grouped suffix: a session name
+            # derived from a repo directory may contain ``~`` itself, and
+            # truncating there collapsed distinct sessions into one row
+            # (review-loop b48f i11).
+            own_base = base_session_name(name)
+            if group and group != own_base:
+                # A user's own view of another session (S118/S121/S124),
+                # however it is named — including a name that looks like a
+                # pm session (``pm-laptop``) and one that starts like a
+                # grouped session (``pm-x~myview``: only a *numeric* suffix
+                # is a grouped one, so its base is itself, not ``pm-x``).
+                # A view shares the windows but is not a session of its
+                # own, so it must not appear as a second row.  The group's
+                # own members all have ``own_base == group`` — the base
+                # session (tmux reports its group as itself once a view
+                # exists) and its ``base~N`` grouped sessions — so this
+                # test keeps them and drops only views.  Its clients are
+                # deliberately not counted either (``tmux list-clients`` is
+                # authoritative for a view's client).
+                _log.debug("list_pm_sessions: skipping view %s of %s",
+                           name, group)
+                continue
+            groups[own_base] = groups.get(own_base, 0) + _int_or_zero(attached)
+        shared = is_shared(Path(socket_path) if socket_path else None)
+        # One row per session: ``groups`` is already keyed by base name,
+        # and each server (and the default server, ``socket_path=None``)
+        # is collected exactly once.
+        for base, attached in sorted(groups.items()):
+            rows.append({"name": base, "socket": socket_path,
+                         "attached": attached, "shared": shared})
+
+    # The socket directory itself must be a real directory.  /tmp is
+    # world-writable, so another local user can create /tmp/pm-sessions as
+    # a symlink to a directory they own; `pm session` refuses that outright
+    # (paths.ensure_socket_dir, review-loop 2caf i8), and the read path
+    # must not enumerate it either — the target's owner would decide which
+    # servers appear as pm sessions, and discovery would scan them.  A
+    # missing directory is the normal first-run state: nothing to scan.
+    # The rule is ``paths.shared_socket_dir_is_usable``, the same one
+    # ``find_session_server`` and ``pm session kill`` apply, so the read
+    # paths cannot drift apart.
+    if not shared_socket_dir_is_usable():
+        _log.warning("list_pm_sessions: %s is not a real directory; "
+                     "not scanning it", SHARED_SOCKET_DIR)
+        sockets = []
+    else:
+        # os.scandir, not Path.glob: glob swallows a PermissionError on the
+        # directory itself.  A socket directory pm can write but not read —
+        # a root-owned 1733 /tmp/pm-sessions, which ensure_socket_dir
+        # accepts — then listed nothing at all, and `pm session list`
+        # printed "No pm sessions found." while the user's own session ran
+        # (QA S34).  The error is reported to the caller instead.
+        try:
+            with os.scandir(SHARED_SOCKET_DIR) as entries:
+                sockets = sorted(SHARED_SOCKET_DIR / entry.name
+                                 for entry in entries
+                                 if entry.name.startswith("pm-"))
+        except FileNotFoundError:
+            sockets = []
+        except OSError as exc:
+            _log.warning("list_pm_sessions: cannot read %s: %s",
+                         SHARED_SOCKET_DIR, exc)
+            if read_errors is not None:
+                read_errors.append(exc)
+            sockets = []
+        # Sockets the caller can name without enumerating the directory
+        # (the cwd project's deterministic socket, the session the command
+        # runs in) stay reachable when it cannot be read.  Only entries of
+        # the socket directory itself are taken, and each goes through the
+        # same lstat check as the scan.
+        for extra in extra_sockets:
+            extra = Path(extra)
+            if extra.parent == SHARED_SOCKET_DIR and extra not in sockets:
+                sockets.append(extra)
+    for sock in sockets:
+        # lstat, not is_socket(): the socket directory is world-writable, so
+        # a symlink another user plants there must not be followed — it
+        # would make their target look like one of our servers.
+        try:
+            mode = sock.lstat().st_mode
+        except OSError:
+            _log.debug("list_pm_sessions: skipping unreadable %s", sock)
+            continue
+        if not stat.S_ISSOCK(mode):
+            _log.debug("list_pm_sessions: skipping non-socket %s", sock)
+            continue
+        collect(str(sock))
+
+    collect(None)
+    return rows

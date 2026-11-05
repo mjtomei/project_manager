@@ -163,7 +163,12 @@ def start_pr(app, companion: bool = False) -> None:
     except Exception:
         tdir = None
     if tdir:
-        cmd_parts.append(f"--transcript {tdir}/impl-{pr_id}.jsonl")
+        # Quoted: run_command shlex-splits the line, and the transcript
+        # dir sits under the repo path, which may hold a space or a quote
+        # (an unquoted "it's" raised "No closing quotation" and took the
+        # whole TUI down, QA S28).
+        cmd_parts.append(
+            f"--transcript {shlex.quote(f'{tdir}/impl-{pr_id}.jsonl')}")
     cmd_parts.append(pr_id)
     cmd = " ".join(cmd_parts)
     run_command(app, cmd, working_message=action_key, action_key=action_key)
@@ -218,7 +223,9 @@ def review_pr(app, fresh: bool = False) -> None:
         tdir = None
     transcript_arg = ""
     if tdir:
-        transcript_arg = f" --transcript {tdir}/review-{pr_id}.jsonl"
+        # Quoted for run_command's shlex.split (see start_pr).
+        transcript_arg = (" --transcript "
+                          + shlex.quote(f"{tdir}/review-{pr_id}.jsonl"))
     fresh_arg = " --fresh" if fresh else ""
     cmd = f"pr review{fresh_arg}{transcript_arg} {pr_id}"
     run_command(app, cmd, working_message=action_key, action_key=action_key)
@@ -631,6 +638,33 @@ def handle_command_submitted(app, cmd: str) -> None:
     _log.info("command submitted: %s", cmd)
     cmd = cmd.strip()
 
+    # Fuzzy ``pr select`` / ``plan select``: handled in-process (cursor move
+    # + active_pr), parsed before the generic shlex split so a query such as
+    # ``user's`` cannot raise on an unbalanced quote.
+    from pm_core.tui import fuzzy_select_cmd
+    select_cmd = fuzzy_select_cmd.parse_select_command(cmd)
+    if select_cmd is not None:
+        kind, query = select_cmd
+        fuzzy_select_cmd.handle_select_command(app, kind, query)
+        app._focus_current_view()
+        return
+
+    # Parse before the in-flight guard below is taken.  An unbalanced
+    # quote ("pr note add pr-1 don't forget") raised ValueError out of this
+    # message handler, which exits the TUI — and, as the window's only
+    # pane, the pm session and its tmux server with it — and a queued
+    # command left the guard set.  Same class as run_command's guard.
+    try:
+        parts = shlex.split(cmd)
+    except ValueError as e:
+        _log.warning("command submitted: cannot parse %r: %s", cmd, e)
+        app.log_message(f"Error: cannot parse command: {escape(str(e))}")
+        if app._plans_visible:
+            app.query_one("#plans-pane", PlansPane).focus()
+        else:
+            app.query_one("#tech-tree", TechTree).focus()
+        return
+
     # Guard PR action commands from the command bar too
     action_key = None
     for prefix in PR_ACTION_PREFIXES:
@@ -645,18 +679,7 @@ def handle_command_submitted(app, cmd: str) -> None:
             app._inflight_pr_action = action_key
             break
 
-    # Fuzzy ``pr select`` / ``plan select``: handled in-process (cursor move
-    # + active_pr), parsed before the generic shlex split so a query such as
-    # ``user's`` cannot raise on an unbalanced quote.
-    from pm_core.tui import fuzzy_select_cmd
-    select_cmd = fuzzy_select_cmd.parse_select_command(cmd)
-    if select_cmd is not None:
-        kind, query = select_cmd
-        fuzzy_select_cmd.handle_select_command(app, kind, query)
-        app._focus_current_view()
-        return
-
-    parts = shlex.split(cmd)
+    # ``parts`` was parsed above, before the guard; ``cmd`` has not changed.
 
     # Handle review loop commands
     # Accepts: review-loop [start] [PR_ID]
@@ -737,12 +760,9 @@ def handle_command_submitted(app, cmd: str) -> None:
             break
     if _as_cmd == "autostart" or _as_cmd.startswith("autostart "):
         from pm_core.tui import auto_start as _auto_start
-        try:
-            _as_args = shlex.split(_as_cmd)[1:]
-        except ValueError as e:
-            app.log_message(f"Auto-start: bad command: {e}")
-        else:
-            _auto_start.handle_command(app, _as_args)
+        # Cannot raise: the line already parsed above, and the alias
+        # rewrite only touches its quote-free first word(s).
+        _auto_start.handle_command(app, shlex.split(_as_cmd)[1:])
         # Unconditional: focus() targets the tree's own (base) screen, so
         # when ``autostart status`` pushed the runs popup this doesn't
         # steal focus from it — it makes Esc return to the tree instead
@@ -831,7 +851,17 @@ def run_command(app, cmd: str, working_message: str | None = None,
         working_message: Optional message to show while running (enables async mode)
         action_key: Optional key for in-flight tracking (set before calling this)
     """
-    parts = shlex.split(cmd)
+    try:
+        parts = shlex.split(cmd)
+    except ValueError as e:
+        # An unbalanced quote must not escape into Textual: an uncaught
+        # exception here exits the TUI, and when it is the window's only
+        # pane the session and its tmux server go with it.
+        _log.warning("run_command: cannot parse %r: %s", cmd, e)
+        app.log_message(f"Error: cannot parse command: {escape(str(e))}")
+        if action_key:
+            app._inflight_pr_action = None
+        return
     if not parts:
         return
 

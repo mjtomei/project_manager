@@ -98,7 +98,6 @@ def build_regression_test_prompt(
     captures_dir: str,
     file_findings: bool,
     registry: str | None = None,
-    tmux_socket: str | None = None,
 ) -> str:
     """Assemble the full prompt the regression runner hands to Claude.
 
@@ -116,10 +115,6 @@ def build_regression_test_prompt(
 
     *target* describes the clone (e.g. ``"`master` (commit `abc123`)"``); the
     paths are as the session sees them (``/workspace`` etc. in a container).
-
-    *tmux_socket* is the ``PM_TMUX_SOCKET`` a host-mode session keeps.  The
-    runner drops ``TMUX``, so a plain ``tmux`` command there goes to the
-    default server while ``pm`` uses that socket; the prompt says so.
     """
     if file_findings and not registry:
         raise ValueError("file_findings requires the registry path")
@@ -127,12 +122,18 @@ def build_regression_test_prompt(
              else "on the host (container mode is off)")
     addendum = _filing_addendum(registry) if file_findings else ""
     socket_note = ""
-    if tmux_socket:
+    if not in_container:
+        # Every pm session has its own tmux server (pr-073910f), so there is
+        # no single ambient server to name (and ``PM_TMUX_SOCKET``, the
+        # user's live session's, is scrubbed from the run's environment).
+        # The run's own session gets its own socket; a plain ``tmux``
+        # command must name that one, which ``pm session --print-connect``
+        # prints.
         socket_note = (
-            f"\n\n`pm` commands here use the tmux server at `{tmux_socket}` "
-            "(`$PM_TMUX_SOCKET`). `$TMUX` is unset, so a plain `tmux` command "
-            "reaches a different server: run it as "
-            f"`tmux -S {shlex.quote(tmux_socket)} …`.")
+            "\n\n`pm` resolves each session's own tmux server (every pm "
+            "session has its own socket). `$TMUX` is unset here, so a plain "
+            "`tmux` command reaches the default server: run it against your "
+            "session's socket, which `pm session --print-connect` prints.")
     setup = _recipe_lines(
         setup_recipes,
         "(none in this project's library — set the project up as the test "

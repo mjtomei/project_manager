@@ -39,8 +39,11 @@ class TestBaseSessionName:
         assert base_session_name("my-project~42") == "my-project"
 
     def test_multiple_tildes(self):
-        # Only the first ~ splits
-        assert base_session_name("a~b~c") == "a"
+        # Only a *numeric* suffix is a grouped session, so a tilde that is
+        # part of the tag stays: splitting at the first one truncated two
+        # different projects onto one name (and one socket).
+        assert base_session_name("a~b~c") == "a~b~c"
+        assert base_session_name("a~b~2") == "a~b"
 
 
 class TestComputeLayout:
@@ -829,3 +832,192 @@ class TestHealRegistryOwnWindow:
         data = load_registry("pm-test")
         assert active_window in data["windows"]
         assert [p["id"] for p in data["windows"][active_window]["panes"]] == [tui_pane]
+
+
+class TestTuiRespawnWindow:
+    """The one "where does a missing TUI go back" rule (``pm session``'s
+    attach and the after-kill-pane hook both use it)."""
+
+    def test_preferred_window_wins(self):
+        from pm_core.pane_layout import tui_respawn_window
+
+        with patch("pm_core.tmux.find_window_by_name") as find, \
+                patch("pm_core.tmux.list_windows") as listing:
+            assert tui_respawn_window("pm-x", "@7") == "@7"
+        find.assert_not_called()
+        listing.assert_not_called()
+
+    def test_main_before_the_first_window(self):
+        from pm_core.pane_layout import tui_respawn_window
+
+        with patch("pm_core.tmux.find_window_by_name",
+                   return_value={"id": "@2", "index": "0", "name": "main"}), \
+                patch("pm_core.tmux.list_windows") as listing:
+            assert tui_respawn_window("pm-x") == "@2"
+        listing.assert_not_called()
+
+    def test_first_window_when_there_is_no_main(self):
+        from pm_core.pane_layout import tui_respawn_window
+
+        with patch("pm_core.tmux.find_window_by_name", return_value=None), \
+                patch("pm_core.tmux.list_windows",
+                      return_value=[{"id": "@5", "index": "0", "name": "x"},
+                                    {"id": "@6", "index": "1", "name": "y"}]):
+            assert tui_respawn_window("pm-x") == "@5"
+
+    def test_no_windows(self):
+        from pm_core.pane_layout import tui_respawn_window
+
+        with patch("pm_core.tmux.find_window_by_name", return_value=None), \
+                patch("pm_core.tmux.list_windows", return_value=[]):
+            assert tui_respawn_window("pm-x") is None
+
+
+class TestRespawnTuiOutcome:
+    """A failed respawn must not look like a started TUI."""
+
+    def test_failure_is_reported_as_none(self):
+        """The hook stops looking for a TUI when ``_respawn_tui`` returns a
+        window, and ``pm session`` selects it for its client — so a failed
+        split/create must return ``None``, not the window it tried."""
+        from pm_core import pane_layout
+
+        with patch("pm_core.tmux.get_pane_indices",
+                   side_effect=RuntimeError("tmux gone")):
+            assert pane_layout._respawn_tui("pm-x", "@1") is None
+
+    def test_a_pane_created_before_a_registry_failure_is_reported(self):
+        """A TUI exists once the split succeeded, whatever the bookkeeping.
+
+        ``locked_read_modify_write`` can time out on a stuck lock after
+        the pane was created.  The TUI registers itself once mounted, so
+        reporting ``None`` there would hide a running TUI from both
+        callers: the hook would not rebalance its window and ``pm session``
+        would not select it for the attaching client.
+        """
+        from pm_core import pane_layout
+
+        with patch("pm_core.tmux.get_pane_indices",
+                   return_value=[("%1", 80, 24)]), \
+                patch("pm_core.tmux.split_pane", return_value="%9"), \
+                patch("pm_core.pane_registry.locked_read_modify_write",
+                      side_effect=OSError("lock wait timed out")):
+            assert pane_layout._respawn_tui("pm-x", "@1") == "@1"
+
+    def test_a_new_window_is_reported_when_only_its_registration_fails(self):
+        """The created window is the one callers must select and rebalance."""
+        from pm_core import pane_layout
+
+        with patch("pm_core.tmux.get_pane_indices", return_value=[]), \
+                patch("pm_core.tmux.create_window",
+                      return_value=("%9", "@2")), \
+                patch("pm_core.tmux.set_shared_window_size"), \
+                patch("pm_core.tmux.select_window"), \
+                patch("pm_core.pane_registry.locked_read_modify_write",
+                      side_effect=OSError("lock wait timed out")):
+            assert pane_layout._respawn_tui("pm-x", "@1") == "@2"
+
+
+class TestNonPmSessionIgnored:
+    """The global hooks must ignore a plain session on the same server (QA S58).
+
+    A user's scratch session lives on the pm server too, so it receives the
+    global ``after-split-window`` / ``after-kill-pane`` / ``window-resized``
+    hooks.  It is not a pm session: its splits must not create a registry, a
+    pane close in it must not reconcile a pm registry or respawn a TUI into
+    it, and a resize there must not rebalance it.
+    """
+
+    def _reg_path(self, root):
+        return lambda session: root / f"{session}.json"
+
+    def test_pane_opened_does_not_create_registry(self, mock_registry):
+        with patch("pm_core.pane_layout.registry_path",
+                   side_effect=self._reg_path(mock_registry)), \
+                patch("pm_core.tmux.session_group", return_value=""):
+            handle_pane_opened("scratch-local", "@2", "%5")
+
+        assert not (mock_registry / "scratch-local.json").exists()
+
+    def test_pane_opened_still_registers_a_pm_session(self, mock_registry):
+        with patch("pm_core.pane_layout.registry_path",
+                   side_effect=self._reg_path(mock_registry)), \
+                patch("pm_core.tmux.session_group", return_value=""):
+            handle_pane_opened("pm-test", "@2", "%5")
+
+        data = load_registry("pm-test")
+        assert data["windows"]["@2"]["user_modified"] is True
+
+    def test_pane_closed_does_not_respawn_in_a_scratch_session(
+            self, mock_registry):
+        from pm_core.pane_layout import handle_any_pane_closed
+
+        # The shape handle_pane_opened used to leave behind for a plain
+        # session: a registry with the window but no panes.
+        _save_registry("scratch-local", {
+            "session": "scratch-local",
+            "windows": {"@2": {"panes": [], "user_modified": True}},
+            "generation": "",
+        })
+
+        with patch("pm_core.pane_layout.registry_path",
+                   side_effect=self._reg_path(mock_registry)), \
+                patch("pm_core.tmux.session_group", return_value=""), \
+                patch("pm_core.tmux.in_tmux", return_value=True), \
+                patch("pm_core.pane_layout._respawn_tui") as respawn, \
+                patch("pm_core.pane_layout._respawn_unlisted_tui") as unlisted:
+            handle_any_pane_closed("scratch-local")
+
+        respawn.assert_not_called()
+        unlisted.assert_not_called()
+        assert load_registry("scratch-local")["windows"]["@2"]["panes"] == []
+
+    def test_window_resized_does_not_rebalance_a_scratch_session(
+            self, mock_registry):
+        from click.testing import CliRunner
+        from pm_core.cli import cli
+
+        # A stale registry from a pm version before the S58 fix: it lists
+        # panes in the user's plain session, so the old handler would have
+        # rebalanced that session on every resize.
+        _save_registry("scratch-local", {
+            "session": "scratch-local",
+            "windows": {"@2": {"panes": [
+                {"id": "%5", "role": "tui", "order": 0, "cmd": "tui"},
+            ], "user_modified": False}},
+            "generation": "",
+        })
+
+        with patch("pm_core.tmux.session_group", return_value=""), \
+                patch("pm_core.pane_registry.registry_dir",
+                      return_value=mock_registry), \
+                patch("pm_core.cli.session.pane_layout.rebalance") as rebalance:
+            r = CliRunner().invoke(cli, ["_window-resized",
+                                         "scratch-local", "@2"])
+
+        assert r.exit_code == 0, r.output
+        rebalance.assert_not_called()
+        assert not (mock_registry / "scratch-local.resize").exists()
+
+    def test_window_resized_still_rebalances_a_pm_session(self, mock_registry):
+        from click.testing import CliRunner
+        from pm_core.cli import cli
+
+        _save_registry("pm-test", {
+            "session": "pm-test",
+            "windows": {"@2": {"panes": [
+                {"id": "%5", "role": "tui", "order": 0, "cmd": "tui"},
+            ], "user_modified": False}},
+            "generation": "",
+        })
+
+        with patch("pm_core.tmux.session_group", return_value=""), \
+                patch("pm_core.pane_registry.registry_dir",
+                      return_value=mock_registry), \
+                patch("time.sleep"), \
+                patch("pm_core.tmux.unzoom_pane"), \
+                patch("pm_core.cli.session.pane_layout.rebalance") as rebalance:
+            r = CliRunner().invoke(cli, ["_window-resized", "pm-test", "@2"])
+
+        assert r.exit_code == 0, r.output
+        rebalance.assert_called_once()

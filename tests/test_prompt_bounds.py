@@ -1555,6 +1555,47 @@ class TestLauncherGuard:
             cmd = build_claude_shell_cmd(prompt="hello", cwd=str(tmp_path))
         assert "$(cat" in cmd
 
+    @pytest.mark.parametrize("dirname", [
+        "plain-dir",
+        "my repo",
+        "qa`touch injected`repo",
+        "qa'quote repo",
+        "qa'`touch injected`'repo",
+        "qa$(touch injected)repo",
+        "qa~tilde",
+    ])
+    def test_shell_cmd_cat_path_survives_an_awkward_cwd(self, tmp_path,
+                                                        dirname):
+        """The prompt file lives under the cwd, which is named after the repo
+        (``pm meta`` launches in ``~/.pm/workdirs/meta-<tag>``).  Unquoted in
+        ``"$(cat ...)"``, a space handed Claude an EMPTY prompt and a backtick
+        in the path ran as a command (QA scenario 23).  Run the real command
+        against a stub ``claude`` that records its argv.
+        """
+        work = tmp_path / dirname
+        work.mkdir()
+        shim = tmp_path / "shim"
+        shim.mkdir()
+        record = tmp_path / "argv.json"
+        claude = shim / "claude"
+        claude.write_text(
+            f"#!{sys.executable}\nimport json, sys\n"
+            f"json.dump(sys.argv[1:], open({str(record)!r}, 'w'))\n")
+        claude.chmod(0o755)
+        prompt = "line one\nit's `not run` and $HOME stays literal"
+        with patch("pm_core.claude_launcher.log_shell_command"), \
+             patch("pm_core.claude_launcher.prepare_workspace"), \
+             patch("pm_core.paths.skip_permissions_enabled", return_value=False):
+            cmd = build_claude_shell_cmd(prompt=prompt, cwd=str(work))
+        assert "$(cat" in cmd
+        subprocess.run(cmd, shell=True, check=True, cwd=tmp_path,
+                       env=dict(os.environ, PATH=f"{shim}:/usr/bin:/bin"),
+                       capture_output=True, text=True)
+        assert json.loads(record.read_text()) == [prompt]
+        assert not list(tmp_path.rglob("injected"))
+        # The trailing cleanup removed the prompt file it named.
+        assert not list((work / "pm" / "prompts").glob("pm_prompt_*.txt"))
+
     def test_shell_cmd_no_writable_dir_raises(self):
         huge = "x" * (PROMPT_ARG_LIMIT + 1)
         with patch("pm_core.claude_launcher.log_shell_command"), \

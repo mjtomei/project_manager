@@ -592,6 +592,7 @@ COMMANDS
   pm status                     Show project status: active PR, counts by status
   pm push                       Commit pm/ changes to a branch and create PR
   pm session                    Start tmux session with TUI + notes editor
+  pm session list               List pm sessions and their tmux servers
   pm plan add <name>            Add a plan and launch Claude to develop it
   pm plan list                  List plans
   pm plan breakdown [plan-id]   Launch Claude to break plan into PRs
@@ -730,6 +731,11 @@ from pm_core.cli import pr, plan, session, tui, guide, meta, cluster, bench, wat
 
 
 def main():
+    # Route every tmux call to this session's own server when invoked from
+    # a pm pane, popup or run-shell hook (which expose $TMUX but may not
+    # carry PM_TMUX_SOCKET).  See tmux.export_ambient_socket.
+    from pm_core import tmux as _tmux_mod
+    _tmux_mod.export_ambient_socket()
     try:
         cli()
     except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:

@@ -98,7 +98,7 @@ class MergeLockScreen(ModalScreen):
 
 
 class ConnectScreen(ModalScreen):
-    """Modal popup showing the tmux connect command for shared sessions."""
+    """Modal popup showing the tmux connect command for this pm session."""
 
     BINDINGS = [
         Binding("escape", "dismiss", "Close"),
@@ -111,7 +111,14 @@ class ConnectScreen(ModalScreen):
         align: center middle;
     }
     #connect-container {
-        width: 70;
+        /* Grow to fit the command: the socket-addressed form is longer
+           than the old `tmux attach -t <session>` and would be clipped by
+           a fixed width.  Never shrink below the historical 70 cells, and
+           cap at the screen so an unusually long socket path wraps
+           instead of running off the edge. */
+        width: auto;
+        min-width: 70;
+        max-width: 100%;
         height: auto;
         background: $surface;
         border: solid $primary;
@@ -127,6 +134,13 @@ class ConnectScreen(ModalScreen):
         padding: 1 2;
         background: $surface-darken-1;
         text-style: bold;
+        /* Intrinsic width, but never wider than the container: a command
+           longer than the modal wraps instead of being clipped by the
+           border, while short commands leave the modal at its 70-cell
+           minimum. */
+        width: auto;
+        max-width: 100%;
+        text-wrap: wrap;
     }
     .connect-hint {
         height: 1;
@@ -141,7 +155,12 @@ class ConnectScreen(ModalScreen):
     def compose(self) -> ComposeResult:
         with Vertical(id="connect-container"):
             yield Label("Connect Command", id="connect-title")
-            yield Label(self._command, id="connect-command")
+            # markup=False: the command is a shell string to copy verbatim.
+            # A session tag comes from the repo directory name, so it may
+            # contain square brackets; rendered as markup, `[repo]` was
+            # silently swallowed and the popup showed a command naming a
+            # different session (or creating a stray one).
+            yield Label(self._command, id="connect-command", markup=False)
             yield Label("")
             yield Label("[dim]Press [bold]c[/bold] to copy to clipboard  |  [bold]Esc[/bold] to close[/]", classes="connect-hint")
 
@@ -277,7 +296,7 @@ class HelpScreen(ModalScreen):
             yield Label("Other", classes="help-section")
             yield Label("  [bold]z[/]  Modifier: kill existing before next", classes="help-row")
             yield Label("  [bold]r[/]  Refresh / sync with GitHub", classes="help-row")
-            yield Label("  [bold]C[/]  Show shared connect command", classes="help-row")
+            yield Label("  [bold]C[/]  Show connect command", classes="help-row")
             yield Label("  [bold]Ctrl+R[/]  Restart TUI", classes="help-row")
             yield Label("  [bold]?[/]  Show this help", classes="help-row")
             yield Label("  [bold]ctrl+b d[/]  Detach from session", classes="help-row")

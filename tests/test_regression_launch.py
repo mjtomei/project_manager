@@ -196,12 +196,13 @@ def test_host_run_is_isolated_and_needs_no_pm_session(project, home,
     assert args[:2] == ("bash", ["bash", "-c", "CLAUDE-CMD"])
     assert "PM_PROJECT" not in args[2] and "PM_SESSION" not in args[2]
     for var in ("TMUX", "TMUX_PANE", "PM_POPUP_SESSION",
-                "PM_IN_TMUX_SESSION", "PM_SHARE_MODE"):
+                "PM_IN_TMUX_SESSION", "PM_SHARE_MODE", "PM_TMUX_SOCKET"):
         assert var not in args[2], var
-    # Host mode still shares the user's tmux server.  With TMUX gone a
-    # plain tmux command would miss it, so the prompt names the socket.
-    assert args[2]["PM_TMUX_SOCKET"] == "/tmp/shared.sock"
-    assert "`tmux -S /tmp/shared.sock …`" in prompt
+    # Every pm session has its own tmux server (pr-073910f): the user's
+    # live session's socket is not inherited, and the prompt says to name
+    # the run's own session's socket instead of pointing at that server.
+    assert "`pm` resolves each session's own tmux server" in prompt
+    assert "/tmp/shared.sock" not in prompt
     spies.create.assert_not_called()
     # pm run from the clone uses this pm_core, as in QA scenarios.
     (override,) = _clone_overrides(home)
@@ -369,6 +370,11 @@ def test_container_run_on_a_router_that_cannot_launch_creates_nothing(
     """A router whose settings cannot launch, or whose host bridge cannot
     start, stops the run before any container exists (R42): the
     provider's error and remedy, exit 1, nothing left behind."""
+    # Copy before popping: a parametrized argument is the *same* dict object
+    # for every collection of this test, so popping from it would mutate the
+    # parameter — a second collection in one process (the suite run twice in
+    # one HOME) then saw no bridge error and expected exit 1 but got 0.
+    problem = dict(problem)
     bridge_error = problem.pop("bridge", None)
     _router_default(home, monkeypatch, **problem)
     sock = tmp_path / "route-bridge" / "r-ctr" / "router.sock"

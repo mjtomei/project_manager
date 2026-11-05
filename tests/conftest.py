@@ -1,5 +1,7 @@
 """Shared test helpers for pm_core tests."""
 
+import os
+
 import pytest
 
 # Load the CLI package before any test patches a launcher function.  Its
@@ -65,6 +67,37 @@ def _no_inherited_routing_env(monkeypatch):
     for var in (*LAUNCH_ROUTING_ENV_VARS, "ANTHROPIC_BASE_URL",
                 "CLAUDE_CODE_EFFORT_LEVEL"):
         monkeypatch.delenv(var, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _restore_environment():
+    """Undo every process-environment change a test makes.
+
+    The code under test deliberately exports ``PM_TMUX_SOCKET`` (and, for
+    shared sessions, ``PM_SHARE_MODE``) into the process environment:
+    ``helpers._use_tmux_socket``, ``session._resolve_session_socket`` and
+    ``tmux.export_ambient_socket`` all write it.  ``monkeypatch`` cannot
+    undo a value the *code* sets, so a test that mocks tmux broadly — e.g.
+    ``review_launch_retry``'s process-wide ``subprocess.run`` stub, which
+    makes every ``session_exists`` probe succeed — leaves the value behind
+    and a later test asserting on an exact tmux command sees a stray
+    ``-S <socket>``.  That is how the suite used to become order-dependent
+    (``test_session_socket_isolation.py`` kept a module-local copy of this
+    fixture; ``test_tmux.py``'s command assertions are the canary).
+
+    Snapshotting the environment is the one form that also covers values
+    pm sets itself.  A missing variable is removed again rather than set
+    to an empty string, so code that tests the variable for truthiness
+    behaves exactly as it did at the start of the test.
+    """
+    saved = dict(os.environ)
+    try:
+        yield
+    finally:
+        for key in set(os.environ) - set(saved):
+            del os.environ[key]
+        for key, value in saved.items():
+            os.environ[key] = value
 
 
 @pytest.fixture

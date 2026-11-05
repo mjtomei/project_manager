@@ -1352,6 +1352,25 @@ def _resume_incomplete_qa(app) -> None:
             overall = sdata.get("overall", "") or overall
             status_error = sdata.get("error", "") or ""
 
+        # Every pm session has its own tmux server (pr-073910f), so a run
+        # launched from another clone's session cannot be driven from here:
+        # its scenario panes live on that session's server, and resuming it
+        # here would poll this session for windows that are not here (ending
+        # that clone's run with a bogus result) or re-launch its scenarios
+        # twice.  The clone whose session hosts the run resumes it when its
+        # TUI restarts; this TUI leaves the snapshot alone.  A *completed*
+        # run needs no driving (its verdict is processed below), and a run
+        # whose session is gone is resumed here — its windows went with it.
+        needs_driving = (not overall) or bool(
+            rdata.get("held") and rdata.get("waiting_for_input"))
+        if (not ours and needs_driving
+                and qa_loop.run_session_live_elsewhere(
+                    rdata.get("session_tag"))):
+            _log.info("QA resume: leaving %s's run to session pm-%s "
+                      "(another tmux server)", pr_id,
+                      rdata.get("session_tag"))
+            continue
+
         # The ownership check above read the snapshot earlier; another TUI
         # may have adopted the run since.  Claim it atomically (S41).
         claimed = qa_loop.claim_resume_file(resume_file.parent,
@@ -1404,6 +1423,11 @@ def _resume_incomplete_qa(app) -> None:
                 _app.call_from_thread(_on_qa_update, _app, s)
 
             app._qa_loops[pr_id] = state
+            # A held run is resumed from disk like any other incomplete run,
+            # so it carries the same resume marker before the held-specific
+            # re-adoption line (QA scenario 88, R15: the resume log is how a
+            # user confirms a restart picked the run back up).
+            _log.info("Resuming incomplete QA from disk: %s", pr_id)
             _log.info("Re-adopting held QA run for %s (waiting=%s, "
                       "processed=%s)", pr_id,
                       sorted(state.waiting_for_input),

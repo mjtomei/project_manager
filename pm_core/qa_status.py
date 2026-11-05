@@ -249,6 +249,46 @@ def _render(status: dict | None, selected: int, rows: int, cols: int,
     return _CLEAR_SCREEN + "\n".join(padded)
 
 
+def _tmux_argv(*args: str) -> list[str]:
+    """Build a tmux argv targeting this pm session's own server.
+
+    This module runs as a standalone script (``python3 .../qa_status.py``),
+    so it must not import ``pm_core``.  It still has to reach the private
+    socket rather than the user's default server: prefer
+    ``PM_TMUX_SOCKET`` (exported into every pane) and fall back to the
+    socket named by ``$TMUX`` when it is a pm socket.
+    """
+    socket_path = os.environ.get("PM_TMUX_SOCKET")
+    if not socket_path:
+        raw = os.environ.get("TMUX")
+        if raw:
+            path = raw.rsplit(",", 2)[0]
+            if os.path.dirname(path) == "/tmp/pm-sessions":
+                socket_path = path
+    cmd = ["tmux"]
+    if socket_path:
+        cmd.extend(["-S", socket_path])
+    cmd.extend(args)
+    return cmd
+
+
+def _is_grouped_of(name: str, base: str) -> bool:
+    """True when *name* is pm's ``<base>~<N>`` grouped session of *base*.
+
+    Only an ASCII numeric suffix is a grouped session (pm never writes
+    another kind), so a *different* session whose name merely starts with
+    ``base~`` — a repo directory may contain ``~``, giving the project
+    ``x~foo`` the session ``pm-x~foo-<hash>`` — is not one.  Kept inline
+    because this module runs standalone (it must not import ``pm_core``);
+    ``pm_core.paths.base_session_name`` is the shared definition.
+    """
+    prefix = base + "~"
+    if not name.startswith(prefix):
+        return False
+    suffix = name[len(prefix):]
+    return suffix.isascii() and suffix.isdigit()
+
+
 def _find_attached_session(base: str) -> str:
     """Find the correct grouped session for window switching.
 
@@ -256,20 +296,43 @@ def _find_attached_session(base: str) -> str:
     1. Use $TMUX_PANE to identify which grouped session we're in
     2. Fall back to first attached grouped session
     3. Fall back to base session
+
+    Step 1 resolves the pane's session through its tmux session *group*:
+    tmux reports the most recently active view's name for a pane in a
+    shared window, and a user's own view created with ``tmux new-session
+    -t base -s myview`` (S118/S121/S124) need not be named ``base~N``.  A
+    bare name test missed such a view and switched the *base* session's
+    window instead — which the user's client does not follow (each session
+    in a group keeps its own current window), so the QA status pane could
+    not bring its window forward.  The field separator is ``:`` because
+    tmux rewrites ``:`` in session names to ``_`` (a session name may
+    contain spaces or ``|``).  ``current_or_base_session`` applies the same
+    group test; this module cannot import it (it runs standalone).
     """
     # Priority 1: use $TMUX_PANE to find our actual session
     pane = os.environ.get("TMUX_PANE")
     if pane:
         try:
             result = subprocess.run(
-                ["tmux", "display-message", "-p", "-t", pane, "#{session_name}"],
+                _tmux_argv(
+                    "display-message", "-p", "-t", pane,
+                    "#{session_name}:#{session_group}"),
                 capture_output=True, text=True,
             )
-            current = result.stdout.strip()
-            if current and (current == base or current.startswith(base + "~")):
+            # ``rstrip("\n")``, not ``strip()``: the session name comes
+            # first, and a user's own view of the session may be named with
+            # a leading space (S118/S121/S124).  Trimming it named a
+            # different (non-existent) session, so the lookup fell through
+            # and the dashboard did not follow its window (review-loop 9d4c
+            # i3; the same round-trip rule as the tmux helpers).
+            current, _, group = result.stdout.rstrip("\n").partition(":")
+            if current and (current == base or _is_grouped_of(current, base)
+                            or group == base):
                 # Verify it has attached clients
                 att = subprocess.run(
-                    ["tmux", "display-message", "-t", current, "-p", "#{session_attached}"],
+                    _tmux_argv(
+                        "display-message", "-t", current, "-p",
+                        "#{session_attached}"),
                     capture_output=True, text=True,
                 )
                 if att.returncode == 0 and att.stdout.strip() != "0":
@@ -277,18 +340,36 @@ def _find_attached_session(base: str) -> str:
         except Exception:
             pass
 
-    # Priority 2: first attached grouped session
+    # Priority 2: first attached session in the group.  ``:`` separates the
+    # fields: tmux rewrites ``:`` in session names to ``_``, while a session
+    # name — derived from the repo directory name — may contain a space or
+    # ``|``.  With a space-separated query ``pm-my repo-abc~1`` was read as
+    # ``pm-my``, so the attached grouped session was never found and the
+    # base's window was switched instead (which the user's client does not
+    # follow); the same parser rule the tmux helpers use.
+    #
+    # Membership is tmux's ``#{session_group}``, not a ``base~`` name
+    # prefix: a repo directory may contain ``~``, so on the legacy default
+    # server another project's ``pm-x~foo-<hash>`` session starts with
+    # ``pm-x~`` without being part of ``pm-x`` — switching *its* window
+    # would move a different session's client (review-loop b48f i13).
     try:
         result = subprocess.run(
-            ["tmux", "list-sessions", "-F", "#{session_name} #{session_attached}"],
+            _tmux_argv(
+                "list-sessions", "-F",
+                "#{session_name}:#{session_group}:#{session_attached}"),
             capture_output=True, text=True,
         )
-        for line in result.stdout.strip().splitlines():
-            parts = line.rsplit(" ", 1)
-            if len(parts) == 2:
-                name, attached = parts
-                if (name == base or name.startswith(base + "~")) and attached != "0":
-                    return name
+        # No ``.strip()``: it trims the leading space off the first row's
+        # session name, so a view named with one was returned under the
+        # wrong name and the switch targeted no session (review-loop 9d4c
+        # i3).  ``splitlines`` already drops the final newline.
+        for line in result.stdout.splitlines():
+            name, _, rest = line.partition(":")
+            group, _, attached = rest.partition(":")
+            if name and (name == base or _is_grouped_of(name, base)
+                         or group == base) and attached != "0":
+                return name
     except Exception:
         pass
     return base
@@ -303,7 +384,7 @@ def _switch_to_window(session: str, window_name: str) -> None:
     try:
         target = _find_attached_session(session)
         result = subprocess.run(
-            ["tmux", "select-window", "-t", f"{target}:{window_name}"],
+            _tmux_argv("select-window", "-t", f"{target}:{window_name}"),
             capture_output=True, text=True,
         )
         if result.returncode != 0:

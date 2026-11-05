@@ -328,6 +328,10 @@ def _detect_pm_install() -> dict:
 
 def _build_meta_prompt(task: str, work_path: Path, install_info: dict, branch_name: str, base_ref: str, session_tag: str, session_name: str | None = None) -> str:
     """Build prompt for meta-development session."""
+    # The copyable ``-s`` examples below must survive a session name with a
+    # space (it comes from the repo directory): quote it as one shell word.
+    # shlex.quote leaves ordinary names bare.
+    q_session = shlex.quote(session_name) if session_name else ""
     task_section = f"""
 ## Task
 
@@ -388,16 +392,16 @@ installation instead of reimplementing.
 ## Debugging the TUI
 
 The TUI runs in a tmux session. You can interact with it programmatically.
-{f"Target the base session with `-s {session_name}`:" if session_name else "Use these commands:"}
+{f"Target the base session with `-s {q_session}`:" if session_name else "Use these commands:"}
 
 **Frame buffer** — The TUI captures frames on every UI change:
-- `pm tui view{f" -s {session_name}" if session_name else ""}` — Capture and display current TUI state
+- `pm tui view{f" -s {q_session}" if session_name else ""}` — Capture and display current TUI state
 - `pm tui frames` — View last 5 captured frames
 - `pm tui frames --all` — View all captured frames with triggers
 - `pm tui clear-frames` — Clear the frame buffer
 
 **Sending keystrokes**:
-- `pm tui send <keys>{f" -s {session_name}" if session_name else ""}` — Send keystrokes to the TUI (e.g., `pm tui send g` for guide)
+- `pm tui send <keys>{f" -s {q_session}" if session_name else ""}` — Send keystrokes to the TUI (e.g., `pm tui send g` for guide)
 
 **Tmux inspection**:
 - `tmux list-panes -t <session> -F "#{{pane_id}} #{{pane_width}}x#{{pane_height}}"` — List panes

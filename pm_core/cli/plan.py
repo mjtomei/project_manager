@@ -98,7 +98,7 @@ def plan_add(name: str, description: str, fresh: bool):
             data["plans"] = []
         data["plans"].append(entry)
 
-    store.locked_update(root, apply)
+    store.locked_update_cli(root, apply)
     click.echo(f"Created plan {plan_id}: {name}")
     click.echo(f"  Plan file: {plan_path}")
     trigger_tui_refresh()
@@ -694,7 +694,7 @@ def plan_load(plan_id: str | None):
                 if entry["id"] not in current_ids:
                     data["prs"].append(entry)
 
-        store.locked_update(root, apply)
+        store.locked_update_cli(root, apply)
         trigger_tui_refresh()
     click.echo(f"\nLoaded {len(new_entries)} PRs from plan {plan_id}.")
 
@@ -821,7 +821,7 @@ def _import_github_prs(root: Path, data: dict) -> None:
                 if entry["id"] not in current_ids:
                     data["prs"].append(entry)
 
-        store.locked_update(root, apply)
+        store.locked_update_cli(root, apply)
         click.echo(f"  Imported {len(entries_to_import)} PR(s) from GitHub.")
 
 
@@ -848,7 +848,7 @@ def _run_plan_import(name: str):
             data["plans"] = []
         data["plans"].append(entry)
 
-    store.locked_update(root, apply)
+    store.locked_update_cli(root, apply)
     click.echo(f"Created plan {plan_id}: {name}")
     click.echo(f"  Plan file: {plan_path}")
     trigger_tui_refresh()

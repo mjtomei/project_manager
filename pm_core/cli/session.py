@@ -4,10 +4,14 @@ Registers the ``session`` group and all subcommands, plus internal
 pane/window management commands and session registry commands.
 """
 
+import contextlib
 import functools
 import os
 import shlex
+import signal
+import stat
 import subprocess
+import sys
 from pathlib import Path
 
 import click
@@ -20,9 +24,12 @@ from pm_core.claude_launcher import find_editor
 
 from pm_core.cli import cli
 from pm_core.cli.helpers import (
+    _find_running_tui_pane,
     _get_current_pm_session,
     _get_session_name_for_cwd,
     _log,
+    _private_session_context,
+    _select_session_socket,
     _set_share_mode_env,
     state_root,
 )
@@ -111,11 +118,136 @@ def _bind_popups() -> None:
                 check=False)
 
 
+def _session_is_shared(session_name: str) -> bool:
+    """True when *session_name* belongs to a shared (--global/--group) session.
+
+    The process environment carries ``PM_SHARE_MODE`` only when *this*
+    invocation passed the flag.  A plain ``pm session`` that adopts an
+    already-shared ambient session (``_resolve_start_session_name``) clears
+    it via ``_set_share_mode_env(False, None)``, yet the session it is
+    attaching to is still shared: the session environment records the mode
+    at creation, so consult that too.  Otherwise the grouped session such a
+    reattach creates would keep tmux's default ``window-size`` and the
+    smallest connected client would see a clipped layout.
+
+    The resolution lives in :func:`pm_core.tmux.session_is_shared` so the
+    same rule serves the other consumers (``set_shared_window_size``,
+    which the hook and reattach respawn paths reach with no
+    ``PM_SHARE_MODE`` in the environment).
+    """
+    return tmux_mod.session_is_shared(session_name)
+
+
+def _adopt_running_tui(session_name: str) -> str | None:
+    """Record a live, unregistered ``pm _tui`` pane of *session_name*.
+
+    Returns the pane id, or ``None`` when the session has no live TUI pane.
+
+    The pane registry can lag the TUI.  A TUI registers itself
+    (``heal_registry``) only after it mounts, about a second after its pane
+    starts.  A session that an older pm started under a name tmux rewrote
+    (``pm-vue.app-…`` becomes ``pm-vue_app-…``) has its first registry
+    written under the old spelling, so the registry this pm reads lists no
+    TUI until then.  A ``pm session`` in that gap used to see "no TUI",
+    print "TUI pane missing — respawning..." and start a second TUI, which
+    the pidfile guard then refused (QA S35).  A pane already running the
+    TUI is adopted instead, so no second TUI is ever started next to it.
+
+    "A pane running the TUI" has the same definition as in the
+    ``pm tui view``/``send`` discovery (a ``pm _tui`` start command,
+    matched through the session group; ``_find_running_tui_pane``, which
+    the TUI-respawn hook also uses).  A dead pane, kept by a user's
+    ``remain-on-exit``, is not adopted.  The
+    entry is added under the registry lock, and only if it is missing
+    (``pane_registry.register_tui_pane``), so it does not duplicate the
+    entry the TUI's own heal may write at the same moment.
+
+    The write is best-effort: when it fails (the registry lock is held
+    past its timeout, or the file cannot be written) the pane is still
+    returned.  The TUI is running either way, and it records itself once
+    it mounts.  Failing the attach on that, or respawning, would start
+    the second TUI this function exists to prevent.
+    """
+    running = _find_running_tui_pane(session_name)
+    if running is None:
+        return None
+    pane_id, window = running
+
+    def _add(raw):
+        data = pane_registry._prepare_registry_data(raw, session_name)
+        if pane_registry.register_tui_pane(data, window, pane_id):
+            return data
+        return None  # already recorded there: skip the write
+
+    try:
+        pane_registry.locked_read_modify_write(
+            pane_registry.registry_path(session_name), _add)
+    except OSError:  # includes the lock wait's TimeoutError
+        _log.warning("could not record running TUI pane %s of %s in "
+                     "the pane registry; it registers itself once "
+                     "mounted", pane_id, session_name, exc_info=True)
+    return pane_id
+
+
+def _ensure_tui_running(session_name: str) -> str | None:
+    """Make sure the running session *session_name* has a TUI pane.
+
+    Returns the window a TUI was respawned in (for the caller to
+    rebalance and to select in the grouped session it attaches), or
+    ``None`` when one was already there or none could be started.  The
+    respawn selects no window itself: it cannot know which client is the
+    caller's (QA S45).  ``_session_start`` calls this under
+    ``pane_registry.tui_respawn_lock``, which the ``after-kill-pane`` hook
+    also holds while it respawns a killed TUI, so a TUI the hook has just
+    started is registered by the time this looks (QA S42).
+    """
+    live_panes = tmux_mod.get_pane_indices(session_name)
+    registry = pane_registry.load_registry(session_name)
+    all_registered = [p for _, p in pane_registry._iter_all_panes(registry)]
+
+    # Find which registered panes are still alive
+    live_pane_ids = {p[0] for p in live_panes}
+    roles_alive = {p["role"] for p in all_registered if p["id"] in live_pane_ids}
+    _log.info("roles_alive: %s", roles_alive)
+    if "tui" in roles_alive:
+        return None
+
+    # The registry may not list a TUI that is running (it registers
+    # itself once mounted): adopt it rather than starting a second one.
+    adopted = _adopt_running_tui(session_name)
+    if adopted:
+        _log.info("TUI pane %s is running but was not registered; "
+                  "adopted it instead of respawning", adopted)
+        return None
+
+    # The TUI is missing: respawn it rather than killing the session
+    _log.info("TUI missing, respawning in existing session")
+    click.echo("TUI pane missing — respawning...")
+    # Find the window where TUI was registered; ``tui_respawn_window`` falls
+    # back to ``main``, else the first window (the same rule the
+    # after-kill-pane hook applies).
+    tui_window = next(
+        (wid for wid, pane in pane_registry._iter_all_panes(registry)
+         if pane.get("role") == "tui"),
+        None)
+    tui_window = pane_layout.tui_respawn_window(session_name, tui_window)
+    if not tui_window:
+        _log.warning("TUI respawn failed — no windows found in session")
+        click.echo("Could not respawn TUI (no windows). "
+                   "Kill the session manually and re-run pm session.",
+                   err=True)
+        return None
+    return pane_layout._respawn_tui(session_name, tui_window, select=False)
+
+
 def _register_tmux_bindings(session_name: str) -> None:
     """Register tmux keybindings and session options for pm.
 
-    Called on both new session creation and reattach so bindings
-    survive across sessions (tmux bindings are global).
+    Called on both new session creation and reattach.  Bindings and hooks
+    are per tmux *server*, and every pm session now has its own, so they
+    are not inherited from another pm session: a fresh server starts with
+    none and needs them registered here.  Re-registering on reattach also
+    heals a server whose bindings were lost.
     For shared sessions (--global/--group), sets window-size=smallest on
     all sessions in the group so the window fits the smallest connected
     client (everyone sees the full layout).
@@ -124,9 +256,13 @@ def _register_tmux_bindings(session_name: str) -> None:
     # users may connect simultaneously.  For normal (non-shared) sessions
     # the default tmux window-size is fine and avoids issues with the
     # unattached base session contributing a zero size.
-    if os.environ.get("PM_SHARE_MODE"):
-        base = session_name.split("~")[0]
-        for s in [base] + tmux_mod.list_grouped_sessions(base):
+    if _session_is_shared(session_name):
+        # Only a numeric ``~N`` is a grouped suffix; a session name may
+        # contain ``~`` itself (paths.base_session_name).  The group comes
+        # from tmux (``sessions_in_group``) so a user's own view of the
+        # session gets the option too — its client constrains the size.
+        base = pane_registry.base_session_name(session_name)
+        for s in tmux_mod.sessions_in_group(base):
             tmux_mod.set_session_option(s, "window-size", "smallest")
 
     subprocess.run(tmux_mod._tmux_cmd("bind-key", "-T", "prefix", "R",
@@ -134,7 +270,42 @@ def _register_tmux_bindings(session_name: str) -> None:
     # Conditionally override pane-switch keys: use pm's mobile-aware
     # switch for pm sessions, fall back to default tmux behavior otherwise.
     # Keyed on the pane registry file existing for the current session.
+    #
+    # The registry is keyed by the *base* pm session, and tmux resolves
+    # that through the session group: a grouped ``base~N`` and a user's own
+    # view (any name, S118/S121/S124) report ``#{session_group}`` = base,
+    # while a lone session reports an empty group (use its own name).  The
+    # old test stripped at the first ``~`` and left the value unquoted, so
+    # a session whose tag contains ``~`` (a repo directory may), one whose
+    # name contains a space, and every user view never matched their
+    # registry file — pm's mobile-aware switch was silently replaced by the
+    # plain fallback for exactly those sessions (review-loop b48f i15).
+    # ``#{}`` values are expanded by tmux before the shell runs, so the
+    # names must reach the shell already quoted: ``#{q:...}`` backslash-
+    # escapes every shell metacharacter (space, quotes, backtick, ``$``).
+    # Wrapping a bare ``#{session_name}`` in single quotes was not enough —
+    # a name containing ``'`` closed the quote, which silently dropped
+    # such a session to the plain fallback and, with a backtick after the
+    # quote (repo ``qa'`touch X`'repo``), ran that command on every
+    # prefix+o (QA scenario 23).  ``~`` is left unescaped; it is only
+    # expanded right after the ``=``, which a pm name (``pm-…``) never
+    # puts there, and a user's own view named ``~x`` is grouped, so the
+    # test uses ``g`` (its base), not ``s``.  The registry path is
+    # shell-quoted too (a home directory may contain a space).
+    #
+    # The *command* the gate runs needs the same treatment, and quoting the
+    # condition alone is not enough: ``pm _pane-switch #{session_name}``
+    # put the name into the shell unquoted, so a space split it into two
+    # arguments (Click rejected the command, so the mobile-aware switch the
+    # gate had just selected never ran) and a ``$`` or backtick ran command
+    # substitution.  ``#{q:...}`` is tmux's shell-quote modifier — the same
+    # one the popup bindings use (review-loop b48f i17).  The hook
+    # registrations below use it for the same reason; the window and pane
+    # ids are tmux-generated (``@N``/``%N``) and need no quoting.
     registry_dir = pane_registry.registry_dir()
+    registry_test = (
+        f"g=#{{q:session_group}}; s=#{{q:session_name}}; "
+        f"test -f {shlex.quote(str(registry_dir))}/\"${{g:-$s}}\".json")
     switch_keys = {
         "o": ("next", "select-pane -t :.+"),
         "Up": ("-U", "select-pane -U"),
@@ -144,15 +315,14 @@ def _register_tmux_bindings(session_name: str) -> None:
     }
     for key, (direction, fallback) in switch_keys.items():
         subprocess.run(tmux_mod._tmux_cmd("bind-key", "-T", "prefix", key,
-                 "if-shell",
-                 f"s='#{{session_name}}'; test -f {registry_dir}/${{s%%~*}}.json",
-                 f"run-shell 'pm _pane-switch #{{session_name}} {direction}'",
+                 "if-shell", registry_test,
+                 f"run-shell 'pm _pane-switch #{{q:session_name}} {direction}'",
                  fallback),
                 check=False)
     subprocess.run(tmux_mod._tmux_cmd("set-hook", "-g", "after-kill-pane",
-             "run-shell 'pm _pane-closed'"), check=False)
+             "run-shell 'pm _pane-closed #{q:session_name}'"), check=False)
     subprocess.run(tmux_mod._tmux_cmd("set-hook", "-gw", "after-split-window",
-             "run-shell 'pm _pane-opened \"#{session_name}\" \"#{window_id}\" \"#{pane_id}\"'"),
+             "run-shell 'pm _pane-opened #{q:session_name} #{window_id} #{pane_id}'"),
             check=False)
     # Auto-rebalance when window resizes (triggered by clients connecting/
     # disconnecting with window-size=smallest, or moving terminal to a different monitor).
@@ -162,7 +332,7 @@ def _register_tmux_bindings(session_name: str) -> None:
     # Capture stderr: this also runs from the TUI, whose stderr is the pane
     # itself, and tmux < 3.3 rejects the hook ("invalid option").
     r = subprocess.run(tmux_mod._tmux_cmd("set-hook", "-gw", "window-resized",
-             "run-shell 'pm _window-resized \"#{session_name}\" \"#{window_id}\"'"),
+             "run-shell 'pm _window-resized #{q:session_name} #{window_id}'"),
             check=False, capture_output=True, text=True)
     if r.returncode != 0:
         _log.warning("set-hook window-resized failed: %s", r.stderr.strip())
@@ -205,6 +375,18 @@ def _schedule_rebalance(session_name: str) -> None:
     if not windows:
         return
     window_ids = [w["id"] for w in windows]
+    # Registry windows tmux no longer has are rebalanced too.  A window
+    # killed with ``C-b &`` or ``kill-window`` fires no pm hook, so its
+    # panes stayed registered until the TUI next restarted (QA S28: a
+    # review window killed from outside left its review-diff pane in the
+    # registry).  rebalance() reconciles first, and for a window that is
+    # gone while the session lives, that drops the window's entry.
+    try:
+        from pm_core import pane_registry
+        registered = pane_registry.load_registry(session_name).get("windows") or {}
+    except Exception:  # an unreadable registry is healed elsewhere
+        registered = {}
+    window_ids += [wid for wid in registered if wid not in window_ids]
     # Build a Python one-liner that rebalances every window
     rebalance_calls = "; ".join(
         f"rebalance({session_name!r}, {wid!r})" for wid in window_ids
@@ -220,6 +402,410 @@ def _schedule_rebalance(session_name: str) -> None:
         start_new_session=True,
     )
     _log.info("scheduled background rebalance for %d window(s)", len(window_ids))
+
+
+def _known_ambient_session() -> str | None:
+    """Return the ambient pm session only when this HOME knows it.
+
+    A pane registry file in the current HOME proves the session belongs to
+    this installation.  Without that check, a process running under a
+    different HOME (tests, tooling, a temporary sandbox) that inherits
+    ``$TMUX``/``$TMUX_PANE`` would adopt a foreign session — and, seeing an
+    empty registry, conclude its TUI is missing and respawn one into the
+    live session.  That is exactly how a smoke test once disturbed the
+    user's live controller.  The same guard keeps `pm session kill` and
+    `pm session mobile` from targeting a foreign session.
+    """
+    ambient = _get_current_pm_session()
+    if ambient and pane_registry.registry_path(ambient).exists():
+        return ambient
+    return None
+
+
+def _ambient_share_mode(ambient: str) -> str | None:
+    """Return the share mode *ambient* was created with (``None`` = private).
+
+    Shared sessions record ``PM_SHARE_MODE`` in their session environment
+    at creation, so this distinguishes them without guessing from names —
+    which matters for workdir clones, whose git-root hash never matches
+    the session hosting them.
+    """
+    return tmux_mod.get_session_environment(ambient, "PM_SHARE_MODE")
+
+
+def _ambient_session_for_share_mode(wanted: str | None) -> str | None:
+    """Return the ambient session when it has the *wanted* share mode.
+
+    Share mode is mixed into the session tag, so a shared session and a
+    private one for the same repo are different sessions on different
+    sockets.  Without this check ``pm session kill --global`` run from
+    inside a private session would fall back to that private session and
+    kill it, and ``pm session --global`` would attach to it without
+    sharing anything.  The same-name fast path avoids a tmux query in the
+    common case.  A session whose environment cannot be read counts as
+    private, which is also what every private session is: pm records the
+    variable only for shared sessions.  An empty ``PM_SHARE_MODE`` counts
+    as unset, like every other reader of the variable (an exported empty
+    value must not turn a private ambient session into a mismatch).
+
+    With *no* mode requested (no ``--global``/``--group`` on the command)
+    the ambient session is returned whatever mode it was created with:
+    the user is acting on "the session" and the ambient one is it.  This
+    is the rule ``_resolve_start_session_name`` already follows for a
+    plain ``pm session`` (it adopts a shared ambient session), and without
+    it ``pm session kill`` / ``mobile`` run from a shell pane in a grouped
+    session ``base~N`` — whose session environment carries no
+    ``PM_SHARE_MODE`` — could not find the very session hosting them.
+    """
+    wanted = wanted or None
+    ambient = _known_ambient_session()
+    if not ambient:
+        return None
+    if wanted is None or ambient == _get_session_name_for_cwd():
+        return ambient
+    return ambient if _ambient_share_mode(ambient) == wanted else None
+
+
+def _resolve_start_session_name(shared: bool = False) -> str:
+    """Return the pm session name ``pm session`` should attach/create.
+
+    Prefers the ambient tmux session (workdir clones and meta workdirs
+    hash differently from the session hosting them) but only when this
+    HOME knows it; otherwise uses the cwd-derived name, which creates an
+    isolated session instead of touching a foreign one.
+
+    With an explicit ``--global``/``--group`` (*shared*), the ambient
+    session is only reused when it was created with that same share mode,
+    so ``pm session --global`` run from inside a *private* session
+    creates/attaches the shared-tag session instead of silently
+    reattaching to the private one (and sharing nothing).  Without the
+    flags the ambient session is adopted as it is, whatever mode it has: a
+    plain ``pm session`` inside a shared session reattaches to it rather
+    than starting a private twin.
+    """
+    if shared:
+        ambient = _ambient_session_for_share_mode(
+            os.environ.get("PM_SHARE_MODE"))
+    else:
+        ambient = _known_ambient_session()
+    return ambient or _get_session_name_for_cwd()
+
+
+def _attached_to_session_socket(session_name: str) -> bool:
+    """True when this process is attached to *session_name*'s own server.
+
+    The one socket an implicit lookup may adopt without an ownership check
+    is the server this process is already connected to: the user is on it,
+    so a socket there is not one another user handed us.  A shared session
+    joined from another user's pane is exactly that case (the socket
+    belongs to the sharing user by design), and so is a private session
+    (its socket is ours anyway).
+
+    A *legacy* pre-isolation session runs on the default server, whose
+    path never equals the session's deterministic private socket — so the
+    check is not skipped there, and a socket another user planted under
+    that name is not adopted (review-loop b48f i15).
+    """
+    try:
+        # Inside the target session, not merely carrying its socket in the
+        # environment (a pane can outlive the session it was started in).
+        if _get_current_pm_session() != session_name:
+            return False
+        ambient = tmux_mod.resolve_ambient_socket(pm_only=False)
+        return (ambient is not None
+                and ambient == tmux_mod.session_socket_for(session_name))
+    except OSError:
+        return False
+
+
+def _owned_only_for_target(session_name: str) -> bool:
+    """Whether *session_name* must resolve to a socket this user owns.
+
+    A shared invocation (``--global``/``--group``, or a pane of a shared
+    session that inherited ``PM_SHARE_MODE``) may legitimately name the
+    sharing user's socket, so it is exempt.  So is the session whose own
+    server this process is attached to (see
+    ``_attached_to_session_socket``): the user is already on it, and a pane
+    of a grouped session carries no ``PM_SHARE_MODE`` to say it is shared
+    (tmux copies no session environment into a grouped session).  Every
+    other target is implicit — the cwd-derived session of a plain shell or
+    a workdir clone, the session a shared pane names, and a *legacy*
+    session on the default server — where only a socket this user owns can
+    be its server (see ``tmux.find_session_server``'s *owned_only*).
+    """
+    if not _private_session_context():
+        return False
+    return not _attached_to_session_socket(session_name)
+
+
+def _removable_private_socket(socket_path: str) -> os.stat_result | None:
+    """The ``lstat`` entry when pm may probe or remove *socket_path*.
+
+    ``pm session kill`` is the only code that deletes a socket file, and
+    the socket directory is world-writable, so the destructive path
+    applies the same fail-closed checks as the rest of the socket
+    handling (review-loop 2caf i8/i10, b48f i7/i9):
+
+    - the directory must be a real directory.  ``/tmp`` is world-writable,
+      so another user can plant ``/tmp/pm-sessions`` as a symlink to a
+      directory they own; a path below it is in a directory pm does not
+      trust, and both probing (``tmux -S`` follows the link) and unlinking
+      there would act inside it — the create path and every read path
+      refuse that state (``paths.shared_socket_dir_is_usable``).
+    - the entry itself must not be a symbolic link.  A real socket is
+      never one, and ``tmux -S`` follows a link on connect, so probing one
+      would reach a server pm never adopted (``find_session_server``
+      skips links for the same reason).
+    - the entry must be a socket (or a plain file) this user owns.  Another
+      local user can plant a server under the session's deterministic name
+      in the 1777 directory, and a stale foreign entry is not ours to
+      remove (``owned_only`` in ``find_session_server``).
+
+    The normal states pass: a stale socket we own (removed once no server
+    answers on it) and a live one (kept).  An absent entry returns
+    ``None``: there is nothing to remove.
+
+    The validated entry itself is returned so the caller can compare the
+    file it actually probes and unlinks with the one these checks saw.  A
+    second ``lstat`` there would not do: an entry planted between the
+    checks would become the caller's baseline and be removed unexamined,
+    which is the same check-what-you-act-on rule the liveness probe
+    follows (review-loop 4c94 i5).
+    """
+    from pm_core.paths import shared_socket_dir_is_usable
+
+    if not shared_socket_dir_is_usable():
+        return None
+    try:
+        entry = Path(socket_path).lstat()
+    except OSError:
+        return None
+    if stat.S_ISLNK(entry.st_mode) or entry.st_uid != os.getuid():
+        return None
+    if not (stat.S_ISSOCK(entry.st_mode) or stat.S_ISREG(entry.st_mode)):
+        return None
+    return entry
+
+
+def _socket_entry_identity(entry: os.stat_result) -> tuple[int, int, int]:
+    """Identify a socket-directory entry across the liveness probe.
+
+    ``(device, inode, mtime)``.  The inode number alone is not enough:
+    filesystems that hand a just-freed inode straight back out (overlayfs
+    — measured on this container's ``/tmp``: SIGKILL the server, let a
+    start rebind the path, and the new socket has the *same* inode
+    number) would make a rebound socket compare equal to the stale one
+    and be unlinked.  A socket file's mtime is its creation time and
+    nothing rewrites it, so a recreated file always differs — while the
+    same file keeps its mtime even when another pm process chmods it for
+    sharing (``paths.set_shared_socket_permissions``), so a chmod does not
+    block the cleanup.
+
+    ``st_mtime_ns`` when the stat provides it; a constructed
+    ``os.stat_result`` (the tests') does not, so its float ``st_mtime`` is
+    scaled instead.
+    """
+    ns = getattr(entry, "st_mtime_ns", None)
+    return (entry.st_dev, entry.st_ino,
+            ns if isinstance(ns, int) else int(entry.st_mtime * 1_000_000_000))
+
+
+def _remove_stale_socket(socket_path: str) -> None:
+    """Unlink *socket_path* when it is ours and no server answers on it.
+
+    tmux leaves the socket file behind after its server exits, and
+    `pm session list` would keep reporting the dead server.  A *live*
+    server's socket is kept: it can still host grouped sessions after its
+    base was killed elsewhere, or a session outside the killed group (a
+    stray or hand-made one, or a kill-session that failed), and unlinking
+    it strands every client attached there.  ``_removable_private_socket``
+    refuses the hostile states first (a planted directory link, a planted
+    symlink, another user's socket), so nothing is probed or deleted
+    through a path pm does not trust.  Both ``pm session kill`` branches
+    (session not found, session killed) apply this one rule.
+
+    The entry is compared with itself across the liveness probe: tmux
+    unlinks a stale socket and binds a new one at the same path, so a
+    ``pm session`` that starts this session while the command probes (a
+    kill racing a start, which the concurrent-start rule treats as
+    normal) leaves a *different* entry at the path.  Unlinking by path
+    then would remove the new server's socket: its clients could no
+    longer connect, and the next ``pm session`` would bind a second
+    server beside the one still running.  A changed entry is therefore
+    left alone; only the same file the probe found dead is removed.  The
+    identity includes the mtime, not only the inode: see
+    :func:`_socket_entry_identity` (a reused inode number would otherwise
+    compare equal).
+
+    The baseline is the entry ``_removable_private_socket`` validated,
+    not a fresh ``lstat``: a replacement planted between the ownership
+    check and the probe would otherwise be probed and unlinked without
+    ever being checked (the check-what-you-act-on rule, applied to the
+    ownership check as well as to the probe).
+    """
+    before = _removable_private_socket(socket_path)
+    if before is None:
+        return
+    if tmux_mod.server_alive(socket_path):
+        return
+    try:
+        after = Path(socket_path).lstat()
+    except OSError:
+        # The entry vanished while the probe ran: nothing left to remove.
+        return
+    if _socket_entry_identity(after) != _socket_entry_identity(before):
+        _log.info("session kill: socket %s was rebound while probing — "
+                  "keeping it", socket_path)
+        return
+    try:
+        Path(socket_path).unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def _pick_existing_session(candidates: list[str]) -> str:
+    """Return the first candidate session that is actually running.
+
+    Used where the cwd-derived name may differ from the session that
+    hosts it (workdir clones hash to their own tag).  Each candidate is
+    looked up on its private socket and then the legacy default server
+    (``tmux_mod.find_session_server``), so a different project's ambient
+    session is never preferred over the cwd's own live session.
+
+    A planted socket must not make a candidate look alive (which would
+    aim ``kill``/``mobile`` at it): see ``_owned_only_for_target``.
+    """
+    for name in candidates:
+        if tmux_mod.find_session_server(
+                name, owned_only=_owned_only_for_target(name))[0]:
+            return name
+    return candidates[0]
+
+
+def _resolve_target_session() -> str:
+    """Return the session ``pm session kill``/``mobile`` should act on.
+
+    Prefers the cwd-derived session and falls back to the session this
+    process is running inside (workdir clones hash to their own tag, so
+    the cwd name is usually absent while the ambient one is live).  A
+    foreign HOME's inherited session is never a candidate (R5b).  When a
+    share mode *is* requested it must match: ``pm session kill --global``
+    from inside a private session has no shared session to act on, and
+    must not kill the private one.  With no mode requested the ambient
+    session is the session the user is in, whatever mode it was created
+    with (``_ambient_session_for_share_mode``).
+    """
+    candidates = [_get_session_name_for_cwd()]
+    ambient = _ambient_session_for_share_mode(os.environ.get("PM_SHARE_MODE"))
+    if ambient and ambient not in candidates:
+        candidates.append(ambient)
+    return _pick_existing_session(candidates)
+
+
+def _resolve_session_socket(session_name: str,
+                            is_shared: bool) -> tuple[str | None, bool]:
+    """Select the tmux server for *session_name* and export it.
+
+    Returns ``(socket_path, legacy)``.  Every session gets its own
+    dedicated socket, derived from the final session name so workdir
+    clones and ``--dir`` joins resolve the same server as the session
+    they target.  Setting ``PM_TMUX_SOCKET`` here routes every subsequent
+    ``_tmux_cmd()`` call (create, split, rebalance, grouped sessions,
+    hooks) to that server.
+
+    Rollout compatibility: if no private session exists but an older pm
+    session of the same name lives on the default server, return
+    ``(None, True)`` and point ``PM_TMUX_SOCKET`` at the *default* server's
+    socket.  ``None`` keeps the caller from propagating the variable into
+    the session; the export is what makes the rest of this process (and
+    the subprocesses it spawns) address the default server explicitly.
+    Nothing is migrated, detached, or killed automatically.
+    """
+    from pm_core.paths import SHARED_SOCKET_DIR, ensure_socket_dir
+
+    try:
+        ensure_socket_dir()
+    except OSError as e:
+        # ensure_socket_dir refuses a world-writable directory without the
+        # sticky bit (another user could unlink our socket there, and the
+        # uid check below cannot prevent it: it runs once, before tmux
+        # binds) and a symbolic link at the path (its target's owner can
+        # unlink our sockets there).  Report the fix instead of a
+        # traceback.
+        click.echo(
+            f"Cannot use tmux socket directory '{SHARED_SOCKET_DIR}': {e}. "
+            "It must be a real directory (not a symlink) owned by you, or "
+            "one with the sticky bit set (1777) so no other user can remove "
+            "your sockets.", err=True)
+        raise SystemExit(1)
+    socket_path = tmux_mod.session_socket_for(session_name)
+    # The socket directory is world-writable, so another user can plant
+    # something at our deterministic socket path.  Inspect the directory
+    # entry itself (``lstat``), never a symlink's target, for both checks
+    # below.
+    try:
+        entry = Path(socket_path).lstat()
+    except OSError:
+        entry = None
+    # A symbolic link is never a server pm created — tmux binds a real
+    # socket file at this path — so it was planted, and connecting through
+    # it would attach this process to whatever server it points at (a
+    # world-writable /tmp lets another user create the link first).  This
+    # check applies to shared sessions too: the ownership check below is
+    # private-only because a joiner does not own the owner's socket, so
+    # without this a *shared* start would follow the link.
+    if entry is not None and stat.S_ISLNK(entry.st_mode):
+        click.echo(
+            f"Refusing to use tmux socket '{socket_path}': it is a symbolic "
+            "link, not a socket. Remove it if you created it.", err=True)
+        raise SystemExit(1)
+    # Private servers live in a world-writable directory; refuse to connect
+    # to a socket another user planted at our path.  Shared sessions are
+    # owned by the sharing user by design, so this check is private-only —
+    # and so is the server this process is already attached to: a joiner's
+    # plain ``pm session`` inside a shared session adopts that session
+    # (``_resolve_start_session_name``), which makes ``is_shared`` false
+    # (``_set_share_mode_env`` pops ``PM_SHARE_MODE`` without a flag) while
+    # the socket is the sharing user's.  ``_owned_only_for_target`` is the
+    # same "implicit target, not the server I am on" rule ``kill``/``mobile``
+    # apply, so a joiner reattaching is not refused a socket that is
+    # legitimately not theirs.
+    # It deliberately runs before the legacy check below: fail closed on a
+    # socket we do not own even though the legacy path would not connect to
+    # it (a squatted socket is a hostile condition, not something to route
+    # around silently).
+    # The ownership comes from the same ``lstat`` result, so a dangling
+    # link planted by another user is never mistaken for our own socket.
+    owned_only = not is_shared and _owned_only_for_target(session_name)
+    if owned_only:
+        owner = entry.st_uid if entry is not None else os.getuid()
+        if owner != os.getuid():
+            click.echo(
+                f"Refusing to use tmux socket '{socket_path}': owned by "
+                f"uid {owner}, not you. A stale socket has to be removed "
+                "by its owner ('pm session kill' as that user).", err=True)
+            raise SystemExit(1)
+    os.environ["PM_TMUX_SOCKET"] = socket_path
+
+    if not is_shared:
+        # Private start: the uid check above already refused a socket we do
+        # not own, and this repeats it inside the probe so a file created
+        # between the check and the connect cannot be adopted either.  The
+        # probe follows the same exemption: the server this process is
+        # attached to is not a planted one (and for a shared session it is
+        # the only one that answers).
+        hosting_socket, on_private = tmux_mod.find_session_server(
+            session_name, owned_only=owned_only)
+        if hosting_socket is not None and not on_private:
+            _log.info("legacy default-server session found: %s", session_name)
+            # Address the default server explicitly rather than clearing the
+            # override: with no -S the tmux binary follows $TMUX, which from
+            # inside another pm pane names that session's private server.
+            # The legacy session would then look missing, and the create
+            # path would duplicate it on the wrong server.
+            os.environ["PM_TMUX_SOCKET"] = hosting_socket
+            return None, True
+    return socket_path, False
 
 
 def _session_start(share_global: bool = False, share_group: str | None = None,
@@ -267,19 +853,12 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
             click.echo(f"Unix group '{share_group}' does not exist.", err=True)
             raise SystemExit(1)
 
-    # Compute socket path for shared sessions
-    socket_path: str | None = None
+    # Shared sessions need a resolvable tag (the tag selects the socket).
     if is_shared:
-        from pm_core.paths import get_session_tag, shared_socket_path, ensure_shared_socket_dir
-        tag = get_session_tag(start_path=Path(start_dir) if start_dir else None)
-        if not tag:
+        from pm_core.paths import get_session_tag
+        if not get_session_tag(start_path=Path(start_dir) if start_dir else None):
             click.echo("Cannot determine session tag (not in a git repo?).", err=True)
             raise SystemExit(1)
-        ensure_shared_socket_dir()
-        socket_path = str(shared_socket_path(tag))
-        # Set env var so _tmux_cmd() in all subsequent calls (split_pane,
-        # get_window_id, rebalance, etc.) routes to the shared server.
-        os.environ["PM_TMUX_SOCKET"] = socket_path
 
     # Check if project exists
     try:
@@ -318,56 +897,61 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
             raise SystemExit(1)
     else:
         # Prefer the actual tmux session if we're already inside one (e.g. meta
-        # workdirs whose git-root hash differs from the session they belong to).
-        session_name = _get_current_pm_session() or _get_session_name_for_cwd()
+        # workdirs whose git-root hash differs from the session they belong to),
+        # but never adopt a foreign session from a different HOME, and never
+        # adopt one created under a different share mode (--global/--group).
+        session_name = _resolve_start_session_name(is_shared)
 
-    _log.info("checking if session exists: %s (socket=%s)", session_name, socket_path)
-    if tmux_mod.session_exists(session_name, socket_path=socket_path):
-        # Check if the session has the expected panes
-        live_panes = tmux_mod.get_pane_indices(session_name)
-        registry = pane_registry.load_registry(session_name)
-        all_registered = [p for _, p in pane_registry._iter_all_panes(registry)]
+    # Every pm session gets its own tmux server.  Derive the socket from the
+    # final session name (not from the cwd) so workdir clones and --dir joins
+    # resolve the same server as the session they target.
+    socket_path, legacy = _resolve_session_socket(session_name, is_shared)
+    session_running = tmux_mod.session_exists(session_name,
+                                              socket_path=socket_path)
+    if legacy and not session_running:
+        # The pre-isolation session disappeared between the rollout lookup
+        # and this check (e.g. a concurrent `pm session kill`).  Re-resolve
+        # rather than carrying on with the default server selected: the
+        # create path below would otherwise leave a brand-new session on
+        # the default server, which R1 says must never happen and which the
+        # next `pm session` would keep treating as legacy.
+        _log.info("legacy session %s vanished; using its private socket",
+                  session_name)
+        socket_path, legacy = _resolve_session_socket(session_name, is_shared)
+        session_running = tmux_mod.session_exists(session_name,
+                                                  socket_path=socket_path)
 
-        # Find which registered panes are still alive
-        live_pane_ids = {p[0] for p in live_panes}
-        roles_alive = {p["role"] for p in all_registered if p["id"] in live_pane_ids}
-
+    _log.info("checking if session exists: %s (socket=%s, running=%s)",
+              session_name, socket_path, session_running)
+    if session_running:
         _log.info("session exists: %s", session_name)
-        _log.info("roles_alive: %s", roles_alive)
-
-        # If TUI is missing, respawn it rather than killing the session
-        if "tui" not in roles_alive:
-            _log.info("TUI missing, respawning in existing session")
-            click.echo("TUI pane missing — respawning...")
-            # Find the window where TUI was registered (or fall back to first window)
-            tui_window = None
-            for wid, wdata in registry.get("windows", {}).items():
-                for p in wdata.get("panes", []):
-                    if p.get("role") == "tui":
-                        tui_window = wid
-                        break
-                if tui_window:
-                    break
-            if not tui_window:
-                # Fall back to window named 'main' (or first window) rather
-                # than the active window, which may be a QA/work window.
-                main_win = tmux_mod.find_window_by_name(session_name, "main")
-                if main_win:
-                    tui_window = main_win["id"]
-                else:
-                    all_wins = tmux_mod.list_windows(session_name)
-                    if all_wins:
-                        tui_window = all_wins[0]["id"]
-            if tui_window:
-                pane_layout._respawn_tui(session_name, tui_window)
-                pane_layout.rebalance(session_name, tui_window)
-            else:
-                _log.warning("TUI respawn failed — no windows found in session")
-                click.echo("Could not respawn TUI (no windows). "
-                           "Kill the session manually and re-run pm session.",
-                           err=True)
+        # The after-kill-pane hook may be respawning a killed TUI at this
+        # moment; deciding under the same lock means only one of us starts
+        # it (QA S42).
+        with pane_registry.tui_respawn_lock(session_name):
+            respawned_window = _ensure_tui_running(session_name)
+        if respawned_window:
+            pane_layout.rebalance(session_name, respawned_window)
 
         if tmux_mod.session_exists(session_name, socket_path=socket_path):
+            if legacy:
+                # Printed here, not from the rollout decision above: that
+                # decision is a snapshot, and the note must never describe a
+                # session that is not being attached (a concurrent
+                # `pm session kill` in the TUI check above takes the create
+                # path instead; review-loop 8d4e i1, 60a8 i2).
+                #
+                # Avoid the word "shared": in pm that means --global/
+                # --group, and this session is private — it is only on the
+                # default tmux server because it predates per-session
+                # servers.
+                click.echo(
+                    f"Note: existing session '{session_name}' was started "
+                    "before per-session tmux servers and still runs on the "
+                    "default tmux server; attaching there. Run "
+                    "'pm session kill' and start again to move it to a "
+                    "private server."
+                )
             _log.info("TUI present, finding/creating grouped session")
             _register_tmux_bindings(session_name)
             # Reuse an unattached grouped session, or create a new one
@@ -382,10 +966,17 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
                 _log.info("creating new grouped session: %s", grouped)
                 tmux_mod.create_grouped_session(session_name, grouped,
                                                 socket_path=socket_path)
-                if os.environ.get("PM_SHARE_MODE"):
+                # A plain `pm session` that adopted a shared ambient session
+                # has no PM_SHARE_MODE in the process env; ask the session.
+                if _session_is_shared(session_name):
                     tmux_mod.set_session_option(grouped, "window-size", "smallest",
                                                 socket_path=socket_path)
                 click.echo(f"Attaching to session '{grouped}'...")
+            if respawned_window:
+                # Show the respawned TUI in the session this command
+                # attaches, and only there.  Another client of the group
+                # (a shared session's owner) stays on its window (QA S45).
+                tmux_mod.select_window_in_session(grouped, respawned_window)
             # Disconnect other clients if requested (before attaching so
             # window-size recalculates based only on our terminal).
             if disconnect_others:
@@ -414,6 +1005,20 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
         click.echo("The session owner must start it first.", err=True)
         raise SystemExit(1)
 
+    if legacy:
+        # A legacy session can also vanish *after* the existence check above
+        # — a concurrent `pm session kill` while the TUI-respawn lock was
+        # held, or between the rollout re-check's own two probes — and the
+        # create path below would then put the replacement on the default
+        # server: ``socket_path`` is None and ``PM_TMUX_SOCKET`` still names
+        # that server (R6.1).  That is outside the session's own server (R1)
+        # and every later `pm session` would see the new session as legacy
+        # again (the same failure the earlier vanished check closes).  The
+        # lookup now yields the deterministic private socket.
+        _log.info("legacy session %s vanished before the attach; using its "
+                  "private socket", session_name)
+        socket_path, legacy = _resolve_session_socket(session_name, is_shared)
+
     _log.info("session does not exist or was killed, creating new session")
     editor = find_editor()
 
@@ -428,8 +1033,8 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
     # Always create session with TUI in the left pane
     _log.info("creating tmux session: %s cwd=%s socket=%s", session_name, cwd, socket_path)
     click.echo(f"Creating tmux session '{session_name}'...")
-    # For shared sessions, set PM_TMUX_SOCKET in the initial command so the TUI
-    # process inherits it immediately (set-environment only affects new processes)
+    # Set PM_TMUX_SOCKET in the initial command so the TUI process inherits
+    # it immediately (set-environment only affects processes started later).
     tui_cmd = "pm _tui"
     tui_env_prefix = ""
     if socket_path:
@@ -461,11 +1066,16 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
             tmux_mod.set_environment(session_name, env_key, val,
                                      socket_path=socket_path)
 
-    # For shared sessions, set PM_TMUX_SOCKET so all pm commands inside
-    # the session automatically route to the correct tmux server
+    # Set PM_TMUX_SOCKET so all pm commands inside the session (panes,
+    # subprocesses, hooks, popups) automatically route to this session's
+    # own tmux server.
     if socket_path:
         tmux_mod.set_environment(session_name, "PM_TMUX_SOCKET", socket_path,
                                  socket_path=socket_path)
+        # run-shell hooks and display-popup bodies inherit the server's
+        # global environment; export it there too.
+        tmux_mod.set_global_environment("PM_TMUX_SOCKET", socket_path,
+                                        socket_path=socket_path)
 
     # Propagate PM_SHARE_MODE so subprocesses (rebalance, pane-switch, etc.)
     # compute the same session tag as the parent
@@ -489,11 +1099,12 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
     # Register TUI pane in layout registry
     pane_registry.register_pane(session_name, window_id, tui_pane, "tui", "pm _tui")
 
-    def _wrap(cmd: str) -> str:
-        """Wrap a pane command in bash with an EXIT trap for rebalancing."""
-        escaped = cmd.replace("'", "'\\''")
-        return (f"bash -c 'trap \"pm _pane-exited {session_name} {window_id} {generation} $TMUX_PANE\" EXIT; "
-                f"{escaped}'")
+    # The EXIT-trap wrapper lives in ``tmux.wrap_with_exit_trap``; every
+    # pane that needs one is launched through ``pane_ops``
+    # (``launch_pane`` / ``_wrap_pane_cmd``), so this path only registers
+    # the TUI pane.  The local wrapper that used to sit here was left over
+    # from the auto-started notes pane and was never called (review-loop
+    # b48f i18).
 
     # Notes pane is no longer auto-started — press `n` in the TUI to
     # open it on demand, or run `pm notes` in a pane manually.
@@ -512,7 +1123,7 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
     # Create a grouped session so we never attach directly to the base
     grouped = f"{session_name}~1"
     tmux_mod.create_grouped_session(session_name, grouped, socket_path=socket_path)
-    if os.environ.get("PM_SHARE_MODE"):
+    if _session_is_shared(session_name):
         tmux_mod.set_session_option(grouped, "window-size", "smallest",
                                     socket_path=socket_path)
     tmux_mod.attach(grouped, socket_path=socket_path)
@@ -547,26 +1158,118 @@ def session(ctx, share_global, share_group, start_dir, print_connect, disconnect
         _set_share_mode_env(share_global, share_group)
     if ctx.invoked_subcommand is not None:
         return
-    if print_connect:
-        # Check PM_TMUX_SOCKET (set inside shared sessions) or compute from flags
-        sp = os.environ.get("PM_TMUX_SOCKET")
-        if not sp and (share_global or share_group):
-            from pm_core.paths import get_session_tag, shared_socket_path
-            tag = get_session_tag(start_path=Path(start_dir) if start_dir else None)
-            if tag:
-                sp = str(shared_socket_path(tag))
-        if sp:
-            click.echo(f"tmux -S {sp} attach")
-        else:
-            click.echo("Not in a shared session and no --global/--group given.", err=True)
-            raise SystemExit(1)
-        return
+    # Validate the flag combination before anything prints a command: the
+    # printed command must name a session `pm session` would actually use.
     if start_dir and not (share_global or share_group):
         click.echo("--dir requires --global or --group", err=True)
         raise SystemExit(1)
     if share_global and share_group:
         click.echo("--global and --group are mutually exclusive", err=True)
         raise SystemExit(1)
+    if print_connect:
+        # Every session lives on its own server; print that socket's attach
+        # command.  Legacy sessions still on the default server get the
+        # default server's explicit socket plus `-t <session>`.
+        if start_dir:
+            from pm_core.paths import get_session_tag
+            tag = get_session_tag(start_path=Path(start_dir))
+            if not tag:
+                click.echo(
+                    f"Cannot determine session from directory '{start_dir}'.",
+                    err=True)
+                raise SystemExit(1)
+            session_name = f"pm-{tag}"
+        else:
+            # Same resolution as `pm session` itself, so the printed
+            # command names the session that would actually be attached —
+            # including the share-mode check, so `--global --print-connect`
+            # inside a private session prints the shared session.
+            #
+            # A shared print must also refuse where the start path refuses:
+            # in a non-git directory `get_session_tag` returns None, so
+            # `pm session --global` exits 1 and can never create the
+            # share-mode-hashed fallback name.  Printing a connect command
+            # for that name would advertise a session that cannot exist
+            # (QA scenario 64).  A plain print keeps working: its private
+            # fallback is exactly what a plain `pm session` creates.
+            if share_global or share_group:
+                from pm_core.paths import get_session_tag
+                if not get_session_tag():
+                    click.echo(
+                        "Cannot determine session tag (not in a git repo?).",
+                        err=True)
+                    raise SystemExit(1)
+            session_name = _resolve_start_session_name(
+                bool(share_global or share_group))
+        sp = tmux_mod.session_socket_for(session_name)
+        # A print must not advertise another user's socket: the command is
+        # pasted into a shell, so it would attach the user to a server
+        # someone else planted.  `--global`/`--group` (and a pane of a
+        # shared session, via the inherited PM_SHARE_MODE) and the session
+        # this process runs inside legitimately name another user's socket.
+        owned_only = _owned_only_for_target(session_name)
+        hosting_socket, on_private = tmux_mod.find_session_server(
+            session_name, owned_only=owned_only)
+        # With no server of our own the command names the deterministic
+        # path, so a hostile entry there must be refused rather than
+        # printed: tmux follows a symbolic link on connect (a real socket
+        # is never a link), and in a private context a socket another user
+        # owns is a planted server.  A shared context keeps a foreign
+        # socket — the sharing user's — reachable, and an absent or stale
+        # entry is the normal before-the-first-start state.
+        if hosting_socket is None:
+            # The directory itself must be a real directory first.  /tmp is
+            # world-writable, so another local user can plant
+            # ``/tmp/pm-sessions`` as a symlink to a directory they own and
+            # run a server there under our deterministic socket name; a
+            # path *inside* that directory follows the link even when the
+            # entry itself is a real socket, and the command is pasted into
+            # another shell — so the print must refuse exactly where
+            # ``find_session_server`` (which skipped the probe) and
+            # ``_resolve_session_socket`` refuse.  This applies to a shared
+            # print too, where no ownership check runs by design.
+            from pm_core.paths import (SHARED_SOCKET_DIR,
+                                       shared_socket_dir_is_usable)
+            if not shared_socket_dir_is_usable():
+                click.echo(
+                    f"Refusing to print a connect command for "
+                    f"'{session_name}': '{SHARED_SOCKET_DIR}' is not a real "
+                    "directory (a symbolic link, or another non-directory "
+                    "entry). Remove it if you created it.", err=True)
+                raise SystemExit(1)
+            try:
+                entry = Path(sp).lstat()
+            except OSError:
+                entry = None
+            if entry is not None and stat.S_ISLNK(entry.st_mode):
+                click.echo(
+                    f"Refusing to print a connect command for "
+                    f"'{session_name}': tmux socket '{sp}' is a symbolic "
+                    "link, not a socket. Remove it if you created it.",
+                    err=True)
+                raise SystemExit(1)
+            if (entry is not None and owned_only
+                    and stat.S_ISSOCK(entry.st_mode)
+                    and entry.st_uid != os.getuid()):
+                click.echo(
+                    f"Refusing to print a connect command for "
+                    f"'{session_name}': tmux socket '{sp}' is owned by uid "
+                    f"{entry.st_uid}, not you.", err=True)
+                raise SystemExit(1)
+        # Quote the socket path and the session name: the output is meant to
+        # be pasted into a shell, and a tag derived from a repo directory
+        # name may contain a space.  shlex.quote leaves ordinary values bare,
+        # so the printed command is unchanged for them.
+        if hosting_socket is not None and not on_private:
+            # Legacy session on the default server.  Name the socket *and*
+            # the session: a bare `tmux attach` follows $TMUX (the wrong
+            # server when pasted into another pm pane), and one default
+            # server can host several legacy pm sessions.
+            click.echo(f"tmux -S {shlex.quote(hosting_socket)} attach "
+                       f"-t {shlex.quote(session_name)}")
+        else:
+            click.echo(f"tmux -S {shlex.quote(sp)} attach")
+        return
     _session_start(share_global=share_global, share_group=share_group,
                    start_dir=start_dir, disconnect_others=disconnect_others)
 
@@ -584,6 +1287,104 @@ def session_tag_cmd():
     click.echo(get_session_tag())
 
 
+@session.command("list")
+def session_list():
+    """List pm sessions across their tmux servers.
+
+    Each pm session runs on its own dedicated tmux server (socket) under
+    /tmp/pm-sessions/.  Sessions started by older pm versions still live on
+    the default server and are listed as "(default server)".  Grouped
+    sessions (~N) are collapsed into their base session; the client count
+    covers the base session and its ~N grouped sessions (a client attached
+    through a user's own tmux view is not counted — `tmux list-clients` is
+    authoritative there).  A view of a session gets no row of its own.
+    """
+    if not tmux_mod.has_tmux():
+        click.echo("tmux is not installed.", err=True)
+        raise SystemExit(1)
+
+    from pm_core.paths import (SHARED_SOCKET_DIR, display_width,
+                               get_session_tag, session_socket_path)
+
+    # The cwd project's socket is probed by name as well, so its session is
+    # still listed when the socket directory can be written but not read
+    # (a root-owned 1733 /tmp/pm-sessions); the scan reports that case in
+    # ``read_errors`` and it is said out loud below, never answered with a
+    # bare "No pm sessions found." while sessions run (QA S34).
+    #
+    # So is the socket of the pm session this command runs in (a pane,
+    # popup or hook: ``$PM_TMUX_SOCKET``, else the socket ``$TMUX`` names
+    # under the socket directory).  A shell window of a session whose cwd
+    # is $HOME or a PR workdir clone otherwise names no socket of that
+    # session, and the list run there left out the very session the pane
+    # belongs to (QA S40, qa.md ambiguity 12).  The scan takes only entries
+    # of the socket directory, so a legacy session's default-server
+    # socket is not an extra one (the default server is always listed).
+    tag = get_session_tag()
+    if tag:
+        own_socket = session_socket_path(tag)
+    else:
+        # A non-git pm project has no tag but does get a session, named
+        # ``pm-<dir>-00000000`` (``_get_session_name_for_cwd``).  Name its
+        # socket the same way, so the one case the probe-by-name exists
+        # for — an unreadable socket directory, which the scan cannot
+        # enumerate — still lists the project's running session.  Outside
+        # a pm project there is no session to name, and the warning says
+        # how to check one.
+        try:
+            store.find_project_root()
+        except FileNotFoundError:
+            own_socket = None
+        else:
+            own_socket = Path(tmux_mod.session_socket_for(
+                _get_session_name_for_cwd()))
+    ambient = tmux_mod.resolve_ambient_socket()
+    ambient_socket = (Path(ambient) if ambient
+                      and Path(ambient).parent == SHARED_SOCKET_DIR
+                      and Path(ambient) != own_socket else None)
+    extra_sockets = [s for s in (own_socket, ambient_socket) if s]
+    read_errors: list[OSError] = []
+    rows = tmux_mod.list_pm_sessions(extra_sockets=extra_sockets,
+                                     read_errors=read_errors)
+    if read_errors:
+        reason = read_errors[0].strerror or str(read_errors[0])
+        hint = ("run this from a project directory to check that "
+                "project's session")
+        if own_socket and ambient_socket:
+            checked = ("only this project's session and the session this "
+                       "command runs in were checked there")
+        elif own_socket:
+            checked = "only this project's session was checked there"
+        elif ambient_socket:
+            checked = ("only the session this command runs in was checked "
+                       f"there; {hint}")
+        else:
+            checked = hint
+        click.echo(
+            f"Cannot read tmux socket directory '{SHARED_SOCKET_DIR}' "
+            f"({reason}): other pm sessions may be running but cannot be "
+            f"listed; {checked}.", err=True)
+    if not rows:
+        click.echo("No pm sessions found.")
+        return
+
+    # Session names are repo-name + hash, so they can be long; size the
+    # column to the data instead of truncating/misaligning.  Measure in
+    # terminal cells, not code points: a repo directory named in a
+    # non-Latin script keeps its wide characters in the tag
+    # (``paths.tmux_safe_name``), and padding by ``len()`` would shift the
+    # CLIENTS/SOCKET columns right on every row that has one.
+    width = max(display_width("SESSION"),
+                *(display_width(r["name"]) for r in rows))
+    click.echo(f"{'SESSION':<{width}} {'CLIENTS':>7}  SOCKET")
+    for row in rows:
+        sock = row["socket"] or "(default server)"
+        if row.get("shared"):
+            sock += "  (shared)"
+        pad = " " * (width - display_width(row["name"]))
+        click.echo(f"{row['name']}{pad} {row['attached']:>7}  {sock}")
+
+
 @session.command("kill")
 @_share_mode_options
 @click.option("--dir", "start_dir", type=click.Path(exists=True, file_okay=False),
@@ -594,50 +1395,166 @@ def session_kill(start_dir):
         click.echo("tmux is not installed.", err=True)
         raise SystemExit(1)
 
-    is_shared = bool(os.environ.get("PM_SHARE_MODE"))
-    socket_path: str | None = None
-    if is_shared:
-        from pm_core.paths import get_session_tag, shared_socket_path
-        tag = get_session_tag(start_path=Path(start_dir) if start_dir else None)
-        if tag:
-            socket_path = str(shared_socket_path(tag))
-
     if start_dir:
         from pm_core.paths import get_session_tag
         tag = get_session_tag(start_path=Path(start_dir))
-        session_name = f"pm-{tag}" if tag else _get_session_name_for_cwd()
+        if not tag:
+            # Never fall back to the caller's cwd: `--dir` names the target,
+            # and killing a different project's session because the given
+            # directory is not a git repo is destructive.  Same refusal as
+            # `pm session --print-connect --dir`.
+            click.echo(
+                f"Cannot determine session from directory '{start_dir}'.",
+                err=True)
+            raise SystemExit(1)
+        session_name = f"pm-{tag}"
     else:
-        session_name = _get_session_name_for_cwd()
+        session_name = _resolve_target_session()
 
-    if not tmux_mod.session_exists(session_name, socket_path=socket_path):
+    session_tag = session_name.removeprefix("pm-")
+    socket_path = tmux_mod.session_socket_for(session_name)
+
+    # The hosting server: the session's own socket, or the default server
+    # for a legacy pre-isolation session (addressed by its explicit path,
+    # since tmux follows $TMUX when no -S is given).
+    # Exact name match: a bare tmux target is a *prefix* match, so
+    # `has-session -t pm-x` also succeeds for a surviving grouped session
+    # `pm-x~1`.  Treating that as "running" would kill the grouped session
+    # (detaching its client) and unlink a live server's socket; R8 requires
+    # "No session found" and leaves the server alone.
+    # An implicit kill must never resolve to another user's server: the
+    # socket directory is world-writable and a real socket there is not a
+    # symlink, so only ownership distinguishes the user's session from a
+    # planted one.  A shared kill, or the session this process runs
+    # inside, may name the sharing user's socket (see
+    # ``_owned_only_for_target``).
+    hosting_socket, _on_private = tmux_mod.find_exact_session_server(
+        session_name, owned_only=_owned_only_for_target(session_name))
+    if hosting_socket is None:
         click.echo(f"No session '{session_name}' found.", err=True)
+        # A stale socket file is still cleaned up; a live server's is kept.
+        _remove_stale_socket(socket_path)
         raise SystemExit(1)
 
-    # Kill grouped sessions first, then the base
-    for g in tmux_mod.list_grouped_sessions(session_name, socket_path=socket_path):
-        tmux_mod.kill_session(g, socket_path=socket_path)
-    tmux_mod.kill_session(session_name, socket_path=socket_path)
-    pane_layout.set_force_mobile(session_name, False)
+    # From here on the command must run to the end even if its terminal
+    # goes away (see ``_hangup_ignored``).
+    with _hangup_ignored():
+        # Kill every session in the group — the `~N` grouped sessions and a
+        # user's own view however it is named — then the base, on the hosting
+        # server.  A view (``tmux new-session -t base -s myview``,
+        # S118/S121/S124) is not a session of its own: it shares the windows,
+        # so leaving it behind would keep the old TUI pane and the server
+        # alive, the socket could not be unlinked, and a later `pm session`
+        # would start a second base with the same name on the same server.
+        # Enumerate through tmux's session *group*, not the ``base~N`` name
+        # prefix, which cannot see a view (R8: nothing of the session is left
+        # behind).  Every kill uses an exact target: the lookup above is exact,
+        # and a bare ``-t`` would prefix-match a *different* session if the base
+        # (or a member) disappeared between the lookup and here (verified on
+        # tmux 3.2a) — on the legacy default server that is another pm
+        # session's TUI.
+        failed: list[str] = []
+        for member in tmux_mod.sessions_in_group(session_name,
+                                                 socket_path=hosting_socket):
+            if member == session_name:
+                continue
+            if (not tmux_mod.kill_session(member, socket_path=hosting_socket,
+                                          exact=True)
+                    and tmux_mod.session_exists(f"={member}",
+                                                socket_path=hosting_socket)):
+                failed.append(member)
+        # Do not kill the base while a member survives.  The member keeps
+        # the session's windows, the server and its socket, and the base is
+        # the name every later lookup is exact on (R8.1): once it is gone,
+        # `pm session kill` reports "No session ... found" and can never
+        # finish the teardown, leaving a session the user cannot retire
+        # with pm.  Stopping here leaves the session intact, so a retry
+        # works.
+        if not failed and (
+                not tmux_mod.kill_session(session_name,
+                                          socket_path=hosting_socket,
+                                          exact=True)
+                and tmux_mod.session_exists(f"={session_name}",
+                                            socket_path=hosting_socket)):
+            failed.append(session_name)
+        if failed:
+            # A failed kill that leaves the session (or a member of its
+            # group) running must not be reported as a teardown: the
+            # container/proxy cleanup below belongs to the session and
+            # would break the survivor, and unlinking a live server's
+            # socket would strand its clients.  Existence is re-checked
+            # only after a failure, because tmux also fails for a session
+            # that vanished concurrently — that one is already gone and
+            # the cleanup is still right.
+            click.echo(
+                f"Failed to kill session '{session_name}' (still running: "
+                f"{', '.join(failed)}); nothing was cleaned up.", err=True)
+            raise SystemExit(1)
 
-    # Clean up containers and push proxies belonging to this session
-    session_tag = session_name.removeprefix("pm-")
-    if session_tag:
-        from pm_core.container import cleanup_session_containers
-        from pm_core.push_proxy import stop_session_proxies
-        n_containers = cleanup_session_containers(session_tag)
-        n_proxies = stop_session_proxies(session_tag)
-        if n_containers or n_proxies:
-            _log.info("Session kill cleanup: %d container(s), %d proxy(ies)",
-                      n_containers, n_proxies)
+        pane_layout.set_force_mobile(session_name, False)
 
-    # Clean up shared socket file
-    if socket_path:
+        # Clean up containers and push proxies belonging to this session
+        if session_tag:
+            from pm_core.container import cleanup_session_containers
+            from pm_core.push_proxy import stop_session_proxies
+            n_containers = cleanup_session_containers(session_tag)
+            n_proxies = stop_session_proxies(session_tag)
+            if n_containers or n_proxies:
+                _log.info(
+                    "Session kill cleanup: %d container(s), %d proxy(ies)",
+                    n_containers, n_proxies)
+
+        # The server normally exits with its last session; remove the socket
+        # file it leaves behind (kept if the server is still alive).
+        _remove_stale_socket(socket_path)
+
+        _echo_surviving_hangup(f"Killed session '{session_name}'.")
+
+
+@contextlib.contextmanager
+def _hangup_ignored():
+    """Ignore SIGHUP for the duration of a session teardown.
+
+    ``pm session kill`` typed in a shell window *inside* the session it
+    kills always loses its terminal: when the server exits it hangs up
+    every pane, and the default SIGHUP action ended the command before the
+    container/proxy cleanup and the socket unlink ran (QA S30: the
+    push-proxy daemon, its directory and ``.lock``, and the
+    ``/tmp/pm-sessions`` socket file were left behind; the container went
+    only through the agent pane's own EXIT trap).  The remaining work is
+    short and bounded, so the hangup is ignored until it is done; the same
+    keeps a kill whole when the user's own terminal closes mid-command.
+    The previous handler is restored afterwards (a hangup that arrived
+    meanwhile was discarded, not left pending).
+    """
+    try:
+        previous = signal.signal(signal.SIGHUP, signal.SIG_IGN)
+    except ValueError:  # not the main thread: leave signals alone
+        previous = None
+    try:
+        yield
+    finally:
+        if previous is not None:
+            signal.signal(signal.SIGHUP, previous)
+
+
+def _echo_surviving_hangup(message: str) -> None:
+    """Print *message*, tolerating a terminal that no longer exists.
+
+    A kill typed in a pane of the session it kills has lost that pane's
+    terminal by the time it reports, so the write fails (EIO).  The work
+    is done and nobody can read the line: drop it, and point stdout at
+    /dev/null so interpreter shutdown does not fail flushing it again.
+    """
+    try:
+        click.echo(message)
+    except OSError:
         try:
-            Path(socket_path).unlink(missing_ok=True)
-        except OSError:
+            devnull = os.open(os.devnull, os.O_WRONLY)
+            os.dup2(devnull, sys.stdout.fileno())
+            os.close(devnull)
+        except (OSError, ValueError, AttributeError):
             pass
-
-    click.echo(f"Killed session '{session_name}'.")
 
 
 @session.command("mobile")
@@ -648,14 +1565,28 @@ def session_mobile(force: bool | None):
     Mobile mode auto-zooms the active pane on every pane switch,
     making the tool usable on narrow terminals (< 120 cols).
     """
-    session_name = _get_session_name_for_cwd()
+    if not tmux_mod.has_tmux():
+        click.echo("tmux is not installed.", err=True)
+        raise SystemExit(1)
+
+    session_name = _resolve_target_session()
+    # Target the server that actually hosts the session (private socket, or
+    # the legacy default server).  An implicit target must resolve to a
+    # socket this user owns (see ``_owned_only_for_target``).  None means
+    # no server hosts it: the ambient setting is left untouched, and the
+    # tmux operations below are skipped rather than run against whichever
+    # server this process happens to be on — a session name is a tmux
+    # *prefix* target there, so a user's view named after the missing
+    # session would be moved instead.
+    socket_path = _select_session_socket(
+        session_name, owned_only=_owned_only_for_target(session_name))
 
     if force is not None:
         pane_layout.set_force_mobile(session_name, force)
         state = "enabled" if force else "disabled"
         click.echo(f"Mobile mode force-{state} for '{session_name}'.")
         # Trigger rebalance if in tmux
-        if tmux_mod.in_tmux():
+        if tmux_mod.in_tmux() and socket_path is not None:
             window = tmux_mod.get_window_id(session_name)
             all_windows = tmux_mod.list_windows(session_name)
             if not force:
@@ -681,9 +1612,11 @@ def session_mobile(force: bool | None):
                     if not tmux_mod.is_zoomed(session_name, w["index"]):
                         tmux_mod.zoom_pane(f"{session_name}:{w['index']}")
     else:
-        # Show status
+        # Show status.  "Running" is the server lookup above, not a prefix
+        # probe on the ambient server: a session that merely starts with
+        # this name is not this session.
         force_flag = pane_layout.mobile_flag_path(session_name).exists()
-        if tmux_mod.session_exists(session_name):
+        if socket_path is not None:
             window = tmux_mod.get_window_id(session_name)
             width, _ = tmux_mod.get_window_size(session_name, window)
             mobile = pane_layout.is_mobile(session_name, window)
@@ -734,9 +1667,14 @@ def pane_exited_cmd(session: str, window: str, generation: str, pane_id: str):
 
 
 @cli.command("_pane-closed", hidden=True)
-def pane_closed_cmd():
-    """Internal: handle pane close from global tmux hook."""
-    pane_layout.handle_any_pane_closed()
+@click.argument("session", default="")
+def pane_closed_cmd(session: str):
+    """Internal: handle pane close from global tmux hook.
+
+    ``session`` is the session the hook fired in (``#{q:session_name}``);
+    when it is empty the handler falls back to ``$TMUX_PANE``.
+    """
+    pane_layout.handle_any_pane_closed(session)
 
 
 @cli.command("_pane-opened", hidden=True)
@@ -744,9 +1682,13 @@ def pane_closed_cmd():
 @click.argument("window")
 @click.argument("pane_id")
 def pane_opened_cmd(session: str, window: str, pane_id: str):
-    """Internal: handle tmux after-split-window hook."""
-    pane_layout.handle_pane_opened(pane_registry.pm_session_name(session),
-                                   window, pane_id)
+    """Internal: handle tmux after-split-window hook.
+
+    The session name is passed through as tmux reported it; the handler
+    resolves a user's own grouped view to its pm session (S121) and skips
+    a non-pm session, so the resolution happens once, there.
+    """
+    pane_layout.handle_pane_opened(session, window, pane_id)
 
 
 def _pin_popup_body(body: str, session: str, window: str | None) -> str:
@@ -810,7 +1752,13 @@ def popup_show_cmd(kind: str, client: str | None = None,
         tmux_mod._tmux_cmd("display-message", *target, "-p", "#{pane_current_path}"),
         capture_output=True, text=True, check=False,
     )
-    pane_cwd = cwd_result.stdout.strip() if cwd_result.returncode == 0 else ""
+    # ``rstrip("\n")``, not ``strip()``: a repo directory may end with a
+    # space, and tmux reports the pane's cwd verbatim.  Trimming it named a
+    # directory that does not exist, so ``display-popup -d`` did not start
+    # the popup in the user's directory (the same round-trip rule as the
+    # session-name reads; review-loop 9d4c i4).
+    pane_cwd = (cwd_result.stdout.rstrip("\n")
+                if cwd_result.returncode == 0 else "")
 
     if session:
         win_result = subprocess.run(
@@ -826,7 +1774,7 @@ def popup_show_cmd(kind: str, client: str | None = None,
               kind, client, session, win_width, threshold, width, pane_cwd)
     popup_cmd = ["display-popup", "-E", "-w", width, "-h", height]
     if pane_cwd:
-        popup_cmd[2:2] = ["-d", pane_cwd]
+        popup_cmd[2:2] = ["-d", tmux_mod.format_literal(pane_cwd)]
     if client:
         popup_cmd[1:1] = ["-c", client]
     popup_cmd[1:1] = target
@@ -847,6 +1795,14 @@ def window_resized_cmd(session: str, window: str):
     _log.info("_window-resized: ENTERED session=%s window=%s pid=%d", session, window, os.getpid())
 
     base = pane_registry.pm_session_name(session)
+    # window-resized is a global hook on the server, so it also fires for a
+    # plain session the user created beside the pm one (QA S58, the same
+    # class as the two pane hooks).  Such a session is not pm's: never
+    # rebalance it, even when a stale registry from an older pm version
+    # still lists panes in it.
+    if not base.startswith("pm-"):
+        _log.info("_window-resized: ignoring non-pm session %s", session)
+        return
     data = pane_registry.load_registry(base)
     wdata = pane_registry.get_window_data(data, window)
     if not wdata["panes"]:
@@ -884,7 +1840,16 @@ def pane_switch_cmd(session: str, direction: str):
     """Internal: switch pane with mobile-aware zoom.
 
     direction is 'next' or a tmux flag like '-U', '-D', '-L', '-R'.
+
+    *session* is the session that owns the key press, which is the grouped
+    session the user is attached to — or a user's own view of the session,
+    under any name (S118/S121/S124).  The window and the pane commands
+    therefore use it as given (each group member keeps its own current
+    window), but the mobile-mode flag is keyed by the pm *base* session, so
+    the check resolves it the way the other pane hooks do (review-loop b48f
+    i16).
     """
+    base = pane_registry.pm_session_name(session)
     window = tmux_mod.get_window_id(session)
 
     # Unzoom first so select-pane can reach other panes
@@ -902,7 +1867,7 @@ def pane_switch_cmd(session: str, direction: str):
         )
 
     # If mobile, zoom the newly focused pane
-    if pane_layout.is_mobile(session, window):
+    if pane_layout.is_mobile(base, window):
         result = subprocess.run(
             tmux_mod._tmux_cmd("display", "-t", f"{session}:{window}", "-p", "#{pane_id}"),
             capture_output=True, text=True,

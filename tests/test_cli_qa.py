@@ -3,11 +3,12 @@
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 from click.testing import CliRunner
 
 from pm_core.cli.qa import (
     qa_list, qa_show, qa_edit, qa_add_instruction, qa_add_artifact,
-    qa_add_regression, qa_docs,
+    qa_add_regression, qa_docs, qa_launch,
 )
 
 
@@ -158,3 +159,83 @@ def test_qa_run_names_this_run_and_leaves_no_resume_snapshot(tmp_path,
     assert "Result: PASS" in result.output
     assert seen["owner"] == os.getpid()
     assert not qa_loop._resume_file_path(wd).exists()
+
+
+@pytest.mark.parametrize("raw_session", ["pm-base~1", "myview"])
+def test_qa_launch_names_the_base_pm_session(tmp_path, monkeypatch,
+                                             raw_session):
+    """The QA prompt must name the base pm session, not the pane's session.
+
+    tmux reports the most recently created session of a window shared by
+    grouped sessions for any pane in it (verified on tmux 3.2a: with
+    ``pm-base`` + ``pm-base~1``, ``display-message -t <base pane> -p
+    '#{session_name}'`` returns ``pm-base~1``; after a user's view
+    ``myview`` is created it returns ``myview``).  The prompt tells the QA
+    worker to run ``pm tui view -s <session>`` and to read
+    ``~/.pm/pane-registry/<session>.json`` — both keyed by the base session.
+    A grouped name pointed at a registry file that does not exist, and a
+    view name made ``pm tui view -s <view>`` fail outright.
+    """
+    item = {"title": "Login", "description": "", "body": "body"}
+    captured = {}
+
+    def _build(prompt=None, **_kwargs):
+        captured["prompt"] = prompt
+        return "claude --prompt ..."
+
+    monkeypatch.delenv("PM_SESSION", raising=False)
+    with patch("pm_core.cli.qa.state_root", return_value=tmp_path), \
+         patch("pm_core.qa_instructions.get_instruction",
+               return_value=item), \
+         patch("pm_core.tmux.has_tmux", return_value=True), \
+         patch("pm_core.tmux.in_tmux", return_value=True), \
+         patch("pm_core.tmux.get_session_name",
+               return_value=raw_session), \
+         patch("pm_core.tmux.session_group", return_value="pm-base"), \
+         patch("pm_core.claude_launcher.build_claude_shell_cmd",
+               side_effect=_build), \
+         patch("pm_core.tmux.new_window"):
+        result = CliRunner().invoke(qa_launch, ["instructions:login"])
+
+    assert result.exit_code == 0, result.output
+    prompt = captured["prompt"]
+    assert "pm tui view -s pm-base" in prompt
+    assert "pane-registry/pm-base.json" in prompt
+    assert raw_session not in prompt
+
+
+def test_qa_launch_shell_quotes_an_awkward_session_name(tmp_path, monkeypatch):
+    """The copyable example commands must quote a name with a space.
+
+    The session name comes from the repo directory, so it may contain a
+    space; unquoted, ``pm tui view -s pm-my repo`` is two arguments and
+    Click rejects it.  ``shlex.quote`` leaves ordinary names bare, which
+    the sibling test above pins.
+    """
+    item = {"title": "Login", "description": "", "body": "body"}
+    captured = {}
+
+    def _build(prompt=None, **_kwargs):
+        captured["prompt"] = prompt
+        return "claude --prompt ..."
+
+    monkeypatch.delenv("PM_SESSION", raising=False)
+    with patch("pm_core.cli.qa.state_root", return_value=tmp_path), \
+         patch("pm_core.qa_instructions.get_instruction",
+               return_value=item), \
+         patch("pm_core.tmux.has_tmux", return_value=True), \
+         patch("pm_core.tmux.in_tmux", return_value=True), \
+         patch("pm_core.tmux.get_session_name",
+               return_value="pm-my repo~1"), \
+         patch("pm_core.tmux.session_group", return_value="pm-my repo"), \
+         patch("pm_core.claude_launcher.build_claude_shell_cmd",
+               side_effect=_build), \
+         patch("pm_core.tmux.new_window"):
+        result = CliRunner().invoke(qa_launch, ["instructions:login"])
+
+    assert result.exit_code == 0, result.output
+    prompt = captured["prompt"]
+    assert "pm tui view -s 'pm-my repo'" in prompt
+    assert "pm tui send <keys> -s 'pm-my repo'" in prompt
+    assert "tmux list-panes -t 'pm-my repo'" in prompt
+    assert "pane-registry/'pm-my repo'.json" in prompt

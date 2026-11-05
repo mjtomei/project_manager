@@ -1786,6 +1786,10 @@ class TestSignalDelivery:
 
     def test_uses_pidfd_send_signal(self, monkeypatch):
         calls = []
+        # PID 1234 stands in for a live TUI; the container's process table
+        # may hold an unreaped child there (PID 1 does not reap in many
+        # containers), which would make _signal_tui report a zombie.
+        monkeypatch.setattr(tpf, "is_zombie", lambda pid: False)
         monkeypatch.setattr(tpf, "open_pidfd", lambda pid: 4242)
         monkeypatch.setattr(tpf, "proc_starttime", lambda pid: 777)
         monkeypatch.setattr(signal, "pidfd_send_signal",
@@ -1825,6 +1829,7 @@ class TestSignalDelivery:
 
     def test_falls_back_to_kill_without_pidfd(self, monkeypatch):
         killed = []
+        monkeypatch.setattr(tpf, "is_zombie", lambda pid: False)
         monkeypatch.setattr(tpf, "open_pidfd", lambda pid: None)
         monkeypatch.setattr(os, "kill",
                             lambda pid, sig: killed.append((pid, sig)))
@@ -1836,6 +1841,7 @@ class TestSignalDelivery:
         def gone(fd, sig):
             raise ProcessLookupError()
 
+        monkeypatch.setattr(tpf, "is_zombie", lambda pid: False)
         monkeypatch.setattr(tpf, "open_pidfd", lambda pid: 4242)
         monkeypatch.setattr(signal, "pidfd_send_signal", gone)
 

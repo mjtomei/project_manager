@@ -71,6 +71,33 @@ def test_popup_targets_pressing_client_and_session_window():
     assert "display-message" not in body
 
 
+def test_popup_keeps_an_edge_space_in_the_pane_cwd():
+    """A repo directory may end with a space; tmux reports it verbatim.
+
+    ``strip()`` on ``#{pane_current_path}`` removed the space, so the
+    popup's ``-d`` named a directory that does not exist instead of the
+    user's (review-loop 9d4c i4).
+    """
+    calls = []
+
+    def run(cmd, **kwargs):
+        calls.append(cmd)
+        out = ""
+        if "display-message" in cmd:
+            out = {"#{window_width}": "160\n",
+                   "#{pane_current_path}": "/work/pr-a \n",
+                   "#{window_name}": "pr-a\n"}.get(cmd[-1], "")
+        return subprocess.CompletedProcess(cmd, 0, stdout=out, stderr="")
+
+    with mock.patch.object(session_mod.subprocess, "run", run), \
+         mock.patch.object(session_mod.pane_layout,
+                           "_get_mobile_width_threshold", return_value=110):
+        result = CliRunner().invoke(popup_show_cmd, ["picker", CLIENT, SESSION])
+    assert result.exit_code == 0, result.output
+    popup = next(c for c in calls if "display-popup" in c)
+    assert popup[popup.index("-d") + 1] == "/work/pr-a "
+
+
 def test_popup_without_client_args_keeps_old_resolution():
     calls = _invoke(["cmd"])
     popup = next(c for c in calls if "display-popup" in c)

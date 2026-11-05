@@ -20,6 +20,8 @@ from pm_core.tmux import (
     split_pane_at,
     send_keys_literal,
     kill_window,
+    kill_session,
+    create_window,
     apply_layout,
     get_pane_indices,
     get_pane_geometries,
@@ -35,9 +37,14 @@ from pm_core.tmux import (
     get_session_name,
     current_or_base_session,
     list_grouped_sessions,
+    next_grouped_session_name,
     find_unattached_grouped_session,
     sessions_on_window,
     attached_group_active_windows,
+    create_grouped_session,
+    switch_sessions_to_window,
+    set_shared_window_size,
+    window_pane_start_commands,
 )
 
 
@@ -49,36 +56,208 @@ class TestAttachedGroupActiveWindows:
     @patch("pm_core.tmux._run")
     def test_single_query_filters_group_and_attachment(self, run):
         run.return_value = MagicMock(returncode=0, stdout=(
-            "1|@1|base|base\n2|@2|base|base~1\n0|@3|base|base~2\n"
-            "1|@4||other\n1|@5||base-extra\n"
-            "|@6|base|base~3\n1||base|base~4\nmalformed\n"
-            "1|@7|base|base~5|with|pipes\n"
-            "1|@8|base|myview\n1|@9|scratch|view2\n"))
+            "1:@1:base:base\n2:@2:base:base~1\n0:@3:base:base~2\n"
+            "1:@4::other\n1:@5::base-extra\n"
+            ":@6:base:base~3\n1::base:base~4\nmalformed\n"
+            "1:@7:base:base~5|with|pipes\n"
+            "1:@8:base:myview\n1:@9:scratch:view2\n"))
         assert attached_group_active_windows("base", socket_path="/socket") == {
             "base": "@1", "base~1": "@2", "base~5|with|pipes": "@7",
             "myview": "@8"}
         run.assert_called_once()
         cmd = run.call_args.args[0]
         assert "list-sessions" in cmd
-        assert "#{session_attached}|#{window_id}|#{session_group}|#{session_name}" in cmd
+        assert "#{session_attached}:#{window_id}:#{session_group}:#{session_name}" in cmd
         assert cmd[cmd.index("-S") + 1] == "/socket"
+
+    @patch("pm_core.tmux._run")
+    def test_group_name_may_contain_the_old_separator(self, run):
+        """The group field repeats the base session's name, which may hold ``|``.
+
+        With a ``|``-separated query a base name containing ``|`` shifted
+        every following field, so the collaborator row was dropped — the
+        same class of defect the other tmux parsers were fixed for.
+        """
+        run.return_value = MagicMock(returncode=0, stdout=(
+            "1:@1:pm-my|repo-abc:pm-my|repo-abc\n"
+            "1:@2:pm-my|repo-abc:pm-my|repo-abc~1\n"
+            "1:@3:pm-my|repo-abc:zview\n"))
+        assert attached_group_active_windows("pm-my|repo-abc") == {
+            "pm-my|repo-abc": "@1", "pm-my|repo-abc~1": "@2",
+            "zview": "@3"}
 
     @patch("pm_core.tmux._run")
     def test_separator_is_printable_so_c_locale_cannot_break_it(self, run):
         # tmux rewrites control characters (e.g. a tab) in format output to
         # "_" when the server runs under LC_ALL=C, so a tab-separated query
-        # silently parsed as zero fields.  The separator must be printable.
-        run.return_value = MagicMock(returncode=0, stdout="1|@1|base|base\n")
+        # silently parsed as zero fields.  The separator must be printable,
+        # and it must be one tmux forbids in session names (``:``).
+        run.return_value = MagicMock(returncode=0, stdout="1:@1:base:base\n")
         assert attached_group_active_windows("base") == {"base": "@1"}
         fmt = next(a for a in run.call_args.args[0] if "session_name" in a)
         assert "\t" not in fmt
-        assert "|" in fmt
+        assert ":" in fmt
 
     @patch("pm_core.tmux._run")
     def test_error_returns_empty_map(self, run):
         run.return_value = MagicMock(returncode=1, stdout="")
         assert attached_group_active_windows("base") == {}
         run.assert_called_once()
+
+
+class TestSwitchSessionsToWindow:
+    @patch("pm_core.tmux.find_window_by_name")
+    @patch("pm_core.tmux._run")
+    def test_session_name_may_contain_a_space(self, run, find_window,
+                                              monkeypatch):
+        """A repo directory name may contain a space, so a session name may.
+
+        The client map used to be space-separated, so ``pm-my repo-abc``
+        was read as ``pm-my``: its client was never found and the
+        ``switch-client`` that moves it to the replacement window was
+        skipped.
+        """
+        # Empty (not absent) so the assertion below is independent of an
+        # ambient pm pane's socket and still records a monkeypatch undo.
+        monkeypatch.setenv("PM_TMUX_SOCKET", "")
+        find_window.return_value = {"id": "@9", "index": "3"}
+        responses = {
+            "list-clients": MagicMock(
+                returncode=0,
+                stdout="pm-my repo-abc:/dev/pts/1\n"
+                       "pm-other:/dev/pts/2\n"),
+        }
+
+        def fake_run(cmd, **kwargs):
+            for key, result in responses.items():
+                if key in cmd:
+                    return result
+            return MagicMock(returncode=0, stdout="")
+
+        run.side_effect = fake_run
+        switch_sessions_to_window(["pm-my repo-abc"], "pm-my repo-abc",
+                                  "review")
+
+        switch_cmds = [c.args[0] for c in run.call_args_list
+                       if "switch-client" in c.args[0]]
+        assert switch_cmds == [["tmux", "switch-client", "-t",
+                                "pm-my repo-abc", "-c", "/dev/pts/1"]]
+
+    @patch("pm_core.tmux.find_window_by_name")
+    @patch("pm_core.tmux._run")
+    def test_keeps_a_leading_space_in_the_session_name(
+            self, run, find_window, monkeypatch):
+        """A view may be named with a leading space (S118/S121/S124).
+
+        ``strip()`` on the whole listing trimmed the first row's name, so
+        the client of such a view was never found and the ``switch-client``
+        that moves it to the replacement window was skipped (review-loop
+        9d4c i3).
+        """
+        monkeypatch.setenv("PM_TMUX_SOCKET", "")
+        find_window.return_value = {"id": "@9", "index": "3"}
+        responses = {
+            "list-clients": MagicMock(
+                returncode=0,
+                stdout=" lead x:/dev/pts/1\n"
+                       "pm-x:/dev/pts/2\n"),
+        }
+
+        def fake_run(cmd, **kwargs):
+            for key, result in responses.items():
+                if key in cmd:
+                    return result
+            return MagicMock(returncode=0, stdout="")
+
+        run.side_effect = fake_run
+        switch_sessions_to_window([" lead x"], " lead x", "review")
+
+        switch_cmds = [c.args[0] for c in run.call_args_list
+                       if "switch-client" in c.args[0]]
+        assert switch_cmds == [["tmux", "switch-client", "-t",
+                                " lead x", "-c", "/dev/pts/1"]]
+
+    @patch("pm_core.tmux.find_window_by_name")
+    @patch("pm_core.tmux._run")
+    def test_unknown_client_still_selects_the_window(self, run, find_window,
+                                                     monkeypatch):
+        monkeypatch.setenv("PM_TMUX_SOCKET", "")
+        find_window.return_value = {"id": "@9", "index": "3"}
+        run.return_value = MagicMock(returncode=0, stdout="")
+        switch_sessions_to_window(["pm-x"], "pm-x", "review")
+
+        select_cmds = [c.args[0] for c in run.call_args_list
+                       if "select-window" in c.args[0]]
+        assert select_cmds == [["tmux", "select-window", "-t", "pm-x:3"]]
+        assert not [c for c in run.call_args_list
+                    if "switch-client" in c.args[0]]
+
+
+class TestSetSharedWindowSize:
+    """The per-window ``smallest`` option must not depend on the env alone.
+
+    ``PM_SHARE_MODE`` is absent exactly where a shared session's new
+    windows need the option most: the global ``after-kill-pane`` hook that
+    respawns a killed TUI (a ``run-shell`` command sees only the server's
+    global environment) and a plain ``pm session`` that adopted a shared
+    ambient session (``_set_share_mode_env`` clears the variable).  With
+    the env-only test those windows kept tmux's default
+    ``window-size=latest``, which overrides the session's ``smallest``, so
+    the smallest connected client saw a clipped layout.
+    """
+
+    SET = ["tmux", "set-window-option", "-t", "pm-x:@1",
+           "window-size", "smallest"]
+
+    @staticmethod
+    def _set_calls(run):
+        return [c.args[0] for c in run.call_args_list
+                if "set-window-option" in c.args[0]]
+
+    @patch("pm_core.tmux._run")
+    def test_process_flag_short_circuits_the_session_lookup(
+            self, run, monkeypatch):
+        monkeypatch.setenv("PM_SHARE_MODE", "global")
+        # Empty (not absent) so the exact command below does not depend on
+        # the caller's environment — e.g. the suite running inside a pm pane.
+        monkeypatch.setenv("PM_TMUX_SOCKET", "")
+        with patch("pm_core.tmux.get_session_environment",
+                   side_effect=AssertionError("must not query the session")):
+            set_shared_window_size("pm-x", "@1")
+        assert self._set_calls(run) == [self.SET]
+
+    @patch("pm_core.tmux._run")
+    def test_reads_the_session_environment_when_the_process_has_none(
+            self, run, monkeypatch):
+        monkeypatch.delenv("PM_SHARE_MODE", raising=False)
+        monkeypatch.setenv("PM_TMUX_SOCKET", "")
+        run.return_value = MagicMock(returncode=0,
+                                     stdout="PM_SHARE_MODE=global\n")
+        set_shared_window_size("pm-x", "@1")
+
+        cmds = [c.args[0] for c in run.call_args_list]
+        assert ["tmux", "show-environment", "-t", "pm-x",
+                "PM_SHARE_MODE"] in cmds
+        assert self._set_calls(run) == [self.SET]
+
+    @patch("pm_core.tmux._run")
+    def test_private_session_is_a_no_op(self, run, monkeypatch):
+        monkeypatch.delenv("PM_SHARE_MODE", raising=False)
+        monkeypatch.setenv("PM_TMUX_SOCKET", "")
+        run.return_value = MagicMock(returncode=1, stdout="")
+        set_shared_window_size("pm-x", "@1")
+        assert self._set_calls(run) == []
+
+    @patch("pm_core.tmux._run")
+    def test_socket_is_forwarded_to_both_queries(self, run, monkeypatch):
+        monkeypatch.delenv("PM_SHARE_MODE", raising=False)
+        run.return_value = MagicMock(returncode=0,
+                                     stdout="PM_SHARE_MODE=global\n")
+        set_shared_window_size("pm-x", "@1", socket_path="/tmp/s.sock")
+        cmds = [c.args[0] for c in run.call_args_list]
+        assert cmds
+        for cmd in cmds:
+            assert cmd[cmd.index("-S") + 1] == "/tmp/s.sock"
 
 
 class TestHasTmux:
@@ -132,6 +311,49 @@ class TestCreateSession:
         assert "new-session" in cmd
         assert "-d" in cmd
         assert "-s" in cmd
+
+
+class TestConcurrentCreate:
+    """Paired ``pm session`` starts race between the existence check and
+    ``new-session``; the loser gets "duplicate session" and must converge
+    on the winner's session instead of crashing with a traceback."""
+
+    @patch("pm_core.tmux.session_exists")
+    @patch("pm_core.tmux.subprocess.run")
+    def test_create_session_converges_on_duplicate(self, mock_run, exists):
+        mock_run.side_effect = subprocess.CalledProcessError(
+            1, ["tmux", "new-session"])
+        exists.return_value = True
+        create_session("proj", "/home/user", "bash")  # must not raise
+        # the duplicate is confirmed with an exact-name probe
+        assert exists.call_args[0][0] == "=proj"
+
+    @patch("pm_core.tmux.session_exists")
+    @patch("pm_core.tmux.subprocess.run")
+    def test_create_session_reraises_a_real_failure(self, mock_run, exists):
+        mock_run.side_effect = subprocess.CalledProcessError(
+            1, ["tmux", "new-session"])
+        exists.return_value = False
+        with pytest.raises(subprocess.CalledProcessError):
+            create_session("proj", "/home/user", "bash")
+
+    @patch("pm_core.tmux.session_exists")
+    @patch("pm_core.tmux.subprocess.run")
+    def test_grouped_session_converges_on_duplicate(self, mock_run, exists):
+        mock_run.side_effect = subprocess.CalledProcessError(
+            1, ["tmux", "new-session"])
+        exists.return_value = True
+        create_grouped_session("proj", "proj~1")  # must not raise
+        assert exists.call_args[0][0] == "=proj~1"
+
+    @patch("pm_core.tmux.session_exists")
+    @patch("pm_core.tmux.subprocess.run")
+    def test_grouped_session_reraises_a_real_failure(self, mock_run, exists):
+        mock_run.side_effect = subprocess.CalledProcessError(
+            1, ["tmux", "new-session"])
+        exists.return_value = False
+        with pytest.raises(subprocess.CalledProcessError):
+            create_grouped_session("proj", "proj~1")
 
 
 # ---------------------------------------------------------------------------
@@ -214,6 +436,90 @@ class TestKillWindow:
         cmd = mock_run.call_args[0][0]
         assert "kill-window" in cmd
         assert "sess:1" in cmd
+
+
+# ---------------------------------------------------------------------------
+# kill_session
+# ---------------------------------------------------------------------------
+
+class TestKillSession:
+    @patch("pm_core.tmux.subprocess.run")
+    def test_bare_target_by_default(self, mock_run):
+        kill_session("pm-x")
+        cmd = mock_run.call_args[0][0]
+        assert cmd[-2:] == ["-t", "pm-x"]
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_exact_target_uses_tmux_exact_syntax(self, mock_run):
+        """``exact=True`` must address ``=name`` so tmux cannot prefix-match.
+
+        A bare ``-t pm-x`` is a prefix match: with ``pm-x`` already gone,
+        tmux kills whichever remaining session starts with it (verified on
+        tmux 3.2a: ``pm-xyz``).  ``pm session kill`` passes ``exact=True``
+        for every session it tears down (R8).
+        """
+        kill_session("pm-x", socket_path="/tmp/s", exact=True)
+        cmd = mock_run.call_args[0][0]
+        assert cmd == ["tmux", "-S", "/tmp/s", "kill-session", "-t", "=pm-x"]
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_reports_whether_tmux_killed_it(self, mock_run):
+        """``pm session kill`` distinguishes a real failure from a session
+        that was already gone; tmux's return code is the signal."""
+        mock_run.return_value = MagicMock(returncode=0)
+        assert kill_session("pm-x") is True
+        mock_run.return_value = MagicMock(returncode=1)
+        assert kill_session("pm-x") is False
+
+
+# ---------------------------------------------------------------------------
+# create_window
+# ---------------------------------------------------------------------------
+
+class TestCreateWindow:
+    @patch("pm_core.tmux.subprocess.run")
+    def test_does_not_make_the_window_current(self, mock_run):
+        """``-d``: a respawn must not switch clients of the target session.
+
+        ``_respawn_tui``'s ``select=False`` (``pm session``'s attach)
+        relies on it, and its ``select=True`` path selects the window for
+        the caller's own client explicitly.
+        """
+        mock_run.return_value = MagicMock(returncode=0,
+                                          stdout="%5 @9")
+        pane_id, window_id = create_window("pm-x", "pm _tui")
+        cmd = mock_run.call_args[0][0]
+        assert "-d" in cmd
+        assert (pane_id, window_id) == ("%5", "@9")
+
+
+# ---------------------------------------------------------------------------
+# window_pane_start_commands
+# ---------------------------------------------------------------------------
+
+class TestWindowPaneStartCommands:
+    @patch("pm_core.tmux._run")
+    def test_queries_the_window_and_skips_dead_panes(self, run):
+        """The QA dashboard check sees live panes of *this* window only.
+
+        ``_qa_status_pane_live`` recognises the dashboard by the command
+        it runs, so the query must be scoped to the QA window (another
+        PR's run has its own dashboard in its own window) and a pane kept
+        dead by ``remain-on-exit`` must not count as a live dashboard.
+        """
+        run.return_value = MagicMock(returncode=0, stdout=(
+            "0 python3 /pm_core/qa_status.py /qa/status.json pm-x\n"
+            "1 echo 'QA execution'; exec sleep infinity\n"))
+        cmds = window_pane_start_commands("pm-x", "3")
+        assert cmds == ["python3 /pm_core/qa_status.py /qa/status.json pm-x"]
+        cmd = run.call_args.args[0]
+        assert cmd[-5:] == ["list-panes", "-t", "pm-x:3", "-F",
+                            "#{pane_dead} #{pane_start_command}"]
+
+    @patch("pm_core.tmux._run")
+    def test_unqueryable_window_reports_nothing(self, run):
+        run.return_value = MagicMock(returncode=1, stdout="")
+        assert window_pane_start_commands("pm-x", "3") == []
 
 
 # ---------------------------------------------------------------------------
@@ -300,6 +606,23 @@ class TestListWindows:
         assert len(result) == 2
         assert result[0] == {"id": "@0", "index": "0", "name": "main"}
         assert result[1] == {"id": "@1", "index": "1", "name": "editor"}
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_keeps_edge_spaces_and_empty_names(self, mock_run):
+        # tmux stores a window name as given, so a user's window named
+        # " lead" / "trail " / "" must come back verbatim; the old
+        # whitespace split trimmed the edge spaces and dropped the empty
+        # row, so a rebalance skipped that window (review-loop 1346 i1).
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="@0 0 main\n@1 1  lead\n@2 2 trail \n@3 3 \n",
+        )
+        assert list_windows("sess") == [
+            {"id": "@0", "index": "0", "name": "main"},
+            {"id": "@1", "index": "1", "name": " lead"},
+            {"id": "@2", "index": "2", "name": "trail "},
+            {"id": "@3", "index": "3", "name": ""},
+        ]
 
     @patch("pm_core.tmux.subprocess.run")
     def test_empty_on_error(self, mock_run):
@@ -393,6 +716,20 @@ class TestGetSessionName:
         assert result == "myproj"
 
     @patch("pm_core.tmux.subprocess.run")
+    def test_keeps_an_edge_space_in_the_session_name(self, mock_run):
+        """A view may be named with an edge space (S118/S121/S124).
+
+        ``display-message -p`` prints the stored name plus a newline, so
+        ``strip()`` trimmed a space that is part of the name: the group
+        query then failed and the pm session was not recognised from
+        inside such a view (review-loop 9d4c i3).
+        """
+        mock_run.return_value = MagicMock(returncode=0, stdout=" trail x \n")
+        with patch.dict(os.environ, {"TMUX_PANE": "%5"}):
+            result = get_session_name()
+        assert result == " trail x "
+
+    @patch("pm_core.tmux.subprocess.run")
     def test_fallback_without_tmux_pane(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stdout="sess\n")
         env = os.environ.copy()
@@ -454,12 +791,40 @@ class TestCurrentOrBaseSession:
         assert current_or_base_session("proj") == "proj"
 
     @patch("pm_core.tmux.subprocess.run")
+    @patch("pm_core.tmux.session_group", return_value="proj")
     @patch("pm_core.tmux.get_session_name", return_value="proj~2")
     @patch("pm_core.tmux.in_tmux", return_value=True)
-    def test_in_grouped_session(self, mock_in, mock_gsn, mock_run):
-        """When current session is a grouped session and it's attached, return it."""
+    def test_in_grouped_session(self, mock_in, mock_gsn, mock_sg, mock_run):
+        """When current session is a grouped session and it's attached, return it.
+
+        Membership comes from tmux's ``#{session_group}`` — the real answer
+        for ``proj~2`` is ``proj`` — not from a ``base~`` name prefix
+        (review-loop b48f i14).
+        """
         mock_run.return_value = MagicMock(returncode=0, stdout="1\n")
         assert current_or_base_session("proj") == "proj~2"
+        mock_sg.assert_called_once_with("proj~2")
+
+    @patch("pm_core.tmux.subprocess.run")
+    @patch("pm_core.tmux.sessions_in_group", return_value=["pm-x"])
+    @patch("pm_core.tmux.list_grouped_sessions", return_value=[])
+    @patch("pm_core.tmux.session_group", return_value="")
+    @patch("pm_core.tmux.get_session_name", return_value="pm-x~foo-12345678")
+    @patch("pm_core.tmux.in_tmux", return_value=True)
+    def test_attached_session_merely_named_like_a_grouped_one_is_ignored(
+            self, mock_in, mock_gsn, mock_sg, mock_lg, mock_sig, mock_run):
+        """A *different* session whose name starts with ``pm-x~`` is not the target.
+
+        A repo directory may contain ``~``, so the project ``x~foo`` runs
+        the session ``pm-x~foo-<hash>``, which starts with ``pm-x~``
+        without being part of ``pm-x``'s tmux group.  On the legacy default
+        server both bases can run side by side, and the old name-prefix
+        test returned that session whenever it had a client attached —
+        ``get_window_id`` / ``select_window`` / the layout sizing then
+        acted on another project's session (review-loop b48f i14).
+        """
+        mock_run.return_value = MagicMock(returncode=0, stdout="1\n")
+        assert current_or_base_session("pm-x") == "pm-x"
 
     @patch("pm_core.tmux.subprocess.run")
     @patch("pm_core.tmux.session_group", return_value="")
@@ -486,6 +851,27 @@ class TestCurrentOrBaseSession:
         with patch("pm_core.tmux.get_session_name", return_value=view):
             assert current_or_base_session("pm-x") == view
         mock_sg.assert_called_once_with(view)
+
+    @patch("pm_core.tmux.subprocess.run")
+    @patch("pm_core.tmux.sessions_in_group",
+           return_value=["myview", "pm-x", "pm-x~1"])
+    @patch("pm_core.tmux.list_grouped_sessions", return_value=["pm-x~1"])
+    @patch("pm_core.tmux.session_group", return_value="")
+    @patch("pm_core.tmux.get_session_name", return_value="other")
+    @patch("pm_core.tmux.in_tmux", return_value=True)
+    def test_falls_back_to_an_attached_view_in_the_group(
+            self, mock_in, mock_gsn, mock_sg, mock_lg, mock_sig, mock_run):
+        """With no attached ``base~N``, an attached view is the target.
+
+        Views are found through tmux's group (``sessions_in_group``), not a
+        ``base~`` name prefix, so a different project whose directory name
+        contains ``~`` is not a candidate (review-loop b48f i13).
+        """
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="0\n"),  # pm-x~1 not attached
+            MagicMock(returncode=0, stdout="1\n"),  # myview attached
+        ]
+        assert current_or_base_session("pm-x") == "myview"
 
 
 # ---------------------------------------------------------------------------
@@ -637,6 +1023,107 @@ class TestListGroupedSessions:
         result = list_grouped_sessions("proj")
         assert result == ["proj~1", "proj~2"]
 
+    @patch("pm_core.tmux.subprocess.run")
+    def test_base_name_may_contain_a_tilde(self, mock_run):
+        """The suffix is the part after the *last* ``~``.
+
+        A repo directory name may contain ``~`` (``pm-my~repo-abc``).  The
+        old first-``~`` split read the tag for a number, so every grouped
+        session sorted as 0 and ``next_grouped_session_name`` always
+        returned ``~1``.
+        """
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout=(
+                "pm-my~repo-abc\npm-my~repo-abc~2\npm-my~repo-abc~1\n"
+                "pm-my~other-def~1\n"
+            )
+        )
+        assert list_grouped_sessions("pm-my~repo-abc") == [
+            "pm-my~repo-abc~1", "pm-my~repo-abc~2"]
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_only_numeric_suffixes_are_grouped(self, mock_run):
+        """A session merely *named* ``base~...`` is not a grouped session.
+
+        A repo directory may contain ``~``, so the project ``x~foo`` runs
+        session ``pm-x~foo-<hash>`` on the legacy default server.  The old
+        name-prefix match made that unrelated session part of ``pm-x``:
+        ``pm session kill``/detach/attach for ``pm-x`` acted on it
+        (review-loop b48f i13).
+        """
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout=(
+                "pm-x\npm-x~1\npm-x~foo-12345678\npm-x~myview\n"
+            )
+        )
+        assert list_grouped_sessions("pm-x") == ["pm-x~1"]
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_keeps_edge_spaces_in_a_view_name(self, mock_run):
+        """tmux stores a name verbatim; a view may be named ``pm-x~1 ``.
+
+        ``strip()`` on the whole listing trimmed the leading space off the
+        first row and the trailing one off the last, so such a view was
+        reported under the name ``pm-x~1`` — a session tmux does not know,
+        and one that would be taken for a real grouped session.  The
+        remainder after ``base~`` must be the number itself (review-loop
+        9d4c i4).
+        """
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout=" pm-x~9\npm-x~1\npm-x~2 \n")
+        # The edge-space rows are views, not grouped sessions; the real
+        # ``pm-x~1`` is still found between them.
+        assert list_grouped_sessions("pm-x") == ["pm-x~1"]
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_another_projects_grouped_session_is_not_ours(self, mock_run):
+        """The whole remainder after ``base~`` must be the number.
+
+        A project whose directory makes its session start with ``pm-x~``
+        has grouped sessions of its own (``pm-x~foo-12345678~1``, created
+        whenever pm attaches to it).  Testing only the part after the last
+        ``~`` made that one a grouped session of ``pm-x`` (review-loop b48f
+        i19).
+        """
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout=(
+                "pm-x\npm-x~1\npm-x~foo-12345678\npm-x~foo-12345678~1\n"
+                "pm-x~foo-12345678~2\n"
+            )
+        )
+        assert list_grouped_sessions("pm-x") == ["pm-x~1"]
+        assert list_grouped_sessions("pm-x~foo-12345678") == [
+            "pm-x~foo-12345678~1", "pm-x~foo-12345678~2"]
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_non_ascii_digit_suffix_does_not_crash(self, mock_run):
+        """``²`` is ``isdigit()`` but ``int()`` raises: it is not grouped."""
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout="pm-x\npm-x~²\npm-x~1\n")
+        assert list_grouped_sessions("pm-x") == ["pm-x~1"]
+
+
+class TestNextGroupedSessionName:
+    @patch("pm_core.tmux.list_grouped_sessions", return_value=[])
+    def test_first_grouped_session(self, mock_lg):
+        assert next_grouped_session_name("proj") == "proj~1"
+
+    @patch("pm_core.tmux.list_grouped_sessions",
+           return_value=["proj~1", "proj~2"])
+    def test_next_after_the_highest(self, mock_lg):
+        assert next_grouped_session_name("proj") == "proj~3"
+
+    @patch("pm_core.tmux.list_grouped_sessions",
+           return_value=["pm-my~repo-abc~1", "pm-my~repo-abc~2"])
+    def test_base_name_may_contain_a_tilde(self, mock_lg):
+        """The tag's own ``~`` is not the grouped suffix.
+
+        A first-``~`` split read ``repo`` for a number, so the counter
+        never advanced past ``~1`` and every reattach converged on it.
+        """
+        assert (next_grouped_session_name("pm-my~repo-abc")
+                == "pm-my~repo-abc~3")
+
 
 class TestFindUnattachedGroupedSession:
     @patch("pm_core.tmux.list_grouped_sessions", return_value=[])
@@ -664,14 +1151,15 @@ class TestFindUnattachedGroupedSession:
 
 class TestSessionsOnWindow:
     @patch("pm_core.tmux.subprocess.run")
-    @patch("pm_core.tmux.list_grouped_sessions", return_value=[])
-    def test_no_match(self, mock_lg, mock_run):
+    @patch("pm_core.tmux.sessions_in_group", return_value=["proj"])
+    def test_no_match(self, mock_sig, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stdout="@2\n")
         assert sessions_on_window("proj", "@1") == []
 
     @patch("pm_core.tmux.subprocess.run")
-    @patch("pm_core.tmux.list_grouped_sessions", return_value=["proj~1", "proj~2"])
-    def test_returns_matching_sessions(self, mock_lg, mock_run):
+    @patch("pm_core.tmux.sessions_in_group",
+           return_value=["proj", "proj~1", "proj~2"])
+    def test_returns_matching_sessions(self, mock_sig, mock_run):
         mock_run.side_effect = [
             MagicMock(returncode=0, stdout="@5\n"),   # base on @5
             MagicMock(returncode=0, stdout="@5\n"),   # proj~1 on @5
@@ -680,8 +1168,8 @@ class TestSessionsOnWindow:
         assert sessions_on_window("proj", "@5") == ["proj", "proj~1"]
 
     @patch("pm_core.tmux.subprocess.run")
-    @patch("pm_core.tmux.list_grouped_sessions", return_value=[])
-    def test_display_error_skipped(self, mock_lg, mock_run):
+    @patch("pm_core.tmux.sessions_in_group", return_value=["proj"])
+    def test_display_error_skipped(self, mock_sig, mock_run):
         mock_run.return_value = MagicMock(returncode=1, stdout="")
         assert sessions_on_window("proj", "@1") == []
 

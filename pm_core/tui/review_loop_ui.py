@@ -12,6 +12,7 @@ Keybindings (mapped to the ``d`` key — "Review" — in the TUI):
 """
 
 import os
+import shlex
 import time
 
 from pm_core.paths import configure_logger
@@ -1102,7 +1103,8 @@ def _attempt_merge(app, pr_id: str, *, resolve_window: bool = False,
     merge_cmd += " --background"
     tdir = _auto_start.get_transcript_dir(app)
     if tdir:
-        merge_cmd += f" --transcript {tdir / f'merge-{pr_id}.jsonl'}"
+        # Quoted for run_command's shlex.split (see pr_view.start_pr).
+        merge_cmd += f" --transcript {shlex.quote(str(tdir / f'merge-{pr_id}.jsonl'))}"
     merge_cmd += f" {pr_id}"
     pr_view.run_command(app, merge_cmd)
 

@@ -129,9 +129,12 @@ project's setup recipes (`pm/qa/instructions/`) and capture recipes
 - **Container mode off**: the session runs on the host in the clone,
   which is the same fallback QA scenarios use. Its environment drops the
   variables that point `pm` at your project or pm session (`PM_PROJECT`,
-  `PM_SESSION`, `TMUX`, `TMUX_PANE` and the like), so `pm` in the run
-  behaves as it does outside tmux. A `PM_TMUX_SOCKET` is kept, and the
-  prompt tells the session to pass it to plain `tmux` commands with `-S`.
+  `PM_SESSION`, `TMUX`, `TMUX_PANE`, `PM_TMUX_SOCKET` and the like), so
+  `pm` in the run behaves as it does outside tmux and it carries no
+  ambient pointer to the user's tmux server. The prompt says that
+  `$TMUX` is unset (so a plain `tmux` reaches the default server) and
+  that the run must use the socket `pm session --print-connect` prints
+  for the session it starts itself.
 
 The test target is a **disposable project** the session creates in the
 scratch dir with a setup recipe, then drives and captures with the

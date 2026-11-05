@@ -5,6 +5,7 @@ HelpGroup, state management, PR ID resolution, TUI refresh, and session helpers.
 """
 
 import os
+import shlex
 import shutil
 import signal
 import subprocess
@@ -566,7 +567,8 @@ def _canonical_session(session: str) -> str:
     """Strip the tmux session-group suffix (``~N``) from ``session``.
 
     The TUI keys its pidfile and command-queue by its own session name
-    with the group suffix removed (see TechTreeApp: ``split("~")[0]``).
+    with the group suffix removed (``pane_registry.base_session_name``:
+    only a numeric ``~N``, so a name containing ``~`` is kept whole).
     A user started via ``pm session`` is attached to the *grouped*
     session (e.g. ``pm-foo~1``), so callers that resolve the current
     session name (``_find_tui_pane`` -> ``get_session_name``) see the
@@ -574,7 +576,7 @@ def _canonical_session(session: str) -> str:
     same canonical file the TUI actually wrote, so external mutations
     (``pm pr edit`` -> SIGUSR1 reload) reach the TUI.
     """
-    return session.split("~")[0]
+    return pane_registry.base_session_name(session)
 
 
 def _tui_pidfile_for_session(session: str) -> Path:
@@ -1255,7 +1257,7 @@ def _clone_workdir(data: dict, pr_entry: dict, root: Path) -> str | None:
                 pr["workdir"] = workdir_str
                 break
 
-    store.locked_update(root, apply)
+    store.locked_update_cli(root, apply)
     click.echo(f"Workdir created at {work_path}")
     return workdir_str
 
@@ -1273,7 +1275,7 @@ def _resolve_repo_id(data: dict, workdir: Path, root: Path) -> None:
         def apply(d):
             d.setdefault("project", {})["repo_id"] = repo_id
 
-        store.locked_update(root, apply)
+        store.locked_update_cli(root, apply)
 
 
 def _infer_pr_id(data: dict, status_filter: tuple[str, ...] | None = None) -> str | None:
@@ -1340,8 +1342,44 @@ def _get_session_name_for_cwd() -> str:
     if tag:
         return f"pm-{tag}"
 
-    # Fallback if not in a git repo
-    return f"pm-{Path.cwd().name}-00000000"
+    # Fallback if not in a git repo.  The name carries the share mode when
+    # one is set: `get_session_tag` mixes it into the tag hash, but there
+    # is no tag here, so without this the private session of this directory
+    # and a `--global` invocation computed the *same* name — and
+    # `pm session kill --global` run inside that private session killed it
+    # instead of reporting "no session" (review-loop 9d4c i4).  The private
+    # name keeps the historical ``-00000000`` placeholder.
+    #
+    # Key it on the pm project's directory, not the caller's cwd: with no
+    # git root to anchor on, using ``Path.cwd().name`` made a plain
+    # `pm session` run from a project subdirectory compute a *different*
+    # name and start a second session and TUI on a second socket instead of
+    # attaching to the project's session (QA scenario 62).  Walk up to the
+    # directory holding ``pm/project.yaml`` — the anchor pm's own project
+    # discovery uses — and fall back to the cwd for a directory that is not
+    # a pm project at all.
+    #
+    # A root-level ``project.yaml`` anchors the name too: that is pm's
+    # legacy standalone layout, which ``store.find_project_root`` still
+    # accepts for backward compatibility, and without it the same bug
+    # remained for such a project (a subdirectory started a second
+    # session).  ``pm/project.yaml`` wins wherever it exists, so a target
+    # repo's own ``pm/`` subdirectory is never mistaken for the project.
+    from pm_core.paths import tmux_safe_name
+    here = Path.cwd()
+    candidates = [here, *here.parents]
+    project_dir = next(
+        (c for c in candidates if (c / "pm" / "project.yaml").exists()), None)
+    if project_dir is None:
+        project_dir = next(
+            (c for c in candidates if (c / "project.yaml").exists()), here)
+    name = f"pm-{tmux_safe_name(project_dir.name)}"
+    share_mode = os.environ.get("PM_SHARE_MODE")
+    if share_mode:
+        import hashlib
+        digest = hashlib.md5(share_mode.encode()).hexdigest()[:8]
+        return f"{name}-{digest}"
+    return f"{name}-00000000"
 
 
 def _get_current_pm_session() -> str | None:
@@ -1355,12 +1393,46 @@ def _get_current_pm_session() -> str | None:
     """
     if not tmux_mod.in_tmux():
         return None
-    name = pane_registry.pm_session_name(tmux_mod.get_session_name())
-    return name if name.startswith("pm-") else None
+    try:
+        name = tmux_mod.get_session_name()
+    except OSError:
+        # tmux missing/unexecutable while $TMUX is set (a forwarded pane
+        # environment, or a container without tmux): "not inside a pm
+        # session" rather than a crash out of `pm session mobile` /
+        # `--print-connect`, like every other probe in this module.
+        return None
+    # Resolve a grouped ``~N`` view — including a user's own view grouped
+    # under another name (S118/S121/S124) — to its pm session, using the
+    # shared definition rather than a local ``~`` strip.
+    name = pane_registry.pm_session_name(name)
+    if name.startswith("pm-"):
+        return name
+    return None
+
+
+def _private_session_context() -> bool:
+    """True when this invocation is not operating on a shared session.
+
+    ``PM_SHARE_MODE`` is set for ``--global``/``--group`` invocations and
+    inherited by the panes of a shared session.  In both cases a socket
+    another user owns at the deterministic path is legitimate — the
+    sharing user owns it, and joining is the documented flow — so an
+    implicit lookup must not require ownership.  Otherwise the session is
+    private, and only a socket this user owns can be its server (see
+    ``tmux.find_session_server``'s *owned_only*).
+    """
+    return not os.environ.get("PM_SHARE_MODE")
 
 
 def _get_pm_session() -> str | None:
     """Get the pm tmux session name if running inside one.
+
+    Also selects the server that hosts the resolved session, because every
+    pm session runs on its own private socket: a command run outside tmux
+    (or from an unrelated tmux session) would otherwise address the default
+    server and conclude that a live session is gone.  Inside a pm session
+    the ambient ``PM_TMUX_SOCKET``/``$TMUX`` is already correct, so the
+    extra lookup is skipped there.
 
     Outside a pm session that is the session of the project this command
     works on: the ``-C``/``PM_PROJECT`` project when given (a PR workdir is
@@ -1376,8 +1448,119 @@ def _get_pm_session() -> str | None:
         from pm_core.paths import get_session_tag
         tag = get_session_tag(start_path=_project_override)
         if tag:
-            return f"pm-{tag}"
-    return _get_session_name_for_cwd()
+            session = f"pm-{tag}"
+            _select_session_socket(session,
+                                   owned_only=_private_session_context())
+            return session
+    session = _get_session_name_for_cwd()
+    _select_session_socket(session, owned_only=_private_session_context())
+    return session
+
+
+def _use_tmux_socket(socket_path: str | None) -> None:
+    """Point subsequent ``tmux_mod`` calls at *socket_path*.
+
+    ``None`` means the user's default server, which is addressed by its
+    explicit path: tmux follows ``$TMUX`` when no ``-S`` is given, and from
+    inside a pm pane that names the session's private server instead.
+    """
+    if not socket_path:
+        from pm_core.paths import default_socket_path
+        socket_path = str(default_socket_path())
+    os.environ["PM_TMUX_SOCKET"] = socket_path
+
+
+def _select_session_socket(session_name: str, *,
+                           owned_only: bool = False) -> str | None:
+    """Point ``PM_TMUX_SOCKET`` at the server hosting *session_name*.
+
+    Prefers the session's dedicated private socket, falls back to the
+    legacy default server (selected by its explicit path).  Returns the
+    socket now in effect, or None when the session is not a pm session or
+    was not found — in which case the ambient setting is left untouched.
+
+    *owned_only* (forwarded to :func:`tmux.find_session_server`) is set by
+    implicit lookups — the cwd-derived session, a command that acts on
+    "this project's session" — so a socket another user planted under the
+    deterministic name is not adopted.  An explicit ``-s`` and a
+    shared/joiner context leave it false: reaching another user's
+    ``--global``/``--group`` session is the documented flow there.
+    """
+    base = pane_registry.base_session_name(session_name)
+    if not base.startswith("pm-"):
+        return None
+    sock, on_private = tmux_mod.find_session_server(base,
+                                                    owned_only=owned_only)
+    if sock is None:
+        return None
+    # ``None`` selects the default server by its explicit path: clearing
+    # the override is not enough, because tmux would then follow $TMUX and
+    # reach the private server this process happens to run on.
+    _use_tmux_socket(sock if on_private else None)
+    return sock
+
+
+def _server_owned_by_us(socket_path: str | None) -> bool:
+    """True when *socket_path* is absent or owned by the current user.
+
+    The pm socket directory is world-writable and ``--global`` sockets are
+    world-accessible, so ``/tmp/pm-sessions`` can hold *other users'*
+    servers.  Discovery that has no session context of its own (a plain
+    shell) must not auto-select one of those: ``pm tui send`` delivers keys
+    to a bare pane id, so resolving to a stranger's TUI would drive it.
+    Their sessions stay reachable explicitly (``pm tui view -s pm-<tag>``)
+    and from inside them (the in-tmux branch), which is where a joining
+    user actually needs them.
+
+    The default server (``socket_path is None``) is per-uid by
+    construction.  A socket file that cannot be ``lstat``-ed counts as ours:
+    the row came from a scan that already talked to that server, and an
+    unreadable entry must not silently hide the user's own session.
+    """
+    if socket_path is None:
+        return True
+    try:
+        return os.lstat(socket_path).st_uid == os.getuid()
+    except OSError:
+        return True
+
+
+def _iter_registry_tui_panes(session: str):
+    """Yield the pane ids the registry records with ``role="tui"``."""
+    data = pane_registry.load_registry(session)
+    for _, pane in pane_registry._iter_all_panes(data):
+        if pane.get("role") == "tui":
+            pane_id = pane.get("id")
+            if pane_id:
+                yield pane_id
+
+
+def _recorded_tui_pane(session: str) -> str | None:
+    """Return the pane id the registry records for *session*'s TUI.
+
+    No liveness check: callers that drive the pane must use
+    ``_find_live_tui_pane``, and ``pm autostart`` needs the recorded pane
+    to report a stale pidfile for the right session.
+    """
+    return next(_iter_registry_tui_panes(session), None)
+
+
+def _registry_tui_pane(session: str) -> str | None:
+    """Return the registered TUI pane for *session* if it is still alive.
+
+    Used where the answer decides *which server* to address (the in-tmux,
+    cwd and cross-server branches of ``_find_tui_pane``): a pane that no
+    longer exists must not be attributed to the server being probed.
+    """
+    for pane_id in _iter_registry_tui_panes(session):
+        try:
+            if tmux_mod.pane_exists(pane_id):
+                return pane_id
+        except OSError:
+            # tmux missing/unexecutable: no pane is live (same contract
+            # as find_session_server's degrade).
+            return None
+    return None
 
 
 def _project_sessions(pm_root: Path):
@@ -1390,20 +1573,50 @@ def _project_sessions(pm_root: Path):
     ``PM_SHARE_MODE``, so a command that lacks it (a host-mode regression
     run drops it, ``cli.qa._REGRESSION_SCRUBBED_ENV``) computes the plain
     tag, which names no session (QA S16 vs R35).
+
+    Every pm session runs on its own tmux server (pr-073910f), so the
+    lookup is not scoped to whichever server ``PM_TMUX_SOCKET``/``$TMUX``
+    happens to name: a plain shell names the default server while the
+    project's session runs on its private socket.  The tag session is
+    resolved through :func:`tmux.find_session_server`; the fallback scans
+    the sessions of every pm server (``list_pm_sessions``).
+
+    Both branches apply the same ownership rule: in a private context a
+    socket another user planted under the deterministic name is not the
+    project's session.  The tag branch needs it as much as the fallback —
+    without it a planted server at the plain tag is yielded and the
+    generator returns before the fallback that finds the project's real
+    share-mode session (the caller rejects the planted name, so nothing
+    is found at all).  The lookup is implicit (the name is derived from
+    the project), so it passes ``find_session_server``'s *owned_only* like
+    every other implicit caller: the planted socket is never even probed,
+    and the default server is still checked — a legacy pre-isolation
+    session of that name is this user's.
     """
     from pm_core.paths import get_session_tag, sessions_dir
     tag = get_session_tag(start_path=pm_root)
-    if tag and tmux_mod.session_exists(f"pm-{tag}"):
-        yield f"pm-{tag}"
-        return
-    result = subprocess.run(
-        tmux_mod._tmux_cmd("list-sessions", "-F", "#{session_name}"),
-        capture_output=True, text=True)
-    if result.returncode != 0:
-        return
+    if tag:
+        session = f"pm-{tag}"
+        hosting, _on_private = tmux_mod.find_session_server(
+            session, owned_only=_private_session_context())
+        if hosting is not None:
+            yield session
+            return
     want = Path(pm_root).resolve()
-    for sess in result.stdout.splitlines():
-        if not sess.startswith("pm-") or "~" in sess:
+    for info in tmux_mod.list_pm_sessions():
+        sess = info["name"]
+        # ``list_pm_sessions`` already collapses grouped sessions into
+        # their base and skips a user's own views (so no ``pm_session_name``
+        # resolution is needed here), and it is the one enumeration that
+        # spans every pm server.  Do not filter on ``~``: only a numeric
+        # ``~N`` suffix is grouped, and a repo directory may put ``~`` in a
+        # session's own tag.
+        if not sess.startswith("pm-"):
+            continue
+        # Same ownership rule as the unscoped scan: outside a shared
+        # context, another user's planted socket is never adopted.
+        if _private_session_context() and not _server_owned_by_us(
+                info["socket"]):
             continue
         try:
             persisted = (sessions_dir() / sess[3:] / "pm_root").read_text()
@@ -1416,33 +1629,99 @@ def _project_sessions(pm_root: Path):
 def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
     """Find the TUI pane in a pm session.
 
-    Returns (pane_id, session_name) or (None, None) if not found.
+    Returns ``(pane_id, session_name)``, or ``(None, None)`` when no live
+    TUI is found.  With an explicit *session* the name is
+    returned even when the session or its TUI pane is gone, and the pane id
+    is whatever the registry records — history/frames commands key their
+    files off the session, and ``pm autostart`` reports a stale pidfile
+    from it.  Callers that *drive* the pane use ``_find_live_tui_pane``,
+    which filters dead panes.
+
+    The returned session name is always the *base* session: a grouped
+    suffix (``pm-x~2``) is normalised away, because the registry, the
+    pidfile and the history/frames files are all keyed by the base name.
+
+    Every pm session has its own tmux server, so resolution also selects
+    the server hosting the found session: subsequent ``tmux_mod`` calls in
+    the caller target it via ``PM_TMUX_SOCKET``.
 
     If session is provided, uses that. Otherwise:
-    - If in a pm- tmux session, uses current session
+    - If inside a pm session (including a user's own grouped view of one,
+      whose name need not be ``pm-*``), uses that session
     - Otherwise, the session of the ``-C``/``PM_PROJECT`` project, if any
-    - Otherwise, tries to find session matching current directory
-    - Falls back to searching for any pm- session with a TUI pane
+    - Otherwise, tries to find session matching current directory (only
+      when the process is not inside a pm session: there the ambient
+      session wins, see the comment on the cwd branch)
+    - Falls back to scanning pm servers for a live TUI pane; when one of the
+      branches above identified a session, only *that* session's server is
+      scanned (see the note on ``identified`` below).  With no session
+      identified, only *this user's* servers are scanned, so the lookup can
+      never resolve to another user's TUI (see ``_server_owned_by_us``).
     """
-    def registry_tui(sess: str) -> str | None:
-        data = pane_registry.load_registry(sess)
-        for _, pane in pane_registry._iter_all_panes(data):
-            if pane.get("role") == "tui":
-                return pane.get("id")
-        return None
-
-    # If session specified, use it
+    # The scan below re-points PM_TMUX_SOCKET at each server it probes, and
+    # the cwd branch selects a server before that scan runs, so read the
+    # value this process started with *first*: a failed lookup has to leave
+    # the caller addressing the server it came in with.
+    ambient_socket = os.environ.get("PM_TMUX_SOCKET")
+    # If session specified, use it (and its server).  The recorded pane is
+    # returned as-is: naming the session is this branch's job, and
+    # liveness is `_find_live_tui_pane`'s.
     if session:
-        pane_id = registry_tui(session)
-        return (pane_id, session) if pane_id else (None, None)
+        base = pane_registry.base_session_name(session)
+        _select_session_socket(base)
+        return _recorded_tui_pane(base), base
+
+    # The session one of the branches below actually identified, if any.
+    # The fallback scan is scoped to it: pane ids are only unique per tmux
+    # server and ``pm tui send`` delivers keys unscoped, so resolving to a
+    # *different* pm session's live ``pm _tui`` pane would drive the wrong
+    # TUI — the cross-session damage this whole change exists to prevent.
+    identified: str | None = None
+    # The server that hosts the identified session (the ambient one, the
+    # project-override one, or the cwd session's).  Used only by the scan
+    # below, which normally finds it through `list_pm_sessions`: that
+    # enumerates *socket files*, so a server whose socket was unlinked
+    # while it kept running (an old pm's kill, or a cleaned
+    # /tmp/pm-sessions) would be invisible to it.
+    identified_server: str | None = None
 
     # If in a pm session, use current
     if tmux_mod.in_tmux():
-        current_session = tmux_mod.get_session_name()
+        try:
+            current_session = tmux_mod.get_session_name()
+            if current_session:
+                # Resolve a user's own grouped view (S118/S121/S124): tmux
+                # reports the view's name for a shared pane while that
+                # view's client is the most recently active one, and the
+                # view need not be named ``pm-*``.  A raw prefix test would
+                # miss the ambient session here and fall through to the
+                # unscoped cross-server scan below, which can return
+                # *another* pm session's TUI pane — the cross-session
+                # damage this lookup exists to avoid.  Same resolution as
+                # ``_get_current_pm_session``.
+                current_session = pane_registry.pm_session_name(
+                    current_session)
+        except OSError:
+            # tmux missing/unexecutable while $TMUX is set (a forwarded
+            # pane environment, or a container without tmux).  Discovery
+            # degrades to the cwd/cross-server branches instead of
+            # crashing, like every other probe in this scan.
+            current_session = ""
         if current_session.startswith("pm-"):
-            pane_id = registry_tui(current_session)
+            base = pane_registry.base_session_name(current_session)
+            identified = base
+            # The server hosting this pane, *any* server: a legacy
+            # (pre-isolation) session lives on the default server and its
+            # panes carry no PM_TMUX_SOCKET, so the pm-only resolution
+            # returns None there and the fallback scan below would be
+            # scoped by name alone — enough to reach a private twin of the
+            # session, whose pane id may collide with the recorded one.
+            # `$TMUX` names the server this pane is on (review-loop b48f
+            # i6).
+            identified_server = tmux_mod.resolve_ambient_socket(pm_only=False)
+            pane_id = _registry_tui_pane(base)
             if pane_id:
-                return pane_id, current_session
+                return pane_id, base
 
     # Outside a pm session, a ``-C``/``PM_PROJECT`` project names the
     # registry this command works on, and the cwd may be anywhere else.  A
@@ -1451,84 +1730,297 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
     # alone its reload went to the first pm session with a TUI, or to the
     # test project's own TUI, never the user's (QA S14, R35).  Same order
     # as ``_get_pm_session``.
-    if _project_override:
+    #
+    # Only when nothing above identified a session: inside a pm session the
+    # ambient one is the answer (the same rule as the cwd branch below).
+    if identified is None and _project_override:
         for sess in _project_sessions(_project_override):
-            pane_id = registry_tui(sess)
+            base = pane_registry.base_session_name(sess)
+            # Select the server hosting this session before reading its
+            # registry: every pm session runs on its own socket, and the
+            # registry probe below (and the caller's later tmux calls) must
+            # address that server, not whichever one this process happens
+            # to name.  Ownership follows the branch's rule: an implicit
+            # (project-derived) lookup in a private context never adopts
+            # another user's socket; inside a shared/joiner context the
+            # shared session is reachable.
+            project_server = _select_session_socket(
+                base, owned_only=_private_session_context())
+            if project_server is None:
+                continue
+            # The project's session *is* running: record it as the
+            # identified session even when its registry lists no live TUI
+            # pane.  Without this the cwd branch below would run and could
+            # return a *different* project's TUI — the cwd is exactly where
+            # a host-mode regression run's clone or disposable test project
+            # lives — and the last-resort scan would be left unscoped.  A
+            # session that is not running still falls through, as before
+            # (that is what makes the override a hint, not a hard failure).
+            if identified is None:
+                identified = base
+                identified_server = project_server
+            pane_id = _registry_tui_pane(base)
             if pane_id:
-                return pane_id, sess
+                return pane_id, base
 
-    # Try to find session matching current directory first
-    expected_session = _get_session_name_for_cwd()
-    if tmux_mod.session_exists(expected_session):
-        pane_id = registry_tui(expected_session)
+    # Try to find session matching current directory — but only when nothing
+    # above identified a session.  Inside a pm session the ambient one is
+    # the answer: the cwd is a weaker signal, and resolving to a *different*
+    # pm session's TUI because its repo happens to be the cwd would hand
+    # ``pm tui send`` another session's pane (keys are delivered unscoped)
+    # and aim ``pm pr merge``'s window cleanup at the wrong session — the
+    # cross-session damage this whole change exists to prevent.  From a
+    # plain shell there is no ambient session, and the cwd lookup is what
+    # makes ``pm tui view`` work outside a pm session.
+    if identified is None:
+        expected_session = _get_session_name_for_cwd()
+        # Remember the server the cwd session was found on, for the same
+        # reason as the ambient branch above: `list_pm_sessions` enumerates
+        # socket files, so a live server whose socket file was removed would
+        # otherwise be unreachable by the last-resort scan.
+        #
+        # `_select_session_socket` already answers "is this session
+        # running?" through `find_session_server`, whose prefix match is
+        # confirmed through the exact name and the session group (b48f
+        # i16).  A second `session_exists` probe here would be a bare
+        # (prefix) target again: on the legacy default server it also
+        # succeeds for a *different* session whose name merely starts with
+        # this one, identifying a session that is not running and letting
+        # the registry probe below resolve a recorded pane id — pane ids
+        # are only unique per server — to an unrelated pane (review-loop
+        # b48f i17).
+        cwd_server = _select_session_socket(
+            expected_session, owned_only=_private_session_context())
+        if cwd_server is not None:
+            identified = expected_session
+            identified_server = cwd_server
+            pane_id = _registry_tui_pane(expected_session)
+            if pane_id:
+                return pane_id, expected_session
+
+    # Fall back to scanning pm servers (private sockets + legacy default)
+    # for a session with a live registered TUI pane.  Only the identified
+    # session's own server is eligible when there is one; with no session
+    # identified at all (a plain shell) every server *this user owns* is
+    # scanned, which is what makes `pm tui view` work from outside a pm
+    # session without ever resolving to another user's TUI.  The scan
+    # re-points PM_TMUX_SOCKET at each server in turn; the value captured
+    # on entry is restored below if nothing is found.
+    servers = tmux_mod.list_pm_sessions()
+    if identified is not None:
+        if identified_server is not None:
+            # Scope by *server*, not by name.  A same-named session on
+            # another server is a different session: a legacy twin (an older
+            # pm binary creates one on the default server, which it cannot
+            # see the private server from) shares the pane-registry key, so
+            # a stale recorded pane id can name a live unrelated pane there
+            # — pane ids are only unique per server.  A name-only filter
+            # would scan that twin and hand its pane to `pm tui send`.
+            servers = [info for info in servers
+                       if info["socket"] == identified_server]
+            if not servers:
+                # The identified session's server is not reported by the
+                # enumeration above: either this process is attached to it
+                # and its socket file is gone, it is a legacy session (whose
+                # rows carry ``socket=None`` while the selected server is
+                # the default server's explicit path), or the cwd session's
+                # socket lives outside the pm socket directory.  Scan it
+                # directly: the last-resort scan below exists precisely for a
+                # live TUI with no registry entry.
+                servers = [{"name": identified, "socket": identified_server,
+                            "attached": 0, "shared": False}]
+        else:
+            # The ambient socket could not be resolved (no PM_TMUX_SOCKET
+            # and no pm socket in $TMUX): fall back to the name, which is
+            # all the identification gives us.  A private context still
+            # restricts the candidates to servers this user owns, so a
+            # socket another user planted under that name is not scanned
+            # (the same rule as the unscoped branch below).
+            servers = [info for info in servers
+                       if info["name"] == identified
+                       and (not _private_session_context()
+                            or _server_owned_by_us(info["socket"]))]
+    else:
+        # No session context at all (a plain shell).  Only this user's
+        # servers are eligible: the socket directory is world-writable and
+        # `--global` sockets are world-accessible, so an unfiltered scan
+        # could resolve to *another user's* live TUI and hand its pane to
+        # `pm tui send` — the cross-session damage this change exists to
+        # prevent, one level up.  A shared session stays reachable with an
+        # explicit `-s`, and from inside it.
+        servers = [info for info in servers
+                   if _server_owned_by_us(info["socket"])]
+    for info in servers:
+        _use_tmux_socket(info["socket"])
+        pane_id = _registry_tui_pane(info["name"])
         if pane_id:
-            return pane_id, expected_session
-
-    # Fall back to searching for any pm session with a TUI
-    result = subprocess.run(
-        tmux_mod._tmux_cmd("list-sessions", "-F", "#{session_name}"),
-        capture_output=True, text=True
-    )
-    if result.returncode != 0:
-        return None, None
-
-    for sess in result.stdout.strip().splitlines():
-        if sess.startswith("pm-") and "~" not in sess:
-            data = pane_registry.load_registry(sess)
-            for _, pane in pane_registry._iter_all_panes(data):
-                if pane.get("role") == "tui":
-                    return pane.get("id"), sess
+            return pane_id, info["name"]
 
     # Last resort: search tmux directly for a pane running 'pm _tui'.
     # This handles cases where the TUI pane was removed from the registry
-    # (e.g. during heal testing) but is still alive in tmux.
-    result = subprocess.run(
-        tmux_mod._tmux_cmd("list-panes", "-a",
-                           "-F", "#{pane_id} #{session_name} #{pane_current_command} #{pane_start_command}"),
-        capture_output=True, text=True
-    )
-    if result.returncode == 0:
-        for line in result.stdout.strip().splitlines():
-            parts = line.split(None, 3)
-            if len(parts) >= 3 and parts[1].startswith("pm-"):
-                # Check if command contains 'pm _tui' or 'pm-tui'
-                cmd_text = " ".join(parts[2:])
-                if "_tui" in cmd_text:
-                    return parts[0], parts[1]
+    # (e.g. during heal testing) but is still alive in tmux.  Reuses
+    # ``_live_panes_and_tuis`` — the same query ``_find_live_tui_pane``
+    # filters — so "a pane running the TUI" has one definition, and a tmux
+    # that cannot be run degrades to "nothing found" instead of raising.
+    #
+    # The pane must belong to the *row's* session, not merely to some pm
+    # session on the same server: a server is not a session, and the
+    # legacy default server hosts every pre-isolation pm session, so
+    # accepting any pm- TUI pane here would hand back another session's
+    # pane (and ``pm tui send`` delivers keys unscoped).  Resolve through
+    # the session group: tmux may report the pane under a user's own view's
+    # name (S118/S121/S124), and a view of this session is not another one.
+    for info in servers:
+        _use_tmux_socket(info["socket"])
+        _, live_tuis = _live_panes_and_tuis()
+        for pane_id, tui_session in live_tuis:
+            if _pm_session_of(tui_session) == info["name"]:
+                return pane_id, info["name"]
 
+    # Nothing found: undo the scan's env mutations so the caller keeps the
+    # server it started with.
+    if ambient_socket is None:
+        os.environ.pop("PM_TMUX_SOCKET", None)
+    else:
+        os.environ["PM_TMUX_SOCKET"] = ambient_socket
     return None, None
 
 
-def _live_panes_and_tuis() -> tuple[set[str], list[tuple[str, str]]]:
-    """Return ``(live_pane_ids, live_tui_panes)`` from tmux in one query.
+def _pm_session_of(tmux_session: str) -> str:
+    """Return the base pm session a tmux session name belongs to.
 
-    ``live_pane_ids`` is every pane tmux currently knows about;
-    ``live_tui_panes`` is the ``(pane_id, session_name)`` pairs whose
-    start command is ``pm _tui``.  Returns ``(set(), [])`` when tmux
-    cannot be queried (no server), so callers degrade to "no live TUI".
+    tmux may report a shared pane under a *view's* name: ``list-panes -a``
+    lists a pane once per session in its group, so the last line (the
+    lexicographically greatest name) wins, and S118/S121/S124 allow a
+    user's own view to be named anything — including a name that sorts
+    after the pm session's, or one that looks like a different pm session.
+    Resolving through the session group is the same answer
+    ``_find_tui_pane``'s in-tmux branch and the detach path use, so a pane
+    reported under a view's name is still recognised as this session's.
+
+    A session that cannot be queried (tmux missing/unexecutable) degrades
+    to its plain base name, the same "no group known" answer every other
+    probe in this module gives.
+    """
+    try:
+        return pane_registry.pm_session_name(tmux_session)
+    except OSError:
+        return pane_registry.base_session_name(tmux_session)
+
+
+def _live_panes_and_tuis() -> tuple[dict[str, str], list[tuple[str, str]]]:
+    """Return ``(pane_sessions, live_tui_panes)`` from tmux in one query.
+
+    ``pane_sessions`` maps every pane tmux currently knows about to the
+    session that owns it; ``live_tui_panes`` is the ``(pane_id,
+    session_name)`` pairs whose start command is ``pm _tui``.  Returns
+    ``({}, [])`` when tmux cannot be queried (no server), so callers
+    degrade to "no live TUI".
+
+    The owning session is returned alongside the id because pane ids are
+    only unique *within* one tmux server, and every pm session now has its
+    own server: a pane id recorded for one session can name an unrelated
+    pane on another, so a bare id is not proof that a recorded pane is
+    still the TUI.
+
+    The session name is tmux's raw answer (which may be a view's name —
+    compare through ``_pm_session_of``, never with a bare ``~`` strip).
+
+    Fields are separated by ``:``, which tmux forbids in session names (it
+    rewrites ``:`` and ``.`` to ``_``), while a session name — derived from
+    the repo directory name — may contain spaces or ``|``.  The start
+    command comes last, so any separators it contains are preserved by
+    ``maxsplit=2``.
     """
     try:
         result = subprocess.run(
             tmux_mod._tmux_cmd(
                 "list-panes", "-a",
-                "-F", "#{pane_id} #{session_name} #{pane_start_command}"),
+                "-F", "#{pane_id}:#{session_name}:#{pane_start_command}"),
             capture_output=True, text=True,
         )
     except Exception:
         _log.debug("_live_panes_and_tuis: tmux query failed", exc_info=True)
-        return set(), []
+        return {}, []
     if result.returncode != 0:
-        return set(), []
-    ids: set[str] = set()
+        return {}, []
+    panes: dict[str, str] = {}
     tuis: list[tuple[str, str]] = []
     for line in result.stdout.splitlines():
-        parts = line.split(None, 2)
-        if not parts:
+        parts = line.split(":", 2)
+        if len(parts) < 2:
             continue
-        ids.add(parts[0])
-        if len(parts) >= 3 and "_tui" in parts[2]:
-            tuis.append((parts[0], parts[1]))
-    return ids, tuis
+        pane_id, session = parts[0], parts[1]
+        panes[pane_id] = session
+        if len(parts) == 3 and _start_command_is_tui(parts[2]):
+            tuis.append((pane_id, session))
+    return panes, tuis
+
+
+def _find_running_tui_pane(session_name: str) -> tuple[str, str] | None:
+    """Return ``(pane_id, window_id)`` of a running TUI of *session_name*.
+
+    A running TUI is a pane whose start command runs ``pm _tui``
+    (``_live_panes_and_tuis``), in a tmux session that resolves to
+    *session_name* through its group (``_pm_session_of``), and whose
+    process has not exited: a dead pane kept by a user's ``remain-on-exit``
+    is not one.  Returns ``None`` when there is none, or when tmux cannot
+    be queried.
+
+    ``pm session`` adopts this pane when the registry does not list it
+    (QA S35), and the TUI-respawn hook leaves a session alone when it has
+    one (QA S42), so both agree on whether a TUI is running.
+    """
+    _, live_tuis = _live_panes_and_tuis()
+    for pane_id, tmux_session in live_tuis:
+        if _pm_session_of(tmux_session) != session_name:
+            continue
+        result = tmux_mod._run(
+            tmux_mod._tmux_cmd("display", "-p", "-t", pane_id,
+                               "#{pane_dead} #{window_id}"),
+            text=True)
+        fields = result.stdout.split() if result.returncode == 0 else []
+        if len(fields) != 2 or fields[0] != "0":
+            continue
+        return pane_id, fields[1]
+    return None
+
+
+def _shell_words(command: str) -> list[str]:
+    """Split *command* into shell words; degrade to a whitespace split.
+
+    An unbalanced quote makes ``shlex`` raise.  The fallback keeps each
+    word whole (only stray quotes at its ends are dropped), so a word is
+    never cut down to a shorter one that could match exactly.
+    """
+    try:
+        return shlex.split(command)
+    except ValueError:
+        return [word.strip("\"'") for word in command.split()]
+
+
+def _start_command_is_tui(command: str) -> bool:
+    """True when a pane's ``#{pane_start_command}`` runs ``pm _tui``.
+
+    tmux reports each argument it was given, quoted the way its own
+    parser reads it back.  pm passes every pane command as one shell
+    string (``PM_TMUX_SOCKET=<socket> pm _tui``), so it comes back as a
+    single double-quoted word, which is split once more into the words the
+    shell runs.  Those words must hold a pm entry point and the exact
+    ``_tui`` argument: the same test the pidfile applies to a live TUI's
+    argv (``tui_pidfile.cmdline_is_tui``).
+
+    A substring test is not enough.  Every pane pm wraps in its EXIT trap
+    names the session (``trap "pm _pane-exited pm-<tag> ..." EXIT; pm
+    notes``), and a review-diff pane cds into a workdir named after the
+    repo, so in a repo whose name contains ``_tui`` those panes looked
+    like the TUI (QA S38): ``pm session`` adopted the notes pane instead
+    of respawning a crashed TUI, and ``pm tui send`` typed into it.
+    """
+    words = _shell_words(command)
+    if len(words) == 1:
+        words = _shell_words(words[0])
+    return tui_pidfile.cmdline_is_tui(words)
 
 
 def _find_live_tui_pane(
@@ -1545,26 +2037,32 @@ def _find_live_tui_pane(
     (view) or a raw tmux error (send).
 
     Returns ``(pane_id, session)`` only when the pane is still alive in
-    tmux.  When the recorded pane is gone, falls back to a live
-    ``pm _tui`` pane in the same session (never another session's), and
-    otherwise returns ``(None, session)``.
+    tmux *and belongs to that session*.  When the recorded pane is gone,
+    falls back to a live ``pm _tui`` pane in the same session (never
+    another session's), and otherwise returns ``(None, session)``.
+
+    The session check matters because pane ids are only unique per tmux
+    server: when the session cannot be found on any server (stale
+    registry, wrong ``--session``), the liveness query still runs against
+    whatever server this process is attached to, where the recorded id may
+    name an unrelated pane of a different session.  The comparison goes
+    through the session *group* (``_pm_session_of``), because tmux may
+    report a shared pane under a user's own view's name.
     """
     pane_id, sess = _find_tui_pane(session)
     if not sess:
-        if not session:
-            return None, None
-        # An explicit session whose registry has no ``tui`` entry yet
-        # (a hand-started TUI before the first ``heal_registry`` pass,
-        # or an entry healed away) still has a live pane to find:
-        # ``_find_tui_pane`` only consults the registry when a session is
-        # given, so without this the caller reports "No TUI pane found"
-        # for a TUI that is running and owns the pidfile.
-        sess = session
-    live_ids, live_tuis = _live_panes_and_tuis()
-    if pane_id and pane_id in live_ids:
+        # Only an unresolved *implicit* lookup gets here: with an explicit
+        # session ``_find_tui_pane`` always returns the base name, even
+        # when the registry has no ``tui`` entry (a hand-started TUI before
+        # the first ``heal_registry`` pass) — the live-pane scan below is
+        # what resolves that case.
+        return None, None
+    live_panes, live_tuis = _live_panes_and_tuis()
+    base = pane_registry.base_session_name(sess)
+    if (pane_id and pane_id in live_panes
+            and _pm_session_of(live_panes[pane_id]) == base):
         return pane_id, sess
-    base = sess.rsplit("~", 1)[0]
     for tui_id, tui_sess in live_tuis:
-        if tui_sess.rsplit("~", 1)[0] == base:
+        if _pm_session_of(tui_sess) == base:
             return tui_id, sess
     return None, sess

@@ -75,14 +75,18 @@ def test_host_mode_says_so():
     assert "`/h/clone`" in out
 
 
-def test_host_tmux_socket_is_named_for_plain_tmux():
-    """Host mode drops TMUX but keeps PM_TMUX_SOCKET: pm uses that server,
-    a plain tmux command would not, so the prompt names the socket."""
-    out = _prompt(in_container=False, tmux_socket="/tmp/my socks/s.sock")
-    assert "tmux server at `/tmp/my socks/s.sock`" in out
-    assert "`tmux -S '/tmp/my socks/s.sock' …`" in out
-    # Nothing to say without one (the default server is used throughout).
-    assert "tmux -S" not in _prompt(in_container=False)
+def test_host_mode_names_the_sessions_own_server():
+    """Host mode: every pm session has its own tmux server (pr-073910f), so
+    there is no ambient server to name — and the user's live session's
+    ``PM_TMUX_SOCKET`` is scrubbed from the run.  A plain ``tmux`` command
+    must be given the run's own session's socket."""
+    out = _prompt(in_container=False)
+    assert "`pm` resolves each session's own tmux server" in out
+    assert "`pm session --print-connect` prints" in out
+    # Never points at an ambient (the user's) server.
+    assert "PM_TMUX_SOCKET" not in out
+    # A container has its own tmux server: nothing to say.
+    assert "tmux server" not in _prompt(in_container=True)
 
 
 def test_empty_recipe_libraries_are_stated():
@@ -185,3 +189,34 @@ def test_launch_problem_none_when_launchable(tmp_path):
     with patch.object(container_mod, "is_container_mode_enabled",
                       return_value=False):
         assert regression_launch_problem(root, "auth-flow") is None
+
+
+def test_discovery_prompt_quotes_the_session_window_target(monkeypatch):
+    """The discovery watcher's ``tmux list-panes -t`` example is a command.
+
+    A session name with a space (it comes from the repo directory) split the
+    ``session:window`` target into two arguments.  The whole target is one
+    shell word; an ordinary name stays bare and no name keeps the
+    placeholder (review-loop b48f i19).  The discovery prompt no longer
+    carries a live-session context, but this example is still copied
+    verbatim into a shell.
+    """
+    from pm_core import prompt_gen
+
+    def no_project():
+        raise FileNotFoundError
+
+    monkeypatch.setattr(prompt_gen.store, "find_project_root", no_project)
+
+    def target_line(session_name):
+        out = prompt_gen.generate_discovery_supervisor_prompt(
+            {}, session_name=session_name)
+        return next(line for line in out.splitlines()
+                    if line.startswith("tmux list-panes -t "))
+
+    assert target_line("pm-my repo-abc").startswith(
+        "tmux list-panes -t 'pm-my repo-abc:discovery' -F")
+    assert target_line("pm-repo-abc").startswith(
+        "tmux list-panes -t pm-repo-abc:discovery -F")
+    assert target_line(None).startswith(
+        "tmux list-panes -t <session>:discovery -F")

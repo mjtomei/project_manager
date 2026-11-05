@@ -42,7 +42,7 @@ def _locked_update_runs(data: dict):
     ``store.locked_update`` and only returns the bounce hop when the apply
     callback actually flips the status, so tests must execute the callback.
     """
-    def _side(root, fn):
+    def _side(root, fn, **kwargs):
         fn(data)
         return data
     return _side

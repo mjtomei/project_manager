@@ -478,6 +478,122 @@ def test_stale_status_keeps_another_clones_snapshot(tmp_path,
     assert _resume_file_path(qa_dir).is_file()
 
 
+class TestCrossServerRunSession:
+    """Every pm session has its own tmux server (pr-073910f).
+
+    A run launched from another clone's session is only reachable when
+    that session is on *this* process's server (a legacy pre-isolation
+    session).  Otherwise its scenario panes live on another server: this
+    TUI must leave the run to the clone that hosts it rather than poll
+    this session for windows that are not here (which would end that
+    run with a bogus result) — review-loop b48f i15.
+    """
+
+    def test_same_server_session_is_not_elsewhere(self, monkeypatch):
+        monkeypatch.setattr("pm_core.tmux.session_exists",
+                            lambda name, *a, **k: True)
+        assert qa_loop.run_session_live_elsewhere("other-clone-cafe") is False
+
+    def test_live_on_another_server_is_elsewhere(self, monkeypatch):
+        monkeypatch.setattr("pm_core.tmux.session_exists",
+                            lambda name, *a, **k: False)
+        monkeypatch.setattr("pm_core.tmux.find_session_server",
+                            lambda name, **k: ("/tmp/pm-sessions/pm-x", True))
+        assert qa_loop.run_session_live_elsewhere("other-clone-cafe") is True
+
+    def test_gone_everywhere_is_not_elsewhere(self, monkeypatch):
+        """Its windows went with the session: the run is resumed here."""
+        monkeypatch.setattr("pm_core.tmux.session_exists",
+                            lambda name, *a, **k: False)
+        monkeypatch.setattr("pm_core.tmux.find_session_server",
+                            lambda name, **k: (None, False))
+        assert qa_loop.run_session_live_elsewhere("other-clone-cafe") is False
+
+    def test_no_recorded_session_is_not_elsewhere(self):
+        assert qa_loop.run_session_live_elsewhere(None) is False
+
+    def test_a_socket_another_user_planted_is_not_the_run_session(
+            self, monkeypatch, tmp_path):
+        """The lookup is implicit, so only a socket we own can host the run.
+
+        ``/tmp/pm-sessions`` is world-writable and the run's socket name is
+        derived from its tag, so another user can bind a server there.  It
+        must not be contacted, and its answer must not make this TUI leave
+        the run alone (review-loop b48f i20).  With no server of ours, the
+        session is gone and the run is resumed here.
+        """
+        import os
+        import socket
+
+        from pm_core import paths, tmux
+
+        monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", tmp_path)
+        tag = "other-clone-cafe1234"
+        planted = tmux.session_socket_for(f"pm-{tag}")
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            s.bind(planted)
+        finally:
+            s.close()
+        real_uid = os.getuid()
+        monkeypatch.setattr(os, "getuid", lambda: real_uid + 1)
+        probed: list[str | None] = []
+
+        def exists(name, socket_path=None, use_env=True):
+            probed.append(socket_path)
+            # Only the planted server would answer.
+            return socket_path == planted
+
+        monkeypatch.setattr(tmux, "session_exists", exists)
+
+        assert qa_loop.run_session_live_elsewhere(tag) is False
+        assert planted not in probed
+
+    def test_tmux_missing_is_not_elsewhere(self, monkeypatch):
+        """No tmux: degrade to the old behaviour instead of crashing the scan."""
+        def missing(*a, **k):
+            raise FileNotFoundError(2, "No such file or directory: 'tmux'")
+
+        monkeypatch.setattr("pm_core.tmux.session_exists", missing)
+        assert qa_loop.run_session_live_elsewhere("other-clone-cafe") is False
+
+    def test_foreign_run_live_on_another_server_is_not_resumed(self, tmp_path):
+        app = _make_app(tmp_path)
+        qa_dir = _seed_run(tmp_path, overall="")
+        _retag(qa_dir, "other-clone-cafe1234")
+
+        with patch("pathlib.Path.home", return_value=tmp_path), \
+             patch("pm_core.tmux.session_exists", return_value=False), \
+             patch("pm_core.tmux.find_session_server",
+                   return_value=("/tmp/pm-sessions/pm-other-clone-cafe1234",
+                                 True)), \
+             patch.object(qa_loop, "resume_qa_background") as resume_bg, \
+             patch.object(qa_loop_ui, "_on_qa_complete") as on_complete:
+            qa_loop_ui._resume_incomplete_qa(app)
+
+        resume_bg.assert_not_called()
+        on_complete.assert_not_called()
+        assert _resume_file_path(qa_dir).is_file()
+        assert "pr-001" not in app._qa_loops
+        assert "pr-001" not in app._resumed_qa_pr_ids
+
+    def test_foreign_run_whose_session_is_gone_is_resumed_here(self, tmp_path):
+        app = _make_app(tmp_path)
+        qa_dir = _seed_run(tmp_path, overall="")
+        _retag(qa_dir, "other-clone-cafe1234")
+
+        with patch("pathlib.Path.home", return_value=tmp_path), \
+             patch("pm_core.tmux.session_exists", return_value=False), \
+             patch("pm_core.tmux.find_session_server",
+                   return_value=(None, False)), \
+             patch.object(qa_loop, "resume_qa_background") as resume_bg:
+            qa_loop_ui._resume_incomplete_qa(app)
+
+        resume_bg.assert_called_once()
+        state = resume_bg.call_args.args[0]
+        assert qa_loop._resume_session(state) == "pm-project_manager-deadbeef"
+
+
 def _retag(qa_dir, tag):
     """Mark a seeded run as launched from another pm session (clone)."""
     f = _resume_file_path(qa_dir)
@@ -697,14 +813,26 @@ def _seed_held_run(home, *, completion_processed=False, pr_id="pr-001"):
 
 def test_resume_held_run_keeps_watching(tmp_path):
     """A held run is re-adopted, not processed-and-dropped, and its snapshot
-    is kept so a follow-up that landed during downtime is collected."""
+    is kept so a follow-up that landed during downtime is collected.
+
+    It also carries the generic resume marker: a restart that picks a held
+    run back up logs the same "Resuming incomplete QA from disk" line as any
+    other incomplete run, followed by the held-specific re-adoption line
+    (QA scenario 88, R15)."""
     app = _make_app(tmp_path)
     qa_dir = _seed_held_run(tmp_path, completion_processed=False)
 
-    with patch("pathlib.Path.home", return_value=tmp_path), \
-         patch.object(qa_loop, "resume_qa_background") as resume_bg, \
-         patch.object(qa_loop_ui, "_on_qa_complete") as on_complete:
-        qa_loop_ui._resume_incomplete_qa(app)
+    with patch.object(qa_loop_ui._log, "info") as log_info:
+        with patch("pathlib.Path.home", return_value=tmp_path), \
+             patch.object(qa_loop, "resume_qa_background") as resume_bg, \
+             patch.object(qa_loop_ui, "_on_qa_complete") as on_complete:
+            qa_loop_ui._resume_incomplete_qa(app)
+
+    messages = [str(c.args[0]) % c.args[1:] if c.args else ""
+                for c in log_info.call_args_list]
+    assert any("Resuming incomplete QA from disk: pr-001" in m
+               for m in messages)
+    assert any("Re-adopting held QA run for pr-001" in m for m in messages)
 
     resume_bg.assert_called_once()
     # Unprocessed completion → noted once during adoption.
@@ -1458,6 +1586,31 @@ def test_resumed_run_is_driven_in_the_session_that_holds_its_windows(tmp_path):
 
 def test_resumed_run_uses_own_session_when_its_session_is_gone(tmp_path):
     assert _resume_in(tmp_path, live_sessions={"pm-clone-a"}) == "pm-clone-a"
+
+
+def test_resume_asks_for_its_main_window_back(tmp_path):
+    """QA S78: a run resumed because its session is gone lost its windows.
+
+    The execution phase relaunches the scenario windows; the main QA window
+    (planner slot + status dashboard) has to be recreated too, and only the
+    resume path may do it (an ordinary restart keeps the window)."""
+    pm_dir = tmp_path / "pm"
+    pm_dir.mkdir()
+    wd = tmp_path / "wd"
+    wd.mkdir()
+    pr = {"id": "pr-001", "title": "T", "branch": "b", "status": "qa",
+          "workdir": str(wd), "notes": []}
+    store.save({"project": {"name": "test", "repo": "/tmp/r",
+                            "base_branch": "master"}, "prs": [pr]}, pm_dir)
+    state = _make_state(tmp_path / "qa")
+    state.session_tag = "clone-b"
+    with patch.object(qa_loop, "get_pm_session", return_value="pm-clone-a"), \
+         patch("pm_core.tmux.session_exists", return_value=False), \
+         patch.object(qa_loop, "_execute_and_finalize",
+                      return_value=state) as run:
+        qa_loop.resume_qa_sync(state, pm_dir, pr)
+
+    assert run.call_args.kwargs["ensure_window"] is True
 
 
 @pytest.mark.parametrize("stale_loop", ["aaa", "zzz"])

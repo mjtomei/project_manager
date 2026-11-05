@@ -9,6 +9,7 @@ import pytest
 
 from pm_core.cli.helpers import (
     LAUNCH_REMOVED_AT_LOCK,
+    _get_session_name_for_cwd,
     _infer_pr_id,
     _make_pr_entry,
     _pr_display_id,
@@ -449,6 +450,87 @@ class TestEnsureWorkdir:
         assert result is None
 
 
+class TestGetSessionNameForCwd:
+    """The non-git fallback name must distinguish share modes."""
+
+    def test_non_git_fallback_name_carries_the_share_mode(self, monkeypatch,
+                                                         tmp_path):
+        """A non-git directory has no tag hash to mix the mode into.
+
+        ``get_session_tag`` returns None here, so without this the private
+        session of the directory and a ``--global`` invocation computed
+        the same name — and ``pm session kill --global`` run inside that
+        private session killed it (review-loop 9d4c i4).
+        """
+        d = tmp_path / "not-a-repo"
+        d.mkdir()
+        monkeypatch.chdir(d)
+        monkeypatch.delenv("PM_SHARE_MODE", raising=False)
+        private = _get_session_name_for_cwd()
+        assert private == "pm-not-a-repo-00000000"
+
+        monkeypatch.setenv("PM_SHARE_MODE", "global")
+        shared = _get_session_name_for_cwd()
+        assert shared != private
+        assert shared.startswith("pm-not-a-repo-")
+
+        monkeypatch.setenv("PM_SHARE_MODE", "group:staff")
+        grouped = _get_session_name_for_cwd()
+        assert grouped not in (private, shared)
+
+    def test_non_git_fallback_uses_the_project_dir_from_a_subdirectory(
+            self, monkeypatch, tmp_path):
+        """A subdirectory of a pm project resolves to the project's session.
+
+        With no git root to anchor on, the fallback name came from the
+        caller's cwd basename, so a plain ``pm session`` run from a
+        subdirectory computed a different name and started a second
+        session/TUI on a second socket instead of attaching to the
+        project's session (QA scenario 62).
+        """
+        proj = tmp_path / "my-proj"
+        (proj / "pm").mkdir(parents=True)
+        (proj / "pm" / "project.yaml").write_text("project: {}\n")
+        sub = proj / "sub" / "deep"
+        sub.mkdir(parents=True)
+        monkeypatch.chdir(sub)
+        monkeypatch.delenv("PM_SHARE_MODE", raising=False)
+        assert _get_session_name_for_cwd() == "pm-my-proj-00000000"
+
+        monkeypatch.setenv("PM_SHARE_MODE", "global")
+        shared = _get_session_name_for_cwd()
+        assert shared.startswith("pm-my-proj-")
+        assert shared != "pm-my-proj-00000000"
+
+    def test_non_git_standalone_project_anchors_on_its_root(
+            self, monkeypatch, tmp_path):
+        """The legacy standalone layout (root-level project.yaml) anchors too.
+
+        ``store.find_project_root`` accepts a root-level ``project.yaml``
+        for backward compatibility, so such a project is a pm project — but
+        the walk-up only looked for ``pm/project.yaml``, leaving the
+        subdirectory bug (QA scenario 62) in place for it.
+        """
+        proj = tmp_path / "legacy-proj"
+        (proj / "specs").mkdir(parents=True)
+        (proj / "project.yaml").write_text("project: {}\n")
+        monkeypatch.chdir(proj / "specs")
+        monkeypatch.delenv("PM_SHARE_MODE", raising=False)
+        assert _get_session_name_for_cwd() == "pm-legacy-proj-00000000"
+
+    def test_a_nested_pm_dir_wins_over_a_root_level_project_yaml(
+            self, monkeypatch, tmp_path):
+        """``pm/project.yaml`` is the stronger anchor when both exist."""
+        repo = tmp_path / "target-repo"
+        (repo / "pm").mkdir(parents=True)
+        (repo / "pm" / "project.yaml").write_text("project: {}\n")
+        (repo / "project.yaml").write_text("project: {}\n")
+        (repo / "sub").mkdir()
+        monkeypatch.chdir(repo / "sub")
+        monkeypatch.delenv("PM_SHARE_MODE", raising=False)
+        assert _get_session_name_for_cwd() == "pm-target-repo-00000000"
+
+
 class TestPmSessionOutsidePmTmux:
     """A process outside a pm tmux session (a QA driver spawned by
     ``pm pr auto-sequence`` from a plain terminal, a non-pm tmux session or
@@ -485,8 +567,11 @@ class TestPmSessionOutsidePmTmux:
         monkeypatch.setattr(no_pm_tmux, "_get_session_name_for_cwd",
                             lambda: "pm-proj-1234")
         live = set()
-        monkeypatch.setattr(tmux_mod, "session_exists",
-                            lambda name, socket_path=None: name.lstrip("=") in live)
+        # ``use_env`` is part of session_exists's signature and is passed by
+        # find_session_server's default-server probe (per-session sockets).
+        monkeypatch.setattr(
+            tmux_mod, "session_exists",
+            lambda name, socket_path=None, use_env=True: name.lstrip("=") in live)
         assert loop_shared.get_pm_session() is None
         live.add("pm-proj-1234")
         assert loop_shared.get_pm_session() == "pm-proj-1234"
@@ -533,7 +618,7 @@ class TestFindLiveTuiPane:
             {"id": "%6", "role": "tui", "order": 0, "cmd": "pm _tui"})
         with patch("pm_core.cli.helpers.pane_registry.load_registry",
                    return_value=data), \
-             self._panes("%3 pm-test bash\n"):
+             self._panes("%3:pm-test:bash\n"):
             assert _find_live_tui_pane("pm-test") == (None, "pm-test")
 
     def test_live_tui_entry_is_returned(self):
@@ -543,8 +628,30 @@ class TestFindLiveTuiPane:
             {"id": "%6", "role": "tui", "order": 0, "cmd": "pm _tui"})
         with patch("pm_core.cli.helpers.pane_registry.load_registry",
                    return_value=data), \
-             self._panes('%6 pm-test "pm _tui"\n'):
+             self._panes('%6:pm-test:"pm _tui"\n'):
             assert _find_live_tui_pane("pm-test") == ("%6", "pm-test")
+
+    def test_live_tui_in_a_session_whose_name_contains_a_space(self):
+        """A repo directory name may contain a space, so a session name may.
+
+        The pane query used to be space-separated, so the session name was
+        read as its first word and the live recorded pane looked like
+        another session's: ``pm tui view`` / ``send`` / ``restart`` and
+        ``pm qa regression`` all reported "No TUI pane found" for a running
+        TUI.  ``:`` is used instead because tmux forbids it in session
+        names.
+        """
+        from pm_core.cli.helpers import _find_live_tui_pane
+
+        data = self._registry(
+            {"id": "%6", "role": "tui", "order": 0, "cmd": "pm _tui"})
+        with patch("pm_core.cli.helpers.pane_registry.load_registry",
+                   return_value=data), \
+             patch("pm_core.tmux.find_session_server",
+                   return_value=(None, False)), \
+             self._panes('%6:pm-my repo-abc:"pm _tui"\n'):
+            assert _find_live_tui_pane("pm-my repo-abc") == (
+                "%6", "pm-my repo-abc")
 
     def test_dead_entry_falls_back_to_a_live_tui_in_same_session(self):
         from pm_core.cli.helpers import _find_live_tui_pane
@@ -553,10 +660,51 @@ class TestFindLiveTuiPane:
             {"id": "%6", "role": "tui", "order": 0, "cmd": "pm _tui"})
         with patch("pm_core.cli.helpers.pane_registry.load_registry",
                    return_value=data), \
-             self._panes("%3 pm-test bash\n"
-                         '%8 pm-test "pm _tui"\n'
-                         '%9 pm-other "pm _tui"\n'):
+             self._panes("%3:pm-test:bash\n"
+                         '%8:pm-test:"pm _tui"\n'
+                         '%9:pm-other:"pm _tui"\n'):
             assert _find_live_tui_pane("pm-test") == ("%8", "pm-test")
+
+    def test_a_pane_naming_a_tui_session_is_not_the_tui(self):
+        """QA S38: in a repo named ``rich_tui`` every pane pm wraps in its
+        EXIT trap names the session, ``pm-rich_tui-<h>``, and a review-diff
+        pane cds into ``~/.pm/workdirs/rich_tui-<h>/``.  With the TUI
+        crashed (its registry entry dead), neither may be returned as the
+        TUI: ``pm tui view`` printed the notes pane and ``pm tui send``
+        typed into it.  The start commands are the ones tmux 3.2a reported.
+        """
+        from pm_core.cli.helpers import _find_live_tui_pane
+
+        sess = "pm-rich_tui-1f36a2a6"
+        data = self._registry(
+            {"id": "%0", "role": "tui", "order": 0, "cmd": "pm _tui"},
+            {"id": "%2", "role": "notes", "order": 1, "cmd": "pm notes"})
+        notes = ('%2:pm-rich_tui-1f36a2a6:"bash -c \'trap \\"pm '
+                 '_pane-exited pm-rich_tui-1f36a2a6 @0 1793622288 '
+                 '\\$TMUX_PANE\\" EXIT; pm notes\'"\n')
+        diff = ('%3:pm-rich_tui-1f36a2a6:"cd /home/u/.pm/workdirs/'
+                'rich_tui-7656872a/pm-pr-051d62a-add-login-c7012788 && '
+                '{ git --no-pager diff master...HEAD; } | less -R; '
+                'exec /bin/bash"\n')
+        with patch("pm_core.cli.helpers.pane_registry.load_registry",
+                   return_value=data), \
+             self._panes(notes + diff):
+            assert _find_live_tui_pane(sess) == (None, sess)
+
+    def test_a_respawned_tui_beside_them_is_found(self):
+        """The same session after a respawn: only the ``pm _tui`` pane."""
+        from pm_core.cli.helpers import _find_live_tui_pane
+
+        sess = "pm-rich_tui-1f36a2a6"
+        data = self._registry(
+            {"id": "%0", "role": "tui", "order": 0, "cmd": "pm _tui"})
+        with patch("pm_core.cli.helpers.pane_registry.load_registry",
+                   return_value=data), \
+             self._panes('%2:pm-rich_tui-1f36a2a6:"bash -c \'trap '
+                         '\\"pm _pane-exited pm-rich_tui-1f36a2a6 @0 1 '
+                         '\\$TMUX_PANE\\" EXIT; pm notes\'"\n'
+                         '%5:pm-rich_tui-1f36a2a6:"pm _tui"\n'):
+            assert _find_live_tui_pane(sess) == ("%5", sess)
 
     def test_never_falls_back_to_another_session(self):
         from pm_core.cli.helpers import _find_live_tui_pane
@@ -565,8 +713,99 @@ class TestFindLiveTuiPane:
             {"id": "%6", "role": "tui", "order": 0, "cmd": "pm _tui"})
         with patch("pm_core.cli.helpers.pane_registry.load_registry",
                    return_value=data), \
-             self._panes('%9 pm-other "pm _tui"\n'):
+             self._panes('%9:pm-other:"pm _tui"\n'):
             assert _find_live_tui_pane("pm-test") == (None, "pm-test")
+
+    def test_pane_id_reused_on_another_server_is_not_returned(self):
+        """Pane ids are only unique per tmux server (per-session sockets).
+
+        A stale registry entry for a session that no longer exists must not
+        be resolved against whatever server this process is attached to: the
+        recorded ``%6`` here is a live pane of a *different* session, and
+        handing it to ``pm tui send``/``view`` would drive the wrong pane.
+        """
+        from pm_core.cli.helpers import _find_live_tui_pane
+
+        data = self._registry(
+            {"id": "%6", "role": "tui", "order": 0, "cmd": "pm _tui"})
+        with patch("pm_core.cli.helpers.pane_registry.load_registry",
+                   return_value=data), \
+             patch("pm_core.tmux.find_session_server",
+                   return_value=(None, False)), \
+             self._panes("%6:pm-other:bash\n"):
+            assert _find_live_tui_pane("pm-gone") == (None, "pm-gone")
+
+    def test_live_pane_in_a_grouped_session_still_counts(self):
+        """A grouped session's name is normalised before comparing."""
+        from pm_core.cli.helpers import _find_live_tui_pane
+
+        data = self._registry(
+            {"id": "%6", "role": "tui", "order": 0, "cmd": "pm _tui"})
+        with patch("pm_core.cli.helpers.pane_registry.load_registry",
+                   return_value=data), \
+             patch("pm_core.tmux.find_session_server",
+                   return_value=(None, False)), \
+             self._panes('%6:pm-test~1:"pm _tui"\n'):
+            assert _find_live_tui_pane("pm-test") == ("%6", "pm-test")
+
+    def test_live_pane_reported_under_the_users_view_is_returned(self):
+        """tmux may name a shared pane after a view, not the pm session.
+
+        ``list-panes -a`` lists a pane once per session in its group, so the
+        last (lexicographically greatest) name wins; a view named ``zview``
+        (S118/S121/S124) therefore makes the recorded pane look like another
+        session's.  The comparison goes through the session group, so the
+        live recorded pane is still returned — a bare ``~`` strip would
+        report "No TUI pane found" for a TUI that is running.
+        """
+        from pm_core.cli.helpers import _find_live_tui_pane
+
+        data = self._registry(
+            {"id": "%6", "role": "tui", "order": 0, "cmd": "pm _tui"})
+        with patch("pm_core.cli.helpers.pane_registry.load_registry",
+                   return_value=data), \
+             patch("pm_core.tmux.find_session_server",
+                   return_value=(None, False)), \
+             patch("pm_core.tmux.session_group",
+                   side_effect=lambda name: "pm-test" if name == "zview" else ""), \
+             self._panes("%6:zview:bash\n"):
+            assert _find_live_tui_pane("pm-test") == ("%6", "pm-test")
+
+    def test_fallback_finds_a_live_tui_reported_under_the_users_view(self):
+        """The live-pane fallback resolves the view name through its group."""
+        from pm_core.cli.helpers import _find_live_tui_pane
+
+        data = self._registry(
+            {"id": "%3", "role": "tui", "order": 0, "cmd": "pm _tui"})
+        with patch("pm_core.cli.helpers.pane_registry.load_registry",
+                   return_value=data), \
+             patch("pm_core.tmux.find_session_server",
+                   return_value=(None, False)), \
+             patch("pm_core.tmux.session_group",
+                   side_effect=lambda name: "pm-test" if name == "zview" else ""), \
+             self._panes('%8:zview:"pm _tui"\n'):
+            assert _find_live_tui_pane("pm-test") == ("%8", "pm-test")
+
+    def test_group_resolution_degrades_when_tmux_cannot_be_queried(self):
+        """Without a group query the pane is attributed by its base name.
+
+        ``_pm_session_of`` resolves a tmux session through its group; when
+        that query cannot run (tmux missing/unexecutable) it must fall back
+        to the plain base name rather than raise out of ``pm tui view`` /
+        ``pm tui send`` — the same degrade contract as the rest of the scan.
+        """
+        from pm_core.cli.helpers import _find_live_tui_pane
+
+        data = self._registry(
+            {"id": "%6", "role": "tui", "order": 0, "cmd": "pm _tui"})
+        with patch("pm_core.cli.helpers.pane_registry.load_registry",
+                   return_value=data), \
+             patch("pm_core.tmux.find_session_server",
+                   return_value=(None, False)), \
+             patch("pm_core.cli.helpers.pane_registry.pm_session_name",
+                   side_effect=OSError("no tmux")), \
+             self._panes("%6:pm-test:bash\n"):
+            assert _find_live_tui_pane("pm-test") == ("%6", "pm-test")
 
     def test_tmux_unavailable_degrades_to_no_live_tui(self):
         from pm_core.cli.helpers import _find_live_tui_pane
@@ -594,16 +833,16 @@ class TestFindLiveTuiPane:
         """A hand-started TUI has no registry entry until heal_registry
         runs; ``pm tui view -s S`` must still resolve its live pane.
 
-        ``_find_tui_pane`` only consults the registry when a session is
-        passed, so it returns ``(None, None)`` here — the live-pane scan
-        is what makes the explicit-session path work at all."""
+        ``_find_tui_pane`` returns ``(None, "pm-test")`` here — the session
+        name with no recorded pane — so the live-pane scan is what makes
+        the explicit-session path work at all."""
         from pm_core.cli.helpers import _find_live_tui_pane
 
         empty = {"session": "pm-test", "windows": {}, "generation": "1"}
         with patch("pm_core.cli.helpers.pane_registry.load_registry",
                    return_value=empty), \
-             self._panes('%3 pm-test bash\n'
-                         '%8 pm-test "pm _tui"\n'):
+             self._panes('%3:pm-test:bash\n'
+                         '%8:pm-test:"pm _tui"\n'):
             assert _find_live_tui_pane("pm-test") == ("%8", "pm-test")
 
     def test_explicit_session_without_a_live_tui_still_reports_the_session(
@@ -614,7 +853,7 @@ class TestFindLiveTuiPane:
         empty = {"session": "pm-test", "windows": {}, "generation": "1"}
         with patch("pm_core.cli.helpers.pane_registry.load_registry",
                    return_value=empty), \
-             self._panes("%3 pm-test bash\n"):
+             self._panes("%3:pm-test:bash\n"):
             assert _find_live_tui_pane("pm-test") == (None, "pm-test")
 
 
@@ -646,18 +885,32 @@ class TestFindTuiPaneProjectOverride:
             lambda start_path=None, use_github_name=True:
                 tags.get(str(start_path or Path.cwd())))
         monkeypatch.setattr(helpers.tmux_mod, "in_tmux", lambda: False)
-        monkeypatch.setattr(helpers.tmux_mod, "session_exists",
-                            lambda name, socket_path=None:
-                                name in self.SESSIONS)
+        # Every pm session runs on its own tmux server (pr-073910f): the
+        # lookup resolves the session's server (find_session_server) and the
+        # cross-server scan enumerates every pm server (list_pm_sessions),
+        # instead of trusting whichever server this process names.
+        monkeypatch.setattr(
+            helpers.tmux_mod, "find_session_server",
+            lambda name, owned_only=False: (
+                (f"/tmp/pm-sessions/{name}", True)
+                if name in self.SESSIONS else (None, False)))
+        monkeypatch.setattr(
+            helpers.tmux_mod, "list_pm_sessions",
+            lambda **kw: [{"name": s, "socket": f"/tmp/pm-sessions/{s}",
+                           "attached": 0, "shared": False}
+                          for s in self.SESSIONS])
+        # The scan attributes a recorded pane only while it is alive.
+        monkeypatch.setattr(helpers.tmux_mod, "pane_exists",
+                            lambda pane_id: True)
+        # The scan re-points PM_TMUX_SOCKET at each server it probes; give
+        # the test a known ambient value so monkeypatch restores the
+        # process's own setting at teardown.
+        monkeypatch.setenv("PM_TMUX_SOCKET", "/tmp/ambient-test.sock")
         monkeypatch.setattr(
             helpers.pane_registry, "load_registry",
             lambda s: {"session": s, "generation": "1", "windows": {
                 "@0": {"panes": [{"id": f"%{s[-4:]}", "role": "tui",
                                   "order": 0, "cmd": "pm _tui"}]}}})
-        monkeypatch.setattr(
-            helpers.subprocess, "run",
-            lambda *a, **k: SimpleNamespace(
-                returncode=0, stdout="\n".join(self.SESSIONS) + "\n"))
         monkeypatch.setattr(helpers, "_project_override", None)
         return SimpleNamespace(helpers=helpers, root=tmp_path)
 
@@ -696,6 +949,45 @@ class TestFindTuiPaneProjectOverride:
                             tmp_path / "gone")
         assert env.helpers._find_tui_pane() == ("%3333", "pm-ztest-3333")
 
+    def test_a_running_project_session_without_a_registered_tui_is_still_it(
+            self, env, monkeypatch):
+        """The override wins even when the project's TUI is unregistered.
+
+        The project's session runs but its registry lists no live TUI pane
+        (a hand-started TUI before the first ``heal_registry`` pass, or an
+        entry healed away).  Falling through to the cwd branch would hand
+        the caller the *cwd* project's TUI — the cross-project damage this
+        branch exists to prevent — so the last-resort scan must be scoped
+        to the project's own server instead.
+        """
+        import os
+
+        monkeypatch.chdir(env.root / "ztest")
+        monkeypatch.setattr(env.helpers, "_project_override",
+                            env.root / "mproj" / "pm")
+
+        def registry(s):
+            if s == "pm-ztest-3333":
+                return {"session": s, "generation": "1", "windows": {
+                    "@0": {"panes": [{"id": "%3333", "role": "tui",
+                                      "order": 0, "cmd": "pm _tui"}]}}}
+            return {"session": s, "generation": "1", "windows": {}}
+
+        monkeypatch.setattr(env.helpers.pane_registry, "load_registry",
+                            registry)
+        seen_sockets: list[str | None] = []
+
+        def live():
+            seen_sockets.append(os.environ.get("PM_TMUX_SOCKET"))
+            return {}, [("%2222", "pm-mproj-2222")]
+
+        monkeypatch.setattr(env.helpers, "_live_panes_and_tuis", live)
+        monkeypatch.setattr(env.helpers, "_pm_session_of", lambda n: n)
+
+        assert env.helpers._find_tui_pane() == ("%2222", "pm-mproj-2222")
+        # Scoped to the project's server, not the cwd project's.
+        assert seen_sockets == ["/tmp/pm-sessions/pm-mproj-2222"]
+
     def _share_mode_session(self, env, monkeypatch):
         """Make mproj's live session a ``pm session --global`` one: its name
         carries the share-mode tag, which a run without PM_SHARE_MODE does
@@ -727,6 +1019,69 @@ class TestFindTuiPaneProjectOverride:
         # No session persisted that project: falls through to the cwd.
         assert env.helpers._find_tui_pane() == ("%3333", "pm-ztest-3333")
 
+    def test_share_mode_lookup_finds_a_tag_containing_a_tilde(
+            self, env, monkeypatch):
+        """Only a numeric ``~N`` is a grouped suffix (b48f i11).
+
+        A tag is derived from the repo directory name, which may contain
+        ``~``.  The fallback scan must not drop such a session — the
+        merge dropped the old ``"~" in sess`` filter for exactly this
+        case, and without a test the filter can come back with a
+        conflict pick.
+        """
+        self._share_mode_session(env, monkeypatch)
+        sd = env.root / "home" / ".pm" / "sessions"
+        (sd / "mproj-5555").rename(sd / "my~repo-5555")
+        monkeypatch.setattr(self, "SESSIONS", tuple(
+            s.replace("mproj-5555", "my~repo-5555") for s in self.SESSIONS))
+        monkeypatch.chdir(env.root / "ztest")
+        monkeypatch.setattr(env.helpers, "_project_override",
+                            env.root / "mproj" / "pm")
+        assert env.helpers._find_tui_pane() == ("%5555", "pm-my~repo-5555")
+
+    def test_a_planted_plain_tag_socket_does_not_hide_the_fallback(
+            self, env, monkeypatch):
+        """A socket another user planted at the plain tag is never adopted.
+
+        The tag branch must not *return* on it either: yielding the
+        planted name and stopping would skip the fallback scan that finds
+        the project's real share-mode session (the caller rejects the
+        planted one, so the lookup would find nothing at all).
+        """
+        self._share_mode_session(env, monkeypatch)
+        planted = "/tmp/pm-sessions/pm-mproj-2222"
+        probes = []
+
+        def find(name, owned_only=False):
+            # ``owned_only`` is ``find_session_server``'s contract for an
+            # implicit lookup: a socket another user owns is not probed.
+            probes.append((name, owned_only))
+            if name == "pm-mproj-2222":
+                return (None, False) if owned_only else (planted, True)
+            if name in self.SESSIONS:
+                return f"/tmp/pm-sessions/{name}", True
+            return None, False
+
+        monkeypatch.setattr(env.helpers.tmux_mod, "find_session_server", find)
+        # The planted server is also visible to the cross-server scan; the
+        # fallback's ownership rule must drop its row.
+        monkeypatch.setattr(
+            env.helpers.tmux_mod, "list_pm_sessions",
+            lambda **kw: [
+                {"name": s, "socket": f"/tmp/pm-sessions/{s}",
+                 "attached": 0, "shared": False}
+                for s in (*self.SESSIONS, "pm-mproj-2222")])
+        monkeypatch.setattr(
+            env.helpers, "_server_owned_by_us",
+            lambda sock: sock is None or "mproj-2222" not in str(sock))
+        assert list(env.helpers._project_sessions(
+            env.root / "mproj" / "pm")) == ["pm-mproj-5555"]
+        # The implicit tag lookup asked for an owned socket, like every
+        # other implicit caller (review-loop b48f i20): the planted server
+        # is never probed at all.
+        assert [owned for name, owned in probes if name == "pm-mproj-2222"] \
+            == [True]
+
     def test_reload_signals_the_registry_sessions_tui(self, env,
                                                       monkeypatch):
         monkeypatch.chdir(env.root / "clone")
@@ -741,6 +1096,52 @@ class TestFindTuiPaneProjectOverride:
             assert env.helpers.trigger_tui_reload() is False
         assert seen == ["pm-mproj-2222"]
         home.assert_called_once_with("pm-mproj-2222")
+
+
+# ---------------------------------------------------------------------------
+# _start_command_is_tui
+# ---------------------------------------------------------------------------
+
+
+class TestStartCommandIsTui:
+    """A pane is the TUI only when its start command runs ``pm _tui``.
+
+    The strings are ``#{pane_start_command}`` as tmux reports it: a command
+    pm passed as one shell string comes back as one double-quoted word.
+    """
+
+    @pytest.mark.parametrize("command", [
+        '"PM_TMUX_SOCKET=/tmp/pm-sessions/pm-rich_tui-1f36a2a6 pm _tui"',
+        '"PM_TMUX_SOCKET=/tmp/pm-sessions/pm-x PM_SHARE_MODE=global pm _tui"',
+        # A tag with a space and an apostrophe, shlex-quoted by pm and
+        # escaped again by tmux.
+        '"PM_TMUX_SOCKET=\'/tmp/pm-sessions/pm-qa it\'\\"\'\\"\'s here-1\' '
+        'pm _tui"',
+        '"pm _tui"',          # respawned, or a legacy session
+        "pm _tui",            # passed as separate arguments
+    ])
+    def test_the_tui(self, command):
+        from pm_core.cli.helpers import _start_command_is_tui
+        assert _start_command_is_tui(command)
+
+    @pytest.mark.parametrize("command", [
+        # QA S38: the session name (repo rich_tui) inside the EXIT trap.
+        '"bash -c \'trap \\"pm _pane-exited pm-rich_tui-1f36a2a6 @0 '
+        '1793622288 \\$TMUX_PANE\\" EXIT; pm notes\'"',
+        # QA S38: the review-diff pane cds into a workdir named after it.
+        '"cd /home/u/.pm/workdirs/rich_tui-7656872a/pm-pr-1-c70 && '
+        '{ git status; } | less -R; exec /bin/bash"',
+        # The project tag alone, or a word that only contains ``_tui``.
+        '"PM_TMUX_SOCKET=/tmp/pm-sessions/pm-rich_tui-1 pm notes"',
+        '"pm my_tui"',
+        "",                    # a plain shell window
+        "bash",
+        # Unbalanced quoting falls back to whole words, never substrings.
+        '"echo \' pm-rich_tui-1 pm notes"',
+    ])
+    def test_not_the_tui(self, command):
+        from pm_core.cli.helpers import _start_command_is_tui
+        assert not _start_command_is_tui(command)
 
 
 # ---------------------------------------------------------------------------

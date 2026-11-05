@@ -95,8 +95,12 @@ def get_reliable_window_size(
     if session not in candidates:
         candidates.append(session)
 
-    # Collect all grouped sessions for potential multi-client check
-    grouped = tmux_mod.list_grouped_sessions(base)
+    # Collect all grouped sessions for potential multi-client check.  The
+    # group comes from tmux (``sessions_in_group``) so a user's own view
+    # of the session counts too — its client constrains the layout — while
+    # a *different* session whose name merely starts with ``base~`` (a repo
+    # directory may contain ``~``) does not.
+    grouped = [s for s in tmux_mod.sessions_in_group(base) if s != base]
 
     # If there are multiple grouped sessions (multi-client), find the
     # minimum non-zero size so panes fit on the smallest connected
@@ -606,33 +610,95 @@ def handle_pane_exited(session: str, window: str, generation: str,
     )
 
 
-def _respawn_tui(session: str, window: str) -> str:
+def tui_respawn_window(session: str, preferred: str | None = None) -> str | None:
+    """Return the window a missing TUI of *session* is started in.
+
+    *preferred* is the window the registry (or the hook's snapshot of it)
+    listed the TUI in, and is used when given.  Otherwise the window named
+    ``main`` — deliberately not the active window, which may be a QA or
+    work window — and failing that the first window.  ``None`` when the
+    session has no windows at all.
+
+    The one definition of "where the TUI goes back", shared by
+    ``pm session``'s attach (``cli.session._ensure_tui_running``) and the
+    ``after-kill-pane`` hook (``_respawn_unlisted_tui``), so the two cannot
+    start a respawned TUI in different places.
+    """
+    from pm_core import tmux as tmux_mod
+
+    if preferred:
+        return preferred
+    main = tmux_mod.find_window_by_name(session, "main")
+    if main:
+        return main["id"]
+    windows = tmux_mod.list_windows(session)
+    return windows[0]["id"] if windows else None
+
+
+def _respawn_tui(session: str, window: str, *, select: bool = True) -> str | None:
     """Respawn the TUI pane in *window* after it was killed.
 
     If the window still exists (other panes remain), splits a new pane
     into it.  If the window is gone (TUI was the last pane), creates a
     new window so the session stays alive.
 
+    A new window is selected for the caller's client (``select_window``
+    picks the client) unless *select* is false.  ``pm session`` passes
+    false: run outside tmux it has no client of its own yet, so
+    ``select_window`` fell back to the first *attached* grouped session
+    and switched another user's client — a shared session's owner — to
+    the new window, while the attach landed on whatever window its own
+    grouped session showed (QA S45).  It selects the window in the
+    grouped session it attaches instead.
+
     Returns the window ID the TUI was actually created in (may differ
-    from *window* when a new window had to be created).
+    from *window* when a new window had to be created), or ``None`` when
+    no pane could be created.  Callers treat a returned window as "a TUI
+    is running" (the hook stops looking for one, ``pm session`` selects it
+    for its client), so a failed split/create must not be reported as
+    success.  A failure *after* the pane was created (the registry write
+    can time out on a stuck lock) is not that: the TUI is running, and it
+    records itself once mounted, so its window is still returned.
+
+    The TUI starts in the directory the session was created in (the
+    project's repo directory), not in tmux's default — the cwd of the
+    client that ran the command.  The ``after-kill-pane`` hook runs this
+    for whichever client killed the pane, so a ``tmux kill-pane`` typed in
+    another project's directory used to start a TUI for *that* project in
+    this session (its pidfile and registry), and one typed outside any
+    project started the pm guide there (QA S42).
+
+    Callers decide that the TUI is missing and call this while holding
+    ``pane_registry.tui_respawn_lock``, so two of them never both start
+    one.
     """
     from pm_core import tmux as tmux_mod
 
     _logger.info("_respawn_tui: respawning TUI in %s:%s", session, window)
+    # Distinguishes "no pane was created" (the respawn really failed) from
+    # a failure after the pane exists: the registry write can raise
+    # (``locked_read_modify_write`` times out on a stuck lock) while the
+    # TUI it describes is already running.
+    pane_id: str | None = None
     try:
         # Check if the window still exists
         live_panes = tmux_mod.get_pane_indices(session, window)
         if live_panes:
             # Window exists — split into it
             target = f"{session}:{window}"
-            pane_id = tmux_mod.split_pane(target, "h", "pm _tui")
+            pane_id = tmux_mod.split_pane(
+                target, "h", "pm _tui",
+                start_dir_format=tmux_mod.SESSION_START_DIR)
         else:
             # Window is gone (TUI was the last pane) — create a new one
             _logger.info("_respawn_tui: window %s gone, creating new window", window)
-            pane_id, window = tmux_mod.create_window(session, "pm _tui")
+            pane_id, window = tmux_mod.create_window(
+                session, "pm _tui",
+                start_dir_format=tmux_mod.SESSION_START_DIR)
             tmux_mod.set_shared_window_size(session, window)
             # Switch the client to the new window so the user sees it
-            tmux_mod.select_window(session, window)
+            if select:
+                tmux_mod.select_window(session, window)
 
         # Register with lowest order so TUI sorts first (leftmost)
         from pm_core.pane_registry import locked_read_modify_write, _prepare_registry_data
@@ -640,13 +706,18 @@ def _respawn_tui(session: str, window: str) -> str:
         def _insert_tui(raw):
             data = _prepare_registry_data(raw, session)
             wdata = get_window_data(data, window)
-            min_order = min((p["order"] for p in wdata["panes"]), default=1) - 1
-            wdata["panes"].insert(0, {
-                "id": pane_id,
-                "role": "tui",
-                "order": min_order,
-                "cmd": "pm _tui",
-            })
+            # The new TUI may already be listed: it records itself once
+            # mounted, and a `pm session` that ran without the respawn
+            # lock may have adopted it.  List it once (QA S42).
+            if not any(p["id"] == pane_id for p in wdata["panes"]):
+                min_order = min((p["order"] for p in wdata["panes"]),
+                                default=1) - 1
+                wdata["panes"].insert(0, {
+                    "id": pane_id,
+                    "role": "tui",
+                    "order": min_order,
+                    "cmd": "pm _tui",
+                })
             # Reset user_modified — same pattern as pane_ops.launch_pane()
             # and cli/pr.py review window (after-split-window hook may have
             # set it before panes are registered).  Caller rebalances.
@@ -656,7 +727,14 @@ def _respawn_tui(session: str, window: str) -> str:
         locked_read_modify_write(registry_path(session), _insert_tui)
         _logger.info("_respawn_tui: created pane %s in window %s", pane_id, window)
     except Exception:
-        _logger.exception("_respawn_tui: failed to respawn TUI")
+        if pane_id is None:
+            _logger.exception("_respawn_tui: failed to respawn TUI")
+            return None
+        # The pane exists; only the bookkeeping after it failed.  Report
+        # the window like any other respawn — the TUI registers itself
+        # once mounted, and callers act on "a window means a TUI".
+        _logger.exception("_respawn_tui: respawned pane %s but failed to "
+                          "record it in window %s", pane_id, window)
     return window
 
 
@@ -666,34 +744,130 @@ def _process_registry_pane_closed(data: dict) -> None:
     if not session:
         return
 
-    for window_id, wdata in list(data.get("windows", {}).items()):
-        # Snapshot TUI pane IDs before reconciliation removes them
-        tui_ids = {p["id"] for p in wdata.get("panes", [])
-                   if p.get("role") == "tui"}
-        removed = _reconcile_registry(session, window_id)
-        if removed:
+    from pm_core.pane_registry import tui_respawn_lock
+
+    to_rebalance: list[str] = []
+    # Windows the registry listed a TUI in when this event was read.
+    tui_windows: list[str] = []
+    tui_handled = False
+    # A `pm session` attach may find the TUI gone at this same moment and
+    # respawn it; deciding under the lock it also holds means only one of
+    # us starts a TUI (QA S42).  The lock is taken once for the whole
+    # event, not once per registered window: this hook is a synchronous
+    # run-shell, so the client that closed the pane is frozen while it
+    # waits, and a stuck holder froze it for one full wait per window —
+    # 30 s with the main window and two review windows (QA S47).
+    with tui_respawn_lock(session) as locked:
+        for window_id, wdata in list(data.get("windows", {}).items()):
+            # Snapshot TUI pane IDs before reconciliation removes them
+            tui_ids = {p["id"] for p in wdata.get("panes", [])
+                       if p.get("role") == "tui"}
+            if tui_ids:
+                tui_windows.append(window_id)
+            removed = _reconcile_registry(session, window_id)
+            if not removed:
+                continue
             _logger.info("handle_any_pane_closed: session=%s window=%s removed=%s",
                          session, window_id, removed)
+            actual_window = None
             # Always respawn TUI regardless of user_modified
             if tui_ids & set(removed):
-                _logger.info("handle_any_pane_closed: TUI pane was killed, respawning")
-                actual_window = _respawn_tui(session, window_id)
+                tui_handled = True
+                running = _running_tui_pane(session)
+                if running:
+                    _logger.info("handle_any_pane_closed: TUI pane was killed, "
+                                 "but TUI pane %s is already running; not "
+                                 "respawning", running)
+                else:
+                    _logger.info("handle_any_pane_closed: TUI pane was killed, respawning")
+                    actual_window = _respawn_tui(session, window_id)
+            if actual_window:
                 # _respawn_tui resets user_modified; always rebalance
                 # after respawn so the new TUI pane is sized correctly.
                 # Use the actual window ID (may differ if a new window
                 # was created because the TUI was the last pane).
-                rebalance(session, actual_window)
+                to_rebalance.append(actual_window)
             elif not wdata.get("user_modified"):
-                rebalance(session, window_id)
+                to_rebalance.append(window_id)
+        if locked and not tui_handled:
+            actual_window = _respawn_unlisted_tui(session, tui_windows)
+            if actual_window:
+                to_rebalance.append(actual_window)
+    # Layout work runs after the lock is released, as before.
+    for window_id in dict.fromkeys(to_rebalance):
+        rebalance(session, window_id)
 
 
-def handle_any_pane_closed() -> None:
+def _respawn_unlisted_tui(session: str, tui_windows: list[str]) -> str | None:
+    """Respawn a killed TUI whose registry entry another process removed.
+
+    Every ``rebalance()`` reconciles the registry first, without the
+    TUI-respawn lock: the background rebalance a ``pm session`` attach
+    schedules, the ``window-resized`` hook, a pane's EXIT trap.  When one
+    of them ran between the TUI's kill and this hook, it had already
+    dropped the dead TUI's entry, so this hook's own reconcile removed
+    nothing and the session was left with no TUI (QA S50: 2 of 4 rounds
+    with the attach's Enter 0.60-0.65 s before the kill, 5 of 8 for the
+    refiner; the entry was often gone before this hook even read the
+    registry, so the hook's own snapshot did not list the TUI either).
+
+    So, under the lock, a session whose registry now lists no TUI and
+    that runs no ``pm _tui`` pane gets one, whoever removed the entry.  A
+    TUI pane kept dead by ``remain-on-exit`` is still listed, and
+    ``pm session`` leaves it alone too, so this does not start one beside
+    it.  The TUI goes back into the window the registry listed it in when
+    this event was read (*tui_windows*); with no such window it goes into
+    ``main``, else the first window (``tui_respawn_window``, the same rule
+    ``pm session``'s attach uses).
+
+    Called only while this hook holds the lock: two hooks that both went
+    ahead past a stuck holder would otherwise both find no TUI and both
+    start one, where only the one whose reconcile removed the entry did.
+    Returns the window the TUI was started in, or ``None``.
+    """
+    registry = load_registry(session)
+    if any(p.get("role") == "tui" for _, p in _iter_all_panes(registry)):
+        return None
+    if _running_tui_pane(session):
+        return None
+    window = tui_respawn_window(session,
+                                tui_windows[0] if tui_windows else None)
+    if window is None:
+        _logger.warning("handle_any_pane_closed: no TUI is running and "
+                        "session %s has no windows; not respawning", session)
+        return None
+    _logger.info("handle_any_pane_closed: no TUI is running and none is "
+                 "registered (its entry was already reconciled); "
+                 "respawning in window %s", window)
+    return _respawn_tui(session, window)
+
+
+def _running_tui_pane(session: str) -> str | None:
+    """Pane id of a running TUI of *session*, or ``None``.
+
+    The same definition ``pm session`` adopts by (a live ``pm _tui`` pane
+    of the session's group: ``cli.helpers._find_running_tui_pane``).
+    """
+    from pm_core.cli.helpers import _find_running_tui_pane
+    running = _find_running_tui_pane(session)
+    return running[0] if running else None
+
+
+def handle_any_pane_closed(session: str = "") -> None:
     """Handle a pane-close event when we don't know which pane died.
 
     Called from global tmux hooks (after-kill-pane). Only processes the
-    current session's registry — the killed pane must belong to the
-    session where the hook fired.  If the killed pane was the TUI,
-    automatically respawns it.
+    session's registry — the killed pane must belong to the session where
+    the hook fired.  If the killed pane was the TUI, automatically
+    respawns it.
+
+    ``session`` is the session the hook fired in (``#{session_name}``).
+    When it is empty the session is derived from ``$TMUX_PANE``, which can
+    name a pane that is not on this server: the pane the hook reports has
+    just been killed, and a server started from inside an ambient tmux
+    inherits that tmux's pane id.  Either way ``display-message -t`` then
+    returns an empty name and the killed TUI would never be respawned, so
+    the hook's own session name is the reliable one.
     """
     _ensure_logging()
     _logger.info("handle_any_pane_closed called")
@@ -705,10 +879,19 @@ def handle_any_pane_closed() -> None:
 
     # A user's own grouped view (myview) shares the pm session's registry.
     from pm_core.pane_registry import pm_session_name
-    current_session = pm_session_name(tmux_mod.get_session_name())
+    current_session = pm_session_name(session or tmux_mod.get_session_name())
     reg_path = registry_path(current_session)
     if not reg_path.exists():
         _logger.info("handle_any_pane_closed: no registry for %s", current_session)
+        return
+    # The hooks are global on the server, so they also fire for a plain
+    # session a user created beside the pm one (a scratch shell).  Such a
+    # session is not pm's: a pane close in it must not reconcile a pm
+    # registry or respawn a TUI into it.  Checked after the registry probe
+    # so an unresolved session (empty name) still logs the same line.
+    if not current_session.startswith("pm-"):
+        _logger.info("handle_any_pane_closed: ignoring non-pm session %s",
+                     current_session)
         return
 
     try:
@@ -719,15 +902,33 @@ def handle_any_pane_closed() -> None:
 
 
 def handle_pane_opened(session: str, window: str, pane_id: str) -> None:
-    """Handle pane-opened event: if not in registry, mark per-window user_modified."""
+    """Handle pane-opened event: if not in registry, mark per-window user_modified.
+
+    *session* is the name tmux reported for the hook.  It is resolved
+    through its group first, so a user's own grouped view of a pm session
+    (any name, S121) marks that session's registry; a session that does
+    not resolve to a pm one is ignored (QA S58).
+    """
     _ensure_logging()
     _logger.info("handle_pane_opened called: session=%s window=%s pane_id=%s",
                  session, window, pane_id)
 
-    from pm_core.pane_registry import locked_read_modify_write, _prepare_registry_data
+    from pm_core.pane_registry import (locked_read_modify_write,
+                                       pm_session_name,
+                                       _prepare_registry_data)
+
+    # A split in a plain session the user created on the same server must
+    # not create a registry: the after-kill-pane hook keys on that file, and
+    # with one present a later pane close there respawned a pm TUI into the
+    # user's scratch session (QA S58).  A view grouped with a pm session
+    # resolves through the group and shares that session's registry.
+    resolved = pm_session_name(session)
+    if not resolved.startswith("pm-"):
+        _logger.info("handle_pane_opened: ignoring non-pm session %s", session)
+        return
 
     def _mark_user_modified(raw):
-        data = _prepare_registry_data(raw, session)
+        data = _prepare_registry_data(raw, resolved)
         wdata = get_window_data(data, window)
         known_ids = {p["id"] for p in wdata["panes"]}
         if pane_id not in known_ids:
@@ -737,4 +938,4 @@ def handle_pane_opened(session: str, window: str, pane_id: str) -> None:
             return data
         return None  # pane already known, skip write
 
-    locked_read_modify_write(registry_path(session), _mark_user_modified)
+    locked_read_modify_write(registry_path(resolved), _mark_user_modified)

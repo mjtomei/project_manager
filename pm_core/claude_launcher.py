@@ -1159,7 +1159,17 @@ def build_claude_shell_cmd(
                             "using file-backed bootstrap %s",
                             prompt_bytes(prompt), PROMPT_ARG_LIMIT, _prompt_ref)
                     else:
-                        cmd += f' "$(cat {_prompt_ref})"; rm -f {shlex.quote(str(_prompt_ref))}'
+                        # Quote the path inside the substitution: the cwd
+                        # may contain a space (the prompt then splits into
+                        # a failed cat and Claude starts with an EMPTY
+                        # prompt) or a backtick / ``$(`` (which would run).
+                        # The base directory is quoted on its own so the
+                        # prefix stays ``$(cat <quoted cwd>/`` — the shape
+                        # container.wrap_claude_cmd rewrites to the
+                        # container path (QA scenario 23).
+                        _cat_ref = (f"{shlex.quote(str(_ref_base))}/pm/prompts/"
+                                    f"{shlex.quote(_fname)}")
+                        cmd += f' "$(cat {_cat_ref})"; rm -f {shlex.quote(str(_prompt_ref))}'
                     _prompt_written = True
             except Exception:
                 pass
@@ -1332,7 +1342,11 @@ def launch_bridge_in_tmux(prompt: str | None, cwd: str, session_name: str) -> st
     from pm_core.tmux import split_pane_background
 
     socket_path = f"/tmp/pm-bridge-{uuid.uuid4().hex[:12]}.sock"
-    bridge_cmd = f"python3 -m pm_core.bridge {socket_path} --cwd '{cwd}'"
+    # ``shlex.quote``, not ``'…'``: the workdir path is derived from the
+    # repo directory, so it may contain a single quote (``it's repo``),
+    # which closed the quote and made the pane die on a shell parse error
+    # (the same awkward-path rule as the prompt-file path above).
+    bridge_cmd = f"python3 -m pm_core.bridge {socket_path} --cwd {shlex.quote(cwd)}"
     if prompt:
         # The bridge reads the prompt file itself, so only its path matters
         # here (the returned bootstrap text is for claude-as-argv launches).

@@ -129,7 +129,7 @@ def cluster_auto(threshold, max_commits, weights, output_fmt):
         def apply(data):
             data.setdefault("plans", []).append(entry)
 
-        store.locked_update(root, apply)
+        store.locked_update_cli(root, apply)
         trigger_tui_refresh()
 
         click.echo(f"Plan written to {plan_path}")
