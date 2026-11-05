@@ -32,6 +32,29 @@ class TestScorePr:
         score = score_pr(pr, "pr-942", {})
         assert score == 500
 
+    def test_bare_hash_is_exact(self):
+        # Notes and commits quote a PR by its hash alone.
+        pr = _make_pr("pr-942aa21", title="Something")
+        assert is_exact_pr_match(pr, "942aa21")
+        assert score_pr(pr, "942aa21", {}) == 1000
+
+    def test_bare_hash_prefix(self):
+        pr = _make_pr("pr-942aa21", title="Something")
+        assert score_pr(pr, "942a", {}) == 500
+
+    def test_short_bare_hash_is_not_an_id_prefix(self):
+        # One- and two-character queries keep matching titles, not every PR
+        # whose hash happens to start with them.
+        pr = _make_pr("pr-942aa21", title="Something")
+        assert score_pr(pr, "942", {}) == 0
+
+    def test_legacy_numeric_id_has_no_hash_alias(self):
+        # ``pr-001`` is a whole id, not a hash; only the raw id matches.
+        pr = _make_pr("pr-001", title="Something")
+        assert not is_exact_pr_match(pr, "001")
+        assert score_pr(pr, "001", {}) == 0
+        assert score_pr(pr, "pr-001", {}) == 1000
+
     def test_title_substring(self):
         pr = _make_pr("pr-001", title="Add spec runner")
         score = score_pr(pr, "spec", {})
@@ -192,6 +215,16 @@ class TestExactIdParity:
         assert score_pr(mentions, "pr-942aa21", plan_map) == 850
         ranked = fuzzy_match_prs([mentions, named], "pr-942aa21", plan_map)
         assert ranked[0]["id"] == "pr-942aa21"
+
+    def test_bare_hash_beats_a_description_mention(self):
+        # ``pr select 5f30bdf`` must not land on a PR that merely mentions
+        # pr-5f30bdf in its description.
+        named = _make_pr("pr-5f30bdf", title="Hardening")
+        mentions = _make_pr("pr-3199f44", title="TUI at Textual 2.x",
+                            description="regression from pr-5f30bdf")
+        ranked = fuzzy_match_prs([mentions, named], "5f30bdf", {},
+                                 cursor_index=0, positions={"pr-3199f44": 0})
+        assert [p["id"] for p in ranked] == ["pr-5f30bdf", "pr-3199f44"]
 
     def test_resolve_pr_id_agreement(self):
         from pm_core.cli.helpers import _resolve_pr_id

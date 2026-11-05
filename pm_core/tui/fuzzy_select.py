@@ -21,10 +21,26 @@ PLAN_NAME = 50
 
 _BARE_NUMBER = re.compile(r"#?(\d+)")
 
+# Canonical pm ids carry their identity in the hash (``pr-5f30bdf``), and
+# notes, commits and QA reports refer to PRs by that hash alone.  The command
+# bar accepts it without the ``pr-`` prefix: an exact hash names the PR, and
+# a hash prefix of four or more hex characters is an id-prefix match.  The
+# length floor keeps one- and two-character queries matching titles rather
+# than turning every PR whose hash starts with them into an id hit, and
+# legacy numeric ids (``pr-001``) keep the old behaviour.
+_CANONICAL_PR_ID = re.compile(r"pr-([0-9a-f]{7})")
+_HASH_QUERY = re.compile(r"[0-9a-f]{4,7}")
+
 
 def _text(value) -> str:
     """Lower-cased string form of a field that may be missing or None."""
     return value.lower() if isinstance(value, str) else ""
+
+
+def _id_hash(pr: dict) -> str:
+    """The hash part of a canonical ``pr-<7 hex>`` id, else ``""``."""
+    m = _CANONICAL_PR_ID.fullmatch(_text(pr.get("id")))
+    return m.group(1) if m else ""
 
 
 def _norm(query: str) -> str:
@@ -39,13 +55,16 @@ def _gh_number(pr: dict) -> int | None:
 def is_exact_pr_match(pr: dict, query: str) -> bool:
     """True if *query* names *pr* exactly, the way ``_resolve_pr_id`` does.
 
-    Accepts the raw pm id (``pr-942aa21``), the display id (``#125``) and a
-    bare GitHub number (``125``).  Case-insensitive.
+    Accepts the raw pm id (``pr-942aa21``), the display id (``#125``), a
+    bare GitHub number (``125``) and the id's hash on its own
+    (``942aa21``).  Case-insensitive.
     """
     q = _norm(query)
     if not q:
         return False
     if _text(pr.get("id")) == q:
+        return True
+    if q == _id_hash(pr):
         return True
     gh = _gh_number(pr)
     m = _BARE_NUMBER.fullmatch(q)
@@ -56,8 +75,10 @@ def score_pr(pr: dict, query: str, plan_map: dict) -> float:
     """Score a PR against a query string (0 = no match).
 
     Scoring weights (higher = better match):
-      - Exact ID match:     1000  (raw ID, display ID ``#125`` or bare ``125``)
-      - ID prefix match:     500  (raw or display ID; only if not exact)
+      - Exact ID match:     1000  (raw ID, display ID ``#125``, bare ``125``
+                                   or the id's hash alone)
+      - ID prefix match:     500  (raw or display ID, or a hash prefix of
+                                   four or more hex characters)
       - Title substring:     200
       - Description substr:  100
       - Plan name/id substr:  50
@@ -75,7 +96,8 @@ def score_pr(pr: dict, query: str, plan_map: dict) -> float:
 
     if is_exact_pr_match(pr, q):
         score += EXACT_ID
-    elif pr_id.startswith(q) or display_id.startswith(q):
+    elif (pr_id.startswith(q) or display_id.startswith(q)
+          or (_HASH_QUERY.fullmatch(q) and _id_hash(pr).startswith(q))):
         score += ID_PREFIX
 
     if q in _text(pr.get("title")):
