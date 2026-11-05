@@ -159,4 +159,3 @@ class TestResumedRunWindow:
         mock_main.assert_called_once_with("pm-test", "qa-pr-001", "/wd")
         mock_status.assert_called_once_with(
             "pm-test", "%9", "/qa/status.json")
-

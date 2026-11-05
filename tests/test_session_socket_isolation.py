@@ -671,13 +671,15 @@ class TestUseEnvFlag:
 class TestDefaultSocketPath:
     """The default server's path must match where tmux actually puts it.
 
-    tmux uses ``$TMUX_TMPDIR`` only when it is an absolute path to an
-    existing directory; a missing or relative value makes it put the
-    default server at ``/tmp/tmux-<uid>/default`` (verified on tmux 3.2a).
-    Computing the value verbatim would look for legacy pre-isolation
-    sessions where no server ever lives, so `pm session` would start a
-    duplicate private session, and `pm session kill` / `list` would not
-    see the legacy one (review-loop b48f i7).
+    tmux uses ``$TMUX_TMPDIR`` when it names an existing directory (it
+    ``realpath()``s the value first, so a *relative* one is taken against
+    the client's cwd); a missing value, or one that resolves to nothing or
+    to a non-directory, makes it put the default server at
+    ``/tmp/tmux-<uid>/default`` (verified on tmux 3.2a).  Computing the
+    value verbatim would look for legacy pre-isolation sessions where no
+    server ever lives, so `pm session` would start a duplicate private
+    session, and `pm session kill` / `list` would not see the legacy one
+    (review-loop b48f i7; the relative case corrected in b48f i9).
     """
 
     @staticmethod
@@ -3571,6 +3573,38 @@ class TestSessionKillServerSelection:
             (stat.S_IFREG | 0o600, 101, 7, 1, os.getuid(), 0, 0, 0, 0, 0))
         rebound = os.stat_result(
             (stat.S_IFREG | 0o600, 202, 7, 1, os.getuid(), 0, 0, 0, 0, 0))
+        stats = iter([stale, rebound])
+        monkeypatch.setattr(paths, "shared_socket_dir_is_usable",
+                            lambda: True)
+        monkeypatch.setattr(Path, "lstat", lambda self: next(stats))
+        unlinked: list[str] = []
+        monkeypatch.setattr(Path, "unlink",
+                            lambda self, missing_ok=False:
+                            unlinked.append(str(self)))
+        monkeypatch.setattr(session_mod.tmux_mod, "server_alive",
+                            lambda p: False)
+
+        session_mod._remove_stale_socket(str(tmp_path / "pm-repo-abc"))
+
+        assert unlinked == []
+
+    def test_a_rebound_socket_whose_inode_number_was_reused_is_kept(
+            self, monkeypatch, tmp_path):
+        """Filesystems may hand the freed inode number straight back out.
+
+        overlayfs (measured on this container's ``/tmp``) gives the socket
+        a racing start creates at the stale one's path the *same* inode
+        number, so comparing inode numbers alone let ``pm session kill``
+        unlink the new server's socket — the failure the rebind guard
+        exists to prevent.  The mtime is the discriminator: a recreated
+        file has a new one, the same file keeps its own.
+        """
+        from pm_core.cli import session as session_mod
+
+        stale = os.stat_result(
+            (stat.S_IFREG | 0o600, 101, 7, 1, os.getuid(), 0, 0, 0, 100.0, 0))
+        rebound = os.stat_result(
+            (stat.S_IFREG | 0o600, 101, 7, 1, os.getuid(), 0, 0, 0, 200.0, 0))
         stats = iter([stale, rebound])
         monkeypatch.setattr(paths, "shared_socket_dir_is_usable",
                             lambda: True)

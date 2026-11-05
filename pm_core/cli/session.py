@@ -587,6 +587,29 @@ def _removable_private_socket(socket_path: str) -> os.stat_result | None:
     return entry
 
 
+def _socket_entry_identity(entry: os.stat_result) -> tuple[int, int, int]:
+    """Identify a socket-directory entry across the liveness probe.
+
+    ``(device, inode, mtime)``.  The inode number alone is not enough:
+    filesystems that hand a just-freed inode straight back out (overlayfs
+    — measured on this container's ``/tmp``: SIGKILL the server, let a
+    start rebind the path, and the new socket has the *same* inode
+    number) would make a rebound socket compare equal to the stale one
+    and be unlinked.  A socket file's mtime is its creation time and
+    nothing rewrites it, so a recreated file always differs — while the
+    same file keeps its mtime even when another pm process chmods it for
+    sharing (``paths.set_shared_socket_permissions``), so a chmod does not
+    block the cleanup.
+
+    ``st_mtime_ns`` when the stat provides it; a constructed
+    ``os.stat_result`` (the tests') does not, so its float ``st_mtime`` is
+    scaled instead.
+    """
+    ns = getattr(entry, "st_mtime_ns", None)
+    return (entry.st_dev, entry.st_ino,
+            ns if isinstance(ns, int) else int(entry.st_mtime * 1_000_000_000))
+
+
 def _remove_stale_socket(socket_path: str) -> None:
     """Unlink *socket_path* when it is ours and no server answers on it.
 
@@ -605,11 +628,14 @@ def _remove_stale_socket(socket_path: str) -> None:
     unlinks a stale socket and binds a new one at the same path, so a
     ``pm session`` that starts this session while the command probes (a
     kill racing a start, which the concurrent-start rule treats as
-    normal) leaves a *different* inode at the path.  Unlinking by path
+    normal) leaves a *different* entry at the path.  Unlinking by path
     then would remove the new server's socket: its clients could no
     longer connect, and the next ``pm session`` would bind a second
     server beside the one still running.  A changed entry is therefore
-    left alone; only the same file the probe found dead is removed.
+    left alone; only the same file the probe found dead is removed.  The
+    identity includes the mtime, not only the inode: see
+    :func:`_socket_entry_identity` (a reused inode number would otherwise
+    compare equal).
 
     The baseline is the entry ``_removable_private_socket`` validated,
     not a fresh ``lstat``: a replacement planted between the ownership
@@ -627,7 +653,7 @@ def _remove_stale_socket(socket_path: str) -> None:
     except OSError:
         # The entry vanished while the probe ran: nothing left to remove.
         return
-    if (after.st_dev, after.st_ino) != (before.st_dev, before.st_ino):
+    if _socket_entry_identity(after) != _socket_entry_identity(before):
         _log.info("session kill: socket %s was rebound while probing — "
                   "keeping it", socket_path)
         return

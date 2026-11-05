@@ -5027,8 +5027,11 @@ Considered and not changed: `_find_tui_pane`'s registry scan can return a
 recorded pane id without re-checking which session it belongs to, but
 every caller that *drives* a pane uses `_find_live_tui_pane`, which does;
 and an implicit `owned_only` lookup still does not probe an absent socket
-path (probing an absent path makes tmux start a server there, so that is
-the rule, not a miss).
+path (af74 i2 correction: probing one does *not* make tmux start a
+server — `has-session`/`list-sessions` answer "error connecting" and leave
+no file behind on tmux 3.2a — so the reason is the TOCTOU window: another
+user could create the entry between the `lstat` and the connect, while a
+running server always has its socket file bound).
 
 Tests: `TestResumedRunWindow` (existing window with a dashboard left
 alone; without one, the dashboard is split), `TestRespawnTuiOutcome`
@@ -5617,3 +5620,62 @@ final head **6203 passed / 1 skipped**, 447.4 s
 absent from this container, not from the project (the 13 tests pass 13/13
 once it is installed).  pyflakes reports no new warning versus
 `origin/master` (`pyflakes-master.txt` / `pyflakes-head.txt`).
+
+## Review iteration (2026-11-05, review-loop af74 i2)
+
+Verification pass over the head after af74 i1 (`adde720d`, `a1cbc2af`);
+no requirement changes.  The whole change set was re-read, and af74 i1's
+fix holds: `test_falls_back_for_a_symlink_loop` passes, and a live
+`TMUX_TMPDIR=<symlink loop> pm session list` returns 0 with "No pm
+sessions found." instead of a traceback.
+
+One defect found and fixed, in the stale-socket rebind guard (4c94
+i4/i5):
+
+**The rebound-socket guard compared inode numbers only.**  tmux unlinks
+a stale socket and binds a new one at the same path, and a filesystem
+that hands a just-freed inode straight back out gives the new file the
+*same* inode number.  Measured on this container's `/tmp` (overlayfs):
+SIGKILL the server, let a start rebind the path, and `st_ino` is
+unchanged while `st_mtime_ns`/`st_ctime_ns` move.  A `pm session kill`
+racing a `pm session` start could therefore still unlink the new
+server's socket — stranding its clients, and making the next
+`pm session` bind a second server — which is exactly what the guard was
+added to prevent.  The identity is now `(st_dev, st_ino, st_mtime_ns)`
+(`session._socket_entry_identity`): a recreated file always has a new
+mtime, while the same file keeps its own when another pm process chmods
+it for sharing (`set_shared_socket_permissions`), so a chmod does not
+block the cleanup.  The new
+`test_a_rebound_socket_whose_inode_number_was_reused_is_kept` passes
+after the fix and fails with the pre-fix two-field identity (verified by
+pinning it).  Live validation on a disposable socket: SIGKILL the
+server, have `server_alive` rebind the path and report it dead (the
+race), then run `_remove_stale_socket` — the socket is kept and the new
+server answers, while the pinned pre-fix identity removes it.
+
+Two documentation corrections:
+
+1. `TestDefaultSocketPath`'s class docstring still said tmux ignores a
+   *relative* `$TMUX_TMPDIR`.  The class's own
+   `test_uses_an_existing_relative_value` — and the implementation since
+   b48f i9 — pin the opposite: tmux `realpath()`s the value, so an
+   existing relative path is used against the client's cwd.
+2. The 6cda i1 note claimed that probing an absent socket path makes
+   tmux start a server there.  Verified false on tmux 3.2a
+   (`has-session`, `list-sessions` and `display-message` all answer
+   "error connecting" and leave no file behind).  The rule (an implicit
+   `owned_only` lookup does not probe an absent path) stands, but for
+   the TOCTOU reason the code comment gives.
+
+Also removed a stray blank line at EOF in
+`tests/test_qa_execution_only_window.py`.
+
+Validation: the 31 files changed under `tests/` pass twice in one HOME
+(1966 each, `/pm-captures/review-af74-i2/affected-runs.log`); the new
+test fails on the pre-fix identity and passes after.  Full suite on the
+final head **6204 passed / 1 skipped**, 450.7 s
+(`/pm-captures/review-af74-i2/full-suite-final.log`; the head before
+this iteration's edit passed the same suite at 6203 / 1).  pyflakes
+reports no new warning versus `origin/master`
+(`/pm-captures/review-af74-i2/pyflakes-master.txt` / `pyflakes-head.txt`
+— the head drops one unused import and adds none).
