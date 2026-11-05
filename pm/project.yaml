@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-05T00:50:44.062270+00:00'
+  updated_at: '2026-11-05T01:13:30.965138+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -9806,6 +9806,21 @@ prs:
       (pre-fix and post-fix recordings).'
     created_at: '2026-11-05T00:50:43Z'
     last_edited: '2026-11-05T00:50:43Z'
+  - id: note-b7899d0
+    text: 'QA S92 re-evaluation (head 020a7662) — WITHDRAWS the earlier "PASS 4/4"
+      for story 1. Its Then 3 (TUI shows the new PR card double-bordered) does NOT
+      hold in the prescribed race. Re-driven exactly, 0.5 s sampling for 30 s: TUI
+      reloads 633->634 with the same pid (state-only reloads), the selection stays
+      #105 from the Down onward, the new PR card is never selected or even visible,
+      and pm status reports Active PR #105. Cause: pm pr add takes ~2 s, so the Down
+      at 0.3 s lands first, and app._load_state deliberately flushes the pending active_pr
+      before re-reading disk (commit 1ca12b7c, a QA fix for the opposite divergence).
+      R16 in pm/specs/pr-073910f/qa.md requires only that both records survive, which
+      they do. Verdict INPUT_REQUIRED: the scenario Then and the deliberate flush
+      design disagree and a human should decide which changes. Story 1 CLI Thens and
+      stories 2-4 all pass. Re-run captures: /pm-captures/scenarios/92/story1-rerun.'
+    created_at: '2026-11-05T01:13:30Z'
+    last_edited: '2026-11-05T01:13:30Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
