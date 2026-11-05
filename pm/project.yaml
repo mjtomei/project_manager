@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-05T02:29:08.570031+00:00'
+  updated_at: '2026-11-05T02:41:57.609540+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -9865,6 +9865,49 @@ prs:
       has an extra fixture session in it.'
     created_at: '2026-11-05T02:29:08Z'
     last_edited: '2026-11-05T02:29:08Z'
+  - id: note-61b04c4
+    text: 'QA S94 (R15 held runs + dashboards after the hosting session dies) PASS
+      5/5 on 0eef71a6, no source changes. Captures /pm-captures/scenarios/94 (README
+      + per-story manifest/cast/mp4/evidence). Fixture traps for the next run: (1)
+      qa_scenario scripted sequences are consumed by Scenario 0 (the loop launches
+      it with session_type=qa_scenario), so a two-entry [INPUT_REQUIRED, PASS] script
+      gives the worker PASS and no hold — prefix one entry for Scenario 0; (2) scenario
+      indices are planner-assigned (observed 1, 2, 3), not the draft''s 1-based numbers;
+      (3) the "leaving <pr>''s run to session pm-<tag>" line does not fire while the
+      run''s owner pid is alive (resume_owned_elsewhere short-circuits first), so
+      a second clone shows it only after the owner dies; (4) pane ids are per tmux
+      server and restart from %0, so a relaunched worker can reuse the recorded label
+      — check that the recorded id is absent after the restart, not that the label
+      differs; (5) `pm session` inside a recorded tmux pane attaches (the pane has
+      a tty) and blocks a driver script until C-b d, unlike the QA worker Bash tool
+      where it fails. Incidental finding filed as pr-567a815: two projects in one
+      HOME whose PRs share an id (titles are deterministic) can adopt each other''s
+      QA run from the shared ~/.pm/workdirs/qa root.'
+    created_at: '2026-11-05T02:16:17Z'
+    last_edited: '2026-11-05T02:16:17Z'
+  - id: note-99d38e5
+    text: 'QA S94 re-evaluation (supersedes the PASS in the previous note): verdict
+      is INPUT_REQUIRED. All five stories were re-driven and every THEN was executed
+      and observed live, but two drafted Thens in story 4 cannot hold as written and
+      neither is a product defect: (1) THEN 2 "a different pane id" — tmux pane ids
+      are per server and restart from %0, so the relaunched worker lands on the same
+      label (%6) it had before (different process pid 38988 vs 37705, different server);
+      the scenario''s own THEN 1 anticipates exactly this, so THEN 2 contradicts THEN
+      1. (2) THEN 5 "the dashboard reaches Progress: 1/1 scenarios complete" — the
+      dashboard never renders it; sampled every 0.1 s across a full single-scenario
+      run it shows only Progress: 0/1 → Progress: 0/1 (1 verifying) → Overall: PASS,
+      because qa_loop publishes overall before the finalize pane runs and qa_status.py
+      prints Overall whenever overall is set. Everything else is observed: held-run
+      re-adoption with the resume marker, main QA window + dashboard rebuilt, no duplicate
+      dashboards over three restarts (incl. a dead dashboard under remain-on-exit),
+      both runs re-adopted after a kill during verification, fresh verifier pane %8
+      (old %7) carrying the verification prompt, worker left running its own PASS
+      session, no follow-up to the old verifier id, and story 2''s "leaving <pr>''s
+      run to session pm-<tag>" Given established live by killing C''s TUI process
+      while its server stayed up. Spec edit needed on those two story-4 Thens before
+      this can score PASS.'
+    created_at: '2026-11-05T02:41:57Z'
+    last_edited: '2026-11-05T02:41:57Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
@@ -62210,6 +62253,54 @@ prs:
   gh_pr_number: null
   created_at: '2026-11-04T19:58:52.136036+00:00'
   updated_at: '2026-11-04T19:58:52.136036+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-567a815
+  plan: bugs
+  title: 'Bug: a QA run is adopted by another project''s TUI when both projects hold
+    a PR with the same id'
+  branch: pm/pr-567a815-bug-a-qa-run-is-adopted-by-another-project-s-tui-w
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/tui/qa_loop_ui.py resume scan — ~/.pm/workdirs/qa/*/qa_resume.json
+    is shared by every project under ~/.pm, and the only cross-project guard is _foreign_qa_pr_ids,
+    keyed by PR id (set(by_pr) - known, where known comes from this project''s project.yaml).
+
+
+    PR ids are deterministic from the PR title (pr-<hash>), so two unrelated projects
+    that each have a PR with the same title share the same id, and neither treats
+    the other''s snapshot as foreign.
+
+
+    Repro (observed 2026-11-05 during QA scenario 94 on pr-073910f at 0eef71a6, tmux
+    3.2a, fake-claude):
+
+    1. Two throwaway projects A (/scratch/qa94-s1-1793841722) and B (/scratch/qa94-c-1793843191)
+    in one HOME, each with a PR titled ''Add login feature'' -> both are pr-95325c4.
+
+    2. A runs QA for pr-95325c4 to completion; A''s TUI stays running (idle).
+
+    3. B starts QA for pr-95325c4 (qa_resume.json written under ~/.pm/workdirs/qa/pr-95325c4-<loop>/),
+    then B''s session is killed.
+
+    4. A''s TUI scans, sees B''s snapshot, does not consider pr-95325c4 foreign (it
+    is in A''s project.yaml), and adopts it: log ''Resuming incomplete QA from disk:
+    pr-95325c4'' at 01:37:07 followed by ''Relaunched scenario 3 in window qa-pr-95325c4-s3''
+    — B''s scenario relaunched inside A''s tmux session and workdir. B''s own clone
+    never gets its run back.
+
+
+    Effect: a run belonging to one project is driven (and its result recorded) by
+    a different project''s session, and the owning clone cannot resume it. Expected:
+    a snapshot is only adoptable by a TUI of the project that owns it (e.g. key the
+    shared qa root by project/repo id, not only by PR id).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-05T02:16:06.575183+00:00'
+  updated_at: '2026-11-05T02:16:06.575183+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
