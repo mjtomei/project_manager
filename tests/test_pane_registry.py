@@ -261,6 +261,32 @@ class TestRegisterPane:
         assert data["windows"]["0"]["panes"][0]["role"] == "tui"
         assert data["windows"]["1"]["panes"][0]["role"] == "review"
 
+    def test_the_same_pane_is_registered_once(self, registry_dir):
+        """Two converging ``pm session`` starts register one TUI (R8.2).
+
+        Both starts register the winner's TUI pane; appending left two
+        ``tui`` entries for the same pane id, and rebalance then computed a
+        layout with one cell too many (the window stayed stacked instead of
+        side by side).
+        """
+        register_pane("sess", "0", "%1", "tui", "pm _tui")
+        register_pane("sess", "0", "%1", "tui", "pm _tui")
+        data = load_registry("sess")
+        panes = data["windows"]["0"]["panes"]
+        assert len(panes) == 1
+        assert panes[0]["id"] == "%1"
+        assert panes[0]["order"] == 0
+
+    def test_re_registering_a_pane_updates_its_role_in_place(self, registry_dir):
+        register_pane("sess", "0", "%1", "tui", "pm _tui")
+        register_pane("sess", "0", "%2", "claude", "claude")
+        register_pane("sess", "0", "%1", "qa-planner", "pm _tui")
+        data = load_registry("sess")
+        panes = data["windows"]["0"]["panes"]
+        assert [p["id"] for p in panes] == ["%1", "%2"]
+        assert panes[0]["role"] == "qa-planner"
+        assert panes[0]["order"] == 0
+
     def test_registers_multiple_panes(self, registry_dir):
         register_pane("sess", "0", "%1", "tui", "pm _tui")
         register_pane("sess", "0", "%2", "claude", "claude")

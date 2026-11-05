@@ -5679,3 +5679,55 @@ this iteration's edit passed the same suite at 6203 / 1).  pyflakes
 reports no new warning versus `origin/master`
 (`/pm-captures/review-af74-i2/pyflakes-master.txt` / `pyflakes-head.txt`
 — the head drops one unused import and adds none).
+
+## Review iteration (2026-11-05, review-loop af74 i3)
+
+Verification pass over the head after af74 i2 (`96771c3c`); no requirement
+changes.  The whole change set was re-read, and af74 i2's stale-socket
+identity fix holds (its regression test passes on this head, and the
+changed test files pass twice in one HOME).
+
+One defect found and fixed, in the R8.2 concurrent-start path:
+
+**Converging `pm session` starts registered the TUI pane twice.**
+`create_session` / `create_grouped_session` treat "duplicate session" as
+a lost race and converge on the winner's session (R8.2), so the loser
+now continues past `create_session`.  Both processes then read the
+winner's TUI pane (`list-panes -t <session>`) and call
+`pane_registry.register_pane`, which appended unconditionally: the
+registry ended with two `tui` entries for the same pane id in the same
+window.  Nothing removes such an entry — `_reconcile_registry` and
+`heal_registry` drop only *dead* panes, and `register_tui_pane` is a
+no-op when the id is already listed — so every later `rebalance`
+computed a layout with one cell too many.  Reproduced live on a
+disposable socket: two simultaneous `pm session` starts left
+`[{"%0","tui",order 0}, {"%0","tui",order 1}, {"%2","guide",...}]`, and
+the window came out stacked (`80x11` + `80x11`) instead of the intended
+side by side (`39x23` + `40x23`); rebalancing the same registry after
+dropping the duplicate produced the correct layout, pinning the cause.
+Before this PR the loser died on the `CalledProcessError` and never
+reached the registration, so the duplicate is introduced by the
+convergence change, not pre-existing.
+
+`register_pane` now treats "this pane id is already in this window" as
+the same registration: it updates role/command in place (and skips the
+write when they match) instead of appending a second row.  A pane id is
+unique per tmux server, so a second row for it in one window is never a
+different pane.  Live re-check with three simultaneous starts on a fresh
+disposable socket: two "created concurrently; converging" lines, two
+`register_pane: %0 already registered ... no change` lines, one `tui`
+entry, and the correct side-by-side layout
+(`f8f1,80x23,0,0{39x23,0,0,0,40x23,40,0,2}`).  Tests
+`test_the_same_pane_is_registered_once` and
+`test_re_registering_a_pane_updates_its_role_in_place` (both fail on the
+pre-fix `register_pane`; the first with two `%1` entries).
+
+Validation: the 31 files changed under `tests/` pass twice in one HOME
+(1968 each, `/pm-captures/review-af74-i3/affected-runs.log`); the two
+new tests pass and both fail on the pre-fix `register_pane`.  Full suite
+on the final head **6206 passed / 1 skipped**, 449.8 s
+(`/pm-captures/review-af74-i3/full-suite-final.log` — af74 i2's 6204 plus
+the two new tests).  pyflakes reports no new warning versus `origin/master`
+(`/pm-captures/review-af74-i3/pyflakes-master.txt` / `pyflakes-head.txt`).
+The live repro and the post-fix re-check are recorded in
+`/pm-captures/review-af74-i3/live-race-repro.md`.

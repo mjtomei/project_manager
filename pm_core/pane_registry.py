@@ -265,12 +265,38 @@ def _save_registry(session: str, data: dict) -> None:
 
 
 def register_pane(session: str, window: str, pane_id: str, role: str, cmd: str) -> None:
-    """Register a new pane in the registry."""
+    """Register a pane in *window*, at most once.
+
+    A pane id is unique per tmux server, so a second entry for it in the
+    same window is never a different pane: it is the same registration
+    made twice.  Two simultaneous ``pm session`` starts do exactly that —
+    they converge on the winner's session (R8.2), and both then register
+    the winner's TUI pane.  Appending blindly left a duplicate ``tui``
+    entry, and every later rebalance then computed a layout with one cell
+    too many: the window came out stacked instead of side by side
+    (measured at an 80x23 window: two 80x11 panes rather than 39x23 +
+    40x23), and no later rebalance could repair it because the entry is
+    live (``_reconcile_registry`` and ``heal_registry`` only drop dead
+    panes).  Re-registering the same pane therefore updates its
+    role/command in place instead of adding a row.
+    """
     _ensure_logging()
 
     def modifier(raw):
         data = _prepare_registry_data(raw, session)
         wdata = get_window_data(data, window)
+        existing = next((p for p in wdata["panes"] if p["id"] == pane_id), None)
+        if existing is not None:
+            if (existing.get("role"), existing.get("cmd")) == (role, cmd):
+                _logger.info("register_pane: %s already registered in window "
+                             "%s; no change", pane_id, window)
+                return None  # nothing to write
+            _logger.info("register_pane: %s already registered in window %s; "
+                         "updating role %s -> %s", pane_id, window,
+                         existing.get("role"), role)
+            existing["role"] = role
+            existing["cmd"] = cmd
+            return data
         order = max((p["order"] for p in wdata["panes"]), default=-1) + 1
         wdata["panes"].append({
             "id": pane_id,
