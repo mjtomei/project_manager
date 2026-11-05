@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-04T23:42:34.635893+00:00'
+  updated_at: '2026-11-05T00:49:07.636360+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -9769,6 +9769,24 @@ prs:
       suite 6196 passed / 1 skipped.'
     created_at: '2026-11-04T23:42:34Z'
     last_edited: '2026-11-04T23:42:34Z'
+  - id: note-8ad589c
+    text: 'QA S92 (R16 concurrent writers, 2026-11-05, head 0eef71a6) PASS 4/4 stories,
+      no source changes. Captures /pm-captures/scenarios/92. Spec note for the next
+      run: story 1 Then 3 ("the new PR card is double-bordered") cannot hold in the
+      prescribed WHEN — pm pr add takes ~2 s on the 3.9 MB registry, so the Down sent
+      at 0.3 s has already moved the cursor, and the TUI flushes its pending active_pr
+      before re-reading disk (app._load_state), so the user navigation wins over the
+      CLI active_pr. Observed 633->634 PRs, same TUI pid, action: reload lines, cursor
+      on #105. The intended follow-the-new-active-PR behaviour was verified separately
+      with no navigation (pm pr add "Race PR B" -> TUI selected pr-e055971 double-bordered
+      with the race PR beside it). Also: pm edit on a killed editor prints "returned
+      non-zero exit status 143" (SIGTERM), not the scenario wording "died with SIGTERM".
+      Everything else held: both concurrent writers rc=0 with no lock error in stories
+      1, 2 and 4; a 10 s held lock fails cleanly with the exact message, no Traceback,
+      registry byte-identical; the in-lock TUI selection is not persisted and a post-release
+      selection is.'
+    created_at: '2026-11-05T00:49:07Z'
+    last_edited: '2026-11-05T00:49:07Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
