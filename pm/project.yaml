@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-05T01:13:30.965138+00:00'
+  updated_at: '2026-11-05T01:46:36.356708+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -9821,6 +9821,36 @@ prs:
       stories 2-4 all pass. Re-run captures: /pm-captures/scenarios/92/story1-rerun.'
     created_at: '2026-11-05T01:13:30Z'
     last_edited: '2026-11-05T01:13:30Z'
+  - id: note-337df34
+    text: 'QA S95 (R13 — two regression runs at the same moment; head 4e7354ca) PASS
+      3/3, no source changes. Story 1: the same test started twice at once (session
+      launch shell + plain shell with --session) got run ids 20261105T014307Z-0a9e
+      / 20261105T014306Z-c196, distinct clones, scratch and captures dirs; the --session
+      run printed the ignored note on stderr before any work; record.txt had one entry
+      per run with its own PWD/CAPTURES and TMUX, TMUX_PANE, PM_TMUX_SOCKET, PM_PROJECT,
+      PM_SESSION all unset; neither prompt named a /tmp/pm-sessions socket or the
+      other run''s id. The session was bit-identical before, during and after (TUI
+      pane %0, pidfile pid 2085/starttime 10878031, pane-registry sha 8ea8c994, project.yaml
+      sha e3b890fb, CLIENTS 1) and pm tui view never showed "Running regression".
+      Story 2: two --file-prs runs at once (file-two from the plain shell, file-one
+      from the session shell) both filed through the prompt''s own quoted pm -C ''/scratch/s95/regr
+      test''"''"''s dir/pm'' pr add (filing.log, both rc 0): pr-e3a1c2e File One finding
+      and pr-a69a5e9 File Two finding beside the seeded pr-6fb0737 Existing bug —
+      no lost update. The TUI reloaded on its own to 3 PRs with both titles, and pm
+      session home''s pm-home window lists all three; TUI pane, pid and pane-registry
+      hash unchanged, CLIENTS 1. Story 3: a run from a pane carrying TMUX/TMUX_PANE/PM_TMUX_SOCKET/PM_PROJECT
+      had all of them unset; plain tmux ls reached /tmp/tmux-1000/default (error,
+      never the user socket); the run''s pm resolved tag repo-4ff0ba1f and --print-connect
+      tmux -S /tmp/pm-sessions/pm-repo-4ff0ba1f attach (rc 0, != the user socket),
+      session list rc 0 still listing the session; prompt.md sits in the run''s captures,
+      has no user socket path, and the pasted pm -C line runs against the registry
+      as one shell word. Fixture note: the container shell profile prepends /home/pm/.local/bin
+      (the real claude), so the stand-in must be re-exported first inside the pane;
+      RECORD_DIR must exist before the run. Captures /pm-captures/scenarios/95 (README
+      + story1-concurrent-runs, story2-concurrent-file-prs, story2-tui, story3-env-scrub:
+      manifests, casts, mp4s, evidence).'
+    created_at: '2026-11-05T01:46:36Z'
+    last_edited: '2026-11-05T01:46:36Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
