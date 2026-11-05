@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-05T01:46:36.356708+00:00'
+  updated_at: '2026-11-05T02:29:08.570031+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -9851,6 +9851,20 @@ prs:
       manifests, casts, mp4s, evidence).'
     created_at: '2026-11-05T01:46:36Z'
     last_edited: '2026-11-05T01:46:36Z'
+  - id: note-8492695
+    text: 'QA S96 (R8 kill branches) PASS on 0eef71a6, no source changes; captures
+      /pm-captures/scenarios/96. Fixture traps for the next refiner/run: (1) a recorded
+      script plays inside a scaffold tmux pane, so bare `tmux` in it resolves to the
+      scaffold socket via $TMUX — `unset TMUX TMUX_PANE` at the top of the recorded
+      script before checking the default server; (2) `podman ps --format {{.Id}}`
+      is unsupported on podman 3.4.4 ("can''t evaluate field Id"), use `podman inspect
+      -f {{.Id}} <name>`; (3) `pm session mobile --force` after a backgrounded `cd
+      X && setsid ... &` runs in the original cwd and flags the wrong session — cd
+      in its own statement; (4) build the story-3 Given only after any earlier story''s
+      pm session is killed, else "pm session list shows only the second pm session"
+      has an extra fixture session in it.'
+    created_at: '2026-11-05T02:29:08Z'
+    last_edited: '2026-11-05T02:29:08Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
