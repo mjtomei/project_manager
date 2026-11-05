@@ -731,6 +731,20 @@ class TestDefaultSocketPath:
         monkeypatch.setenv("TMUX_TMPDIR", str(entry))
         assert paths.default_socket_path() == self._expected(Path("/tmp"))
 
+    def test_falls_back_for_a_symlink_loop(self, monkeypatch, tmp_path):
+        """An unusable value must not escape as a traceback.
+
+        ``Path.resolve()`` reports a symlink loop as ``RuntimeError`` on
+        Python < 3.13, not ``OSError``: catching only the latter crashed
+        every caller of ``default_socket_path`` (``pm session``,
+        ``pm session list``, ``pm session kill``) instead of treating the
+        value like any other one tmux cannot use.
+        """
+        (tmp_path / "a").symlink_to(tmp_path / "b")
+        (tmp_path / "b").symlink_to(tmp_path / "a")
+        monkeypatch.setenv("TMUX_TMPDIR", str(tmp_path / "a"))
+        assert paths.default_socket_path() == self._expected(Path("/tmp"))
+
     def test_falls_back_when_unset_or_empty(self, monkeypatch):
         for value in (None, ""):
             if value is None:

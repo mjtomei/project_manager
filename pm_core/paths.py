@@ -918,9 +918,13 @@ def default_socket_path() -> Path:
     if base:
         try:
             resolved = Path(base).resolve()
-        except OSError:
-            # A symlink loop or an unreadable component: treat it like any
-            # other value tmux cannot use.
+        except (OSError, RuntimeError):
+            # A symlink loop (``RuntimeError`` on Python < 3.13, where
+            # ``Path.resolve`` reports ELOOP that way) or an unreadable
+            # component (``OSError``): treat it like any other value tmux
+            # cannot use.  Catching only ``OSError`` let a loop escape as a
+            # traceback out of `pm session`, `pm session list` and
+            # `pm session kill`.
             resolved = None
         if resolved is not None and resolved.is_dir():
             return resolved / f"tmux-{os.getuid()}" / "default"

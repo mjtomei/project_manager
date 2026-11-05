@@ -5577,3 +5577,40 @@ test passes 5/5 and fails 3/3 on the pre-fix head.  Full suite 6196 passed
 — the pre-fix head's 6195 passed / 1 skipped, 435.6 s
 (`full-suite-pre-fix.log`) plus the new test.  pyflakes reports no new
 warning versus `origin/master`.
+
+## Review iteration (2026-11-05, review-loop af74 i1)
+
+First pass of a new loop over the head after 358c i1 (`0eef71a6`) and the
+QA-driven fuzzy-select fix (`d1832553`).  No requirement changes.
+
+Reviewed `d1832553` (the command bar's `pr select` accepts a PR's id hash
+on its own: an exact hash scores `EXACT_ID`, a prefix of four or more hex
+characters scores `ID_PREFIX`, and legacy numeric ids keep the old
+behaviour) — the logic holds, and its tests cover the exact, prefix,
+short-query and legacy-id cases plus the description-mention regression.
+Two comments there described the floor as "one- and two-character" (it is
+four) and claimed full parity with `_resolve_pr_id` (the bare hash is a
+command-bar-only alias); both corrected.
+
+One defect found and fixed:
+
+**`paths.default_socket_path()` let a symlink loop escape.**
+`Path(base).resolve()` reports a loop as `RuntimeError` on Python < 3.13
+(the project supports 3.10), not `OSError`, so the docstring's "a symlink
+loop or an unreadable component" fallback only covered the latter.  With
+`TMUX_TMPDIR` naming a loop, every caller — `pm session`,
+`pm session list`, `pm session kill`, `find_session_server`,
+`helpers._use_tmux_socket` — died with a traceback instead of falling
+back to `/tmp/tmux-<uid>/default`.  It now catches
+`(OSError, RuntimeError)`.  Test `test_falls_back_for_a_symlink_loop`
+(fails on the pre-fix head with the `RuntimeError`; a live
+`TMUX_TMPDIR=<loop> pm session list` returns 0 after the fix).
+
+Validation: the 31 files changed under `tests/` pass twice in one HOME
+(1965 each, `affected-run1.log` / `affected-run2.log`); the new test fails
+1/1 on the pre-fix head and passes after.  Full suite 6190 passed / 12
+failed / 1 skipped, 443.4 s (`full-suite.log`): every failure is
+`test_markdown_render`'s `ModuleNotFoundError: No module named 'markdown'`
+(the dependency is absent from this container, not from the project —
+the 13 tests pass 13/13 once it is installed), so the code baseline is
+6203 passed / 1 skipped.

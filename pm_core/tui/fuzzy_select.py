@@ -25,9 +25,9 @@ _BARE_NUMBER = re.compile(r"#?(\d+)")
 # notes, commits and QA reports refer to PRs by that hash alone.  The command
 # bar accepts it without the ``pr-`` prefix: an exact hash names the PR, and
 # a hash prefix of four or more hex characters is an id-prefix match.  The
-# length floor keeps one- and two-character queries matching titles rather
-# than turning every PR whose hash starts with them into an id hit, and
-# legacy numeric ids (``pr-001``) keep the old behaviour.
+# length floor keeps queries shorter than four characters matching titles
+# rather than turning every PR whose hash starts with them into an id hit,
+# and legacy numeric ids (``pr-001``) keep the old behaviour.
 _CANONICAL_PR_ID = re.compile(r"pr-([0-9a-f]{7})")
 _HASH_QUERY = re.compile(r"[0-9a-f]{4,7}")
 
@@ -53,11 +53,13 @@ def _gh_number(pr: dict) -> int | None:
 
 
 def is_exact_pr_match(pr: dict, query: str) -> bool:
-    """True if *query* names *pr* exactly, the way ``_resolve_pr_id`` does.
+    """True if *query* names *pr* exactly.
 
     Accepts the raw pm id (``pr-942aa21``), the display id (``#125``), a
     bare GitHub number (``125``) and the id's hash on its own
-    (``942aa21``).  Case-insensitive.
+    (``942aa21``).  Case-insensitive.  The first three are also what
+    ``cli.helpers._resolve_pr_id`` accepts; the bare hash is a command-bar
+    alias only (notes and commits quote ids that way).
     """
     q = _norm(query)
     if not q:
