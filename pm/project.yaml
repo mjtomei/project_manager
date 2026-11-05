@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-05T00:49:07.636360+00:00'
+  updated_at: '2026-11-05T00:50:44.062270+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -9787,6 +9787,25 @@ prs:
       selection is.'
     created_at: '2026-11-05T00:49:07Z'
     last_edited: '2026-11-05T00:49:07Z'
+  - id: note-3fd89f2
+    text: 'QA S93 (scenario 93, R16 first bullet) NEEDS_WORK with one incidental fix,
+      d1832553. The registry merge itself is intact at 0eef71a6: 633 PRs (632 = union
+      of 1d22a0cd^1 5c08c406 + 1d22a0cd^2 c3bac6ce, plus pr-e9bd0d3 added after the
+      merge), every internal id unique, no id lost (master contributed 46, branch
+      15), 22 plans identical to both parents, and 218 notes in the same order on
+      pm pr show, pm pr note list and the pm pr edit template. Display ids repeat
+      only for the known #163 pair (pr-d8cfa16 / pr-5471329, distinct titles). TUI
+      agreed: status bar 633 PRs / filter hide closed, the plans view listed the same
+      22 ids, and both #163 nodes render with distinct titles under the closed filter.
+      FIX: the command bar''s pr select did not accept a PR id''s hash alone, so the
+      scenario''s `pr select 5f30bdf` landed on the unrelated pr-3199f44 (its description
+      mentions pr-5f30bdf) instead of #296. The hash of a canonical pr-<7 hex> id
+      is now an id alias (exact hash -> EXACT_ID, 4+ hex prefix -> ID_PREFIX); legacy
+      numeric ids and short queries unchanged. Tests: tests/test_fuzzy_select.py,
+      tests/test_fuzzy_select_tui.py (79 passed). Captures: /pm-captures/scenarios/93
+      (pre-fix and post-fix recordings).'
+    created_at: '2026-11-05T00:50:43Z'
+    last_edited: '2026-11-05T00:50:43Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
