@@ -198,7 +198,11 @@ the task and on the measurements above.
   * consumer active (pm inside a consumer launching its own containers) →
     never prepare, never auto-build: the default image must be visible
     through the shared store (`image_exists`), else `ContainerError` naming
-    the cached image and the host-side remedy.  The engine config for the
+    the cached image and the remedies: use a cached image, build a fixture
+    on one, or launch this container from the wanted image (`pm container
+    set image` on the host, then relaunch: a container only ever sees the
+    entry of the image it was launched from, so preparing another image on
+    the host changes nothing here — review 62b4 i8).  The engine config for the
     current `HOME` is ensured first (a test pm with a private `HOME`).  The
     shared entry is **not** mounted into the next level (fact 6); see A3.
 * `pm container status` shows the cache mode and, when applicable, the
@@ -221,8 +225,10 @@ the task and on the measurements above.
   image).
 * `pm container engine-setup [--home DIR]` (in-container) writes the config
   for `DIR` (default `$HOME`), refuses an existing config that it did not
-  write unless `--force`, refuses a graphroot on a network filesystem, and
-  runs the consumer check.
+  write unless `--force` — naming what that file needs (`storage.conf`:
+  the store and mount_program; `containers.conf`: the engine's own
+  `tmp_dir`, review 62b4 i8) — refuses a graphroot on a network
+  filesystem, and runs the consumer check.
 * `pm container cache check` (in-container) verifies: entry present,
   engine config references the store, graphroot local, mapping probes read
   `0:0` / `1:1` through `podman unshare stat`, configured image visible
@@ -541,7 +547,8 @@ the same shared layers:
     HOME=/scratch/engines/w2 podman run -d --uts host --name w2 pm-dev:latest sleep infinity
 
 `engine-setup` refuses a network filesystem, an incompatible cache, and an
-existing `storage.conf` it did not write (`--force` replaces it).
+existing `storage.conf` or `containers.conf` it did not write; the error
+says what to add to that file, and `--force` replaces it instead.
 
 ## Container-mode pm inside the container (nested pm launch)
 

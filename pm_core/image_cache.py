@@ -771,18 +771,32 @@ def write_engine_config(home: str | None = None, *, force: bool = False,
             except OSError:
                 ours = False
             if not ours:
-                raise ImageCacheError(
-                    f"{p} exists and was not written by pm; it would hide "
-                    f"the shared image store. Rerun with --force to replace "
-                    f"it, or add \"{CONSUMER_STORE}\" to its "
-                    f"additionalimagestores and set mount_program = "
-                    f"\"{MOUNT_PROGRAM}\" yourself.")
+                raise ImageCacheError(_foreign_config_message(p, fname, home))
     cdir.mkdir(parents=True, exist_ok=True)
     written = {}
     for fname, text in files.items():
         (cdir / fname).write_text(text)
         written[fname] = cdir / fname
     return written
+
+
+def _foreign_config_message(path: Path, fname: str, home: str) -> str:
+    """Why :func:`write_engine_config` will not replace *path*, and what to
+    add to it instead — specific to the file, since a scenario's own
+    ``containers.conf`` (e.g. its network mode) has nothing to do with the
+    image store."""
+    if fname == "storage.conf":
+        why = "it would hide the shared image store"
+        add = (f"add \"{CONSUMER_STORE}\" to its additionalimagestores and "
+               f"set mount_program = \"{MOUNT_PROGRAM}\"")
+    else:
+        why = ("this engine needs its own runtime tmp dir, so it does not "
+               "share runtime state with another engine in this container")
+        add = (f"add tmp_dir = \"/tmp/pm-eng-{_engine_hash(home)}/tmp\" "
+               f"under its [engine] table")
+    return (f"{path} exists and was not written by pm; {why}. Either {add} "
+            f"yourself, or rerun with --force to replace it (its other "
+            f"settings are then lost).")
 
 
 def overlay_support_problem() -> str | None:
@@ -1016,6 +1030,8 @@ def missing_in_consumer_message(image_ref: str) -> str:
         f"per-engine copies the cache exists to avoid — and it does not fall "
         f"back to VFS or the host.\n\nTo fix: use one of the cached images "
         f"('pm container set image <name>'), build a small fixture on top of "
-        f"one, or have the host prepare this image ('pm container cache "
-        f"prepare --image {image_ref}' on the host, then relaunch this "
-        f"container); " + _off_remedy() + ".")
+        f"one, or launch this container from that image — a container sees "
+        f"only the entry of the image it was launched from, so on the host "
+        f"run 'pm container set image {image_ref}' and relaunch this "
+        f"container (that launch prepares the image's entry); "
+        + _off_remedy() + ".")

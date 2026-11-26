@@ -54,7 +54,8 @@ the same shared layers:
     HOME=/scratch/engines/w2 podman run -d --uts host --name w2 pm-dev:latest sleep infinity
 
 `engine-setup` refuses a network filesystem, an incompatible cache, and an
-existing `storage.conf` it did not write (`--force` replaces it).
+existing `storage.conf` or `containers.conf` it did not write; the error
+says what to add to that file, and `--force` replaces it instead.
 
 ## Container-mode pm inside the container (nested pm launch)
 

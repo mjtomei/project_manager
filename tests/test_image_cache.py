@@ -538,6 +538,28 @@ class TestWriteEngineConfig:
         image_cache.write_engine_config(str(eng), force=True)
         assert "vfs" not in cfg.read_text()
 
+    def test_foreign_containers_conf_names_the_tmp_dir_it_needs(
+            self, consumer, tmp_path):
+        # A scenario's own containers.conf (its network mode) has nothing
+        # to do with the image store: the refusal says what this file
+        # needs, and nothing is written over it.
+        eng = tmp_path / "w4"
+        cfg = eng / ".config" / "containers" / "containers.conf"
+        cfg.parent.mkdir(parents=True)
+        cfg.write_text('[network]\nnetwork_backend = "cni"\n'
+                       '[engine]\nnetwork_cmd_options = []\n')
+        with pytest.raises(ImageCacheError) as exc:
+            image_cache.write_engine_config(str(eng))
+        msg = str(exc.value)
+        tmp_dir = image_cache.engine_config_text(
+            str(eng), isolated=True)["containers.conf"].split(
+                'tmp_dir = "')[1].split('"')[0]
+        assert f'tmp_dir = "{tmp_dir}"' in msg and "[engine]" in msg
+        assert "--force" in msg
+        assert "additionalimagestores" not in msg
+        assert "network_backend" in cfg.read_text()
+        assert not (cfg.parent / "storage.conf").exists()
+
     def test_refuses_a_fuse_graphroot(self, consumer, tmp_path, monkeypatch):
         from pm_core import paths
         mi = tmp_path / "mountinfo"
@@ -662,6 +684,11 @@ def test_missing_in_consumer_message_names_the_cache(consumer):
     assert "does not build, pull or import" in msg
     assert "VFS" in msg and "host" in msg
     assert f"pm set {image_cache.MODE_SETTING} off" in msg
+    # The host remedy must change what this container is launched from:
+    # a relaunch mounts the entry of the host's configured image only, so
+    # merely preparing another image there would change nothing here.
+    assert "pm container set image pm-dev:other" in msg
+    assert "cache prepare --image" not in msg
 
 
 def test_missing_overlay_support_fails_the_nested_launch(consumer, tmp_path,
