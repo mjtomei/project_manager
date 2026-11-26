@@ -2369,6 +2369,16 @@ prs:
       add duplicates plan entries (pre-existing).'
     created_at: '2026-11-26T16:50:43Z'
     last_edited: '2026-11-26T16:50:43Z'
+  - id: note-cb0ffc8
+    text: 'QA S1 refiner 2026-11-26: verified live at 92d4732f (plan add prompt with/without
+      existing PRs, path-seeded plan, no-claude fallback, plan load + reload skip).
+      Trap for any no-Claude-fallback check: the container has a real claude in /usr/local/bin
+      next to pm, so PATH=/usr/local/bin:/usr/bin:/bin still launches real Claude.
+      Use a dir holding only a pm symlink (ln -s /usr/local/bin/pm $D/pm; PATH=$D:/usr/bin:/bin)
+      and confirm `command -v claude` is empty. A recording stand-in claude must come
+      first on PATH and exit 0 (non-zero makes launch_claude retry with a fresh session).'
+    created_at: '2026-11-26T16:56:15Z'
+    last_edited: '2026-11-26T16:56:15Z'
   - id: note-62c6dbf
     text: 'QA S3 refiner (plans view w/o breakdown, TUI): all 7 stories held live
       at 92d4732f. Container lacks less and vi, so the plans-view Enter (less) and
