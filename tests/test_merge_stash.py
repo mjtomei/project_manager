@@ -1397,6 +1397,35 @@ class TestResolveProjectYamlPop:
         assert [n["id"] for n in _pr(d, "pr-001")["notes"]] == ["note-c"]
         assert _stash_list(repo) == ""
 
+    def test_partly_resolved_pop_names_only_what_still_conflicts(
+            self, tmp_path, capsys):
+        """A nested pm registry and another file both conflict on the
+        auto-stash pop: the registry is merged, the stash is kept for the
+        other file, and the warning does not say the merged registry still
+        holds conflict markers."""
+        repo = _init_repo(tmp_path)
+        _seed_project(repo)
+        sub = repo / "sub" / "pm"
+        sub.mkdir(parents=True)
+        store.save({"project": {"name": "nested"}, "plans": [],
+                    "prs": [{"id": "pr-n", "title": "n", "status": "pending",
+                             "updated_at": "base"}]}, sub)
+        (repo / "code.txt").write_text("v1\n")
+        _git("add", "-A", cwd=repo)
+        _git("commit", "-q", "-m", "nested", cwd=repo)
+        _incoming(repo, sub, lambda d: _pr(d, "pr-n").update(
+            updated_at="incoming"), files={"code.txt": "v2\n"})
+        _edit(sub, lambda d: _pr(d, "pr-n").update(updated_at="local"))
+        (repo / "code.txt").write_text("v1 local\n")
+
+        r = pr_mod._ff_with_autostash(repo, "incoming")
+        assert r.returncode == 0
+        err = capsys.readouterr().err
+        assert "conflicted in: code.txt.\n" in err
+        assert "sub/pm/project.yaml" not in err
+        assert _pr(store.load(sub), "pr-n")["updated_at"] == "local"
+        assert "auto-stash for merge" in _stash_list(repo)   # kept for code.txt
+
     def test_leaves_a_non_registry_project_yaml_alone(self, tmp_path):
         repo = _init_repo(tmp_path)
         _seed_project(repo)

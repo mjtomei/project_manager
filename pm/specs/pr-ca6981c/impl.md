@@ -324,6 +324,9 @@ position:
   `_resolve_project_yaml_pop(cwd, ref)`, which merges only real pm
   registries. A lock failure there counts as unresolved. Otherwise the
   stash is kept with a "resolve, then `git stash drop <ref>`" instruction.
+  The warning names only the files that still conflict: the resolver may
+  have merged a registry before it gave up on the others (review c6a2
+  i12).
 - If git refuses the pop, the stash is kept ("Nothing was lost"). The
   message does not suggest popping it again: git >= 2.34 restores the
   tracked changes before it refuses an untracked file that now exists, and
@@ -471,6 +474,8 @@ lock is a different one.
 - Restore and reap:
   - a conflicted pop keeps the stash, leaves the registry valid and opens no
     window (the warning names a path with a space unsplit);
+  - a pop whose nested registry the resolver merged, while another file
+    still conflicts, keeps the stash and names only that file;
   - a refused pop keeps the stash intact, also under a user's
     `status.showUntrackedFiles=no`;
   - a partly applied pop (untracked collision; a failed drop) keeps the

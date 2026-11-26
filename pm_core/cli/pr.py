@@ -3587,6 +3587,9 @@ def _restore_merge_stash(cwd: Path, sha: str, count: int) -> bool:
         click.echo(f"Restored {count} stashed file(s).")
         return True
     if unmerged:
+        # The resolver may have merged a registry before it gave up on the
+        # other files: name only the ones that still hold markers.
+        unmerged = _unmerged_paths(cwd) or unmerged
         click.echo(f"Warning: restoring your auto-stashed local changes "
                    f"conflicted in: {', '.join(unmerged)}.\n  Those files "
                    f"now hold conflict markers. The stash is kept as {ref} "
