@@ -6411,7 +6411,7 @@ prs:
   title: 'Project watcher sessions: maintain dynamic dependency guidance and choose
     work'
   branch: pm/pr-945546e-project-state-watcher-monitor-project-health-and-r
-  status: pending
+  status: in_progress
   depends_on:
   - pr-3032fb6
   description: 'Deliver a project-level watcher session that understands active and
@@ -6646,12 +6646,12 @@ prs:
     at the existing required spec review.
 
     '
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/292
+  gh_pr_number: 292
   created_at: '2026-03-09T15:17:16.291505+00:00'
-  updated_at: '2026-11-01T20:38:42.683324+00:00'
-  started_at: null
+  updated_at: '2026-11-01T21:29:41.785214+00:00'
+  started_at: '2026-11-01T20:39:16.656124+00:00'
   reviewed_at: null
   merged_at: null
   notes:
@@ -6738,9 +6738,26 @@ prs:
       and all other holds unchanged.'
     created_at: '2026-11-01T20:38:42.683324+00:00'
     last_edited: '2026-11-01T20:38:42.683324+00:00'
+  - id: note-9605fe9
+    text: 'Spec drafted (pm/specs/pr-945546e/impl.md): full prompts P1-P5 inline first,
+      worked examples W0-W12 from real registry/branch facts, CLI shapes, PD1-PD9
+      and A1-A24 all pending. Awaiting explicit owner approval of spec and full prompt
+      text; no product implementation, review or QA before that. Key coordination
+      to settle at review: pr-8162f0f draft (58f5d4ee) also proposes pm pr ready --explain
+      and schedule: notes (spec A2); pr-7d5d036 retired legacy pm/qa/regression scenarios,
+      so acceptance scenarios here go through the QA flow, not that directory.'
+    created_at: '2026-11-01T21:29:41Z'
+    last_edited: '2026-11-01T21:29:41Z'
   review_spec: true
   model: provider:claude-work-xhigh-249
   effort: high
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-945546e-project-state-watcher-monitor-projec-81e5d7f4
+  spec_pending:
+    phase: impl
+    requested_at: '2026-11-01T20:38:42.683324+00:00'
+    reason: Owner requires the complete project-watcher and composed scheduling prompts
+      inline in impl.md as the primary review item; no product implementation/review/QA
+      before explicit approval. Coordinate approved owner-guidance and brief contracts.
 - id: pr-c21e2ed
   plan: watchers
   title: 'Review/QA oversight watcher: monitor loops for anomalies and shortcuts'
