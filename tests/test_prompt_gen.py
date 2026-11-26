@@ -162,13 +162,33 @@ class TestArchitectureSection:
         static = architecture_section(tmp_path, "plan", max_bytes=0)
         assert prompt_bytes(block) <= 4_000 + prompt_bytes(static)
 
-    def test_pointer_in_repo_pm_dir(self, tmp_path):
+    @pytest.mark.parametrize("prompt_type", ["impl", "review"])
+    def test_pointer_in_repo_pm_dir(self, tmp_path, prompt_type):
+        # Impl/review sessions run at the root of a workdir clone, where an
+        # in-repo pm dir is at pm/.
         (tmp_path / ".git").mkdir()
         root = tmp_path / "pm"
         root.mkdir()
         _write_arch(root)
         assert notes.architecture_pointer(root) == "pm/architecture.md"
-        assert "`pm/architecture.md`" in architecture_section(root, "impl")
+        block = architecture_section(root, prompt_type)
+        assert "`pm/architecture.md`" in block
+        assert str(root) not in block
+
+    def test_plan_pointer_in_repo_pm_dir_is_absolute(self, tmp_path):
+        # Plan sessions run in the base checkout from wherever pm was started
+        # (a subdir, or anywhere with -C), so a relative pm/ path may not
+        # resolve; they get the absolute path, like the plan file itself.
+        (tmp_path / ".git").mkdir()
+        root = tmp_path / "pm"
+        root.mkdir()
+        _write_arch(root)
+        expected = str(root / "architecture.md")
+        assert notes.architecture_pointer(root, in_clone=False) == expected
+        block = architecture_section(root, "plan")
+        assert f"## Project Architecture (`{expected}`)" in block
+        assert f"--- begin {expected} ---" in block
+        assert "`pm/architecture.md`" not in block
 
     def test_pointer_standalone_pm_dir_is_absolute(self, tmp_path):
         # A standalone pm dir is not part of the target repo's clones, so
@@ -215,10 +235,12 @@ class TestArchitectureSection:
 
     def test_every_role_has_guidance_and_debt_addendum(self, tmp_path):
         # PROMPT_TYPES is derived from the guidance mapping; a new role must
-        # also state how the debt rule applies to it (even if only "").
+        # also state how the debt rule applies to it (even if only "") and
+        # whether its session runs in a clone (how the document is named).
         assert set(PROMPT_TYPES) == {"plan", "impl", "review"}
         assert (set(architecture_prompts._STRUCTURAL_DEBT_ROLE_ADDENDUM)
                 == set(PROMPT_TYPES))
+        assert set(architecture_prompts._RUNS_IN_CLONE) == set(PROMPT_TYPES)
         _write_arch(tmp_path)
         for role in PROMPT_TYPES:
             _assert_aware(architecture_section(tmp_path, role))

@@ -57,7 +57,8 @@ that needs human judgment is **INPUT_REQUIRED**.""",
 
 
 #: Role-specific text appended after the structural-debt rule.  Every role in
-#: ``_ROLE_GUIDANCE`` needs an entry (``""`` when the rule stands alone).
+#: ``_ROLE_GUIDANCE`` needs an entry here (``""`` when the rule stands alone)
+#: and in ``_RUNS_IN_CLONE``.
 _STRUCTURAL_DEBT_ROLE_ADDENDUM: dict[str, str] = {
     "plan": """
 This applies to plans too: when a plan accepts a workaround, or leaves
@@ -77,6 +78,19 @@ yourself for any workaround you add while fixing.
 #: so a new role (e.g. sign-off) can't silently fall through to another
 #: role's text.  Bug-fix PRs use the impl/review blocks.
 PROMPT_TYPES = tuple(_ROLE_GUIDANCE)
+
+
+#: Whether each role's session runs at the root of a clone of the target
+#: repo, which decides how the block names the document
+#: (:func:`pm_core.notes.architecture_pointer`).  Impl and review sessions
+#: run in their PR's workdir clone; plan sessions run in the base checkout
+#: from wherever pm was started, so they get the absolute path, as the plan
+#: prompts already do for the plan file.
+_RUNS_IN_CLONE: dict[str, bool] = {
+    "plan": False,
+    "impl": True,
+    "review": True,
+}
 
 
 _STRUCTURAL_DEBT_RULE = """
@@ -133,7 +147,8 @@ def architecture_section(root: Path, prompt_type: str, *,
     if not content:
         return ""
 
-    pointer = notes.architecture_pointer(root)
+    pointer = notes.architecture_pointer(
+        root, in_clone=_RUNS_IN_CLONE[prompt_type])
     excerpt = bounded_text(content, max_bytes=max_bytes,
                            pointer=f"`{pointer}`",
                            label="architecture document")

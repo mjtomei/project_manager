@@ -409,14 +409,18 @@ def load_architecture(root: Path) -> str:
     return text.strip()
 
 
-def architecture_pointer(root: Path) -> str:
+def architecture_pointer(root: Path, *, in_clone: bool = True) -> str:
     """How a session should name the architecture document.
 
-    An in-repo pm dir is committed with the target repo, so every clone a
-    session works in has it at ``pm/architecture.md`` (the same convention
-    impl sessions use for ``pm/specs/``).  A standalone pm dir is not part of
-    those clones, so the absolute path is the only name that resolves.
+    *in_clone* says the session runs at the root of a clone of the target
+    repo (impl and review workdirs).  An in-repo pm dir is committed with the
+    target repo, so every such clone has it at ``pm/architecture.md`` (the
+    same convention impl sessions use for ``pm/specs/``).  Otherwise the
+    absolute path is the only name that resolves: a standalone pm dir is not
+    part of those clones, and a session outside a clone (plan sessions run in
+    the base checkout from wherever pm was started, which may be a subdir or
+    anywhere with ``-C``) can't rely on its working directory.
     """
-    if store.is_internal_pm_dir(root):
+    if in_clone and store.is_internal_pm_dir(root):
         return f"pm/{ARCHITECTURE_FILENAME}"
     return str(root / ARCHITECTURE_FILENAME)

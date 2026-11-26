@@ -21,9 +21,10 @@ refactor PR depend on it).
   - `ARCHITECTURE_FILENAME = "architecture.md"`
   - `load_architecture(root) -> str`: stripped content, `""` when missing,
     empty or unreadable.
-  - `architecture_pointer(root) -> str`: how a session names the file:
-    `pm/architecture.md` for an in-repo pm dir (`store.is_internal_pm_dir`),
-    otherwise the absolute path `root/architecture.md`.
+  - `architecture_pointer(root, *, in_clone=True) -> str`: how a session
+    names the file: `pm/architecture.md` for an in-repo pm dir
+    (`store.is_internal_pm_dir`) when the session runs at the root of a
+    clone, otherwise the absolute path `root/architecture.md`.
 - The prompt block lives in a new `pm_core/architecture_prompts.py` (next to
   `bug_fix_prompts` / `regression_prompts`), not in `notes.py`: the plan's
   target table puts `notes` in DP2 ("notes primitives") and role prompt
@@ -37,7 +38,9 @@ refactor PR depend on it).
     Deriving `PROMPT_TYPES` from the guidance mapping means a new role (the
     sign-off PR pr-4bff69e is the likely first) can't silently fall through
     to another role's text; a test asserts both mappings cover the same roles
-    (review-loop 322e i3).
+    (review-loop 322e i3). A third role-keyed mapping, `_RUNS_IN_CLONE`
+    (`plan: False`, `impl`/`review: True`), picks the pointer form (see
+    Ambiguity 4) and is covered by the same test (review-loop 322e i4).
   - `architecture_section(root, prompt_type, *, pr_id=None,
     max_bytes=ARCHITECTURE_BUDGET) -> str`: the prompt block (see R2).
     Returns `""` when there's no document. `pr_id` fills the impl guidance's
@@ -149,7 +152,9 @@ later tests — review-loop 322e i3):
   (a directory at that path) → `""`; small doc inlined verbatim with no
   truncation marker; over budget → excerpt bounded (block ≤ budget + static
   guidance), head (provenance) and tail (latest change log) kept, marker
-  names the pointer; in-repo vs standalone pointer; role variants differ;
+  names the pointer; in-repo vs standalone pointer (impl/review name an
+  in-repo doc `pm/architecture.md`, plan names it by absolute path); role
+  variants differ;
   unknown role raises; non-UTF-8 bytes don't crash.
 - Prompt generation with/without `architecture.md`: impl, review
   (incl. review-loop), bug-fix impl + bug-fix review, and plan
@@ -193,9 +198,15 @@ later tests — review-loop 322e i3):
    when their task says to (the plan's refactor PRs do). Sign-off (PR 3)
    owns routine updates. This avoids conflicts from concurrent PRs editing one
    document.
-4. **Pointer form.** → `pm/architecture.md` for in-repo pm dirs (matches
-   the `pm/specs/...` convention impl sessions already use in their clone).
-   The absolute path for standalone pm dirs, whose clones contain no `pm/`.
+4. **Pointer form.** → Impl and review sessions run at the root of their
+   PR's workdir clone: `pm/architecture.md` for in-repo pm dirs (matches the
+   `pm/specs/...` convention impl sessions already use in their clone), the
+   absolute path for standalone pm dirs, whose clones contain no `pm/`.
+   Plan sessions (add, breakdown, review, import) run in the base checkout
+   with the cwd pm was started from — a subdir works because
+   `find_project_root` walks up, and `-C`/`PM_PROJECT` work from anywhere —
+   so they always get the absolute path, as their prompts already name the
+   plan file (review-loop 322e i4).
 5. **Budget size.** → `ARCHITECTURE_BUDGET = 16_000` bytes. Impl static text
    runs ~19 KB and PR notes ≤ 35 KB. 16 KB fits a Level-1 matrix for ~15
    FR/DPs plus the debt list, and the full doc is one read away. The block
