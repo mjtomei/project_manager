@@ -313,7 +313,7 @@ class TestSyncPrs:
              patch("pm_core.git_ops.is_git_repo", return_value=True):
             result = pr_sync.sync_prs(tmp_pm_root_with_prs, force=True)
 
-        # Only in_progress and in_review should be checked
+        # Only in_progress, in_review, and qa should be checked
         # pr-003 is pending, so should not be in merged_prs
         assert "pr-003" not in result.merged_prs
 
@@ -564,16 +564,10 @@ class TestSyncFromGitHub:
 
     def test_sync_from_github_detects_merged(self, tmp_pm_root_github):
         """sync_from_github detects merged PRs from GitHub API."""
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        mock_result.stdout = json.dumps({
-            "state": "MERGED",
-            "isDraft": False,
-            "mergedAt": "2024-01-15T10:00:00Z"
-        })
-
-        with patch("subprocess.run", return_value=mock_result), \
-             patch("subprocess.Popen"):  # Don't actually spawn background process
+        with patch("pm_core.pr_sync.gh_ops.get_pr_state", return_value={
+            "state": "MERGED", "isDraft": False,
+            "mergedAt": "2024-01-15T10:00:00Z",
+        }), patch("subprocess.Popen"):  # Don't actually spawn background process
             result = pr_sync.sync_from_github(tmp_pm_root_github, save_state=False)
 
         assert result.synced is True
@@ -581,16 +575,9 @@ class TestSyncFromGitHub:
 
     def test_sync_from_github_detects_closed(self, tmp_pm_root_github):
         """sync_from_github detects closed PRs from GitHub API."""
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        mock_result.stdout = json.dumps({
-            "state": "CLOSED",
-            "isDraft": False,
-            "mergedAt": None
-        })
-
-        with patch("subprocess.run", return_value=mock_result), \
-             patch("subprocess.Popen"):  # Don't actually spawn background process
+        with patch("pm_core.pr_sync.gh_ops.get_pr_state", return_value={
+            "state": "CLOSED", "isDraft": False, "mergedAt": None,
+        }), patch("subprocess.Popen"):  # Don't actually spawn background process
             result = pr_sync.sync_from_github(tmp_pm_root_github, save_state=False)
 
         assert result.synced is True
@@ -603,16 +590,9 @@ class TestSyncFromGitHub:
         data["prs"][0]["status"] = "in_review"
         store.save(data, tmp_pm_root_github)
 
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        mock_result.stdout = json.dumps({
-            "state": "OPEN",
-            "isDraft": True,
-            "mergedAt": None
-        })
-
-        with patch("subprocess.run", return_value=mock_result), \
-             patch("subprocess.Popen"):
+        with patch("pm_core.pr_sync.gh_ops.get_pr_state", return_value={
+            "state": "OPEN", "isDraft": True, "mergedAt": None,
+        }), patch("subprocess.Popen"):
             result = pr_sync.sync_from_github(tmp_pm_root_github, save_state=False)
 
         assert result.synced is True
@@ -620,16 +600,9 @@ class TestSyncFromGitHub:
 
     def test_sync_from_github_detects_ready_as_in_review(self, tmp_pm_root_github):
         """sync_from_github sets ready PRs to in_review."""
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        mock_result.stdout = json.dumps({
-            "state": "OPEN",
-            "isDraft": False,
-            "mergedAt": None
-        })
-
-        with patch("subprocess.run", return_value=mock_result), \
-             patch("subprocess.Popen"):
+        with patch("pm_core.pr_sync.gh_ops.get_pr_state", return_value={
+            "state": "OPEN", "isDraft": False, "mergedAt": None,
+        }), patch("subprocess.Popen"):
             result = pr_sync.sync_from_github(tmp_pm_root_github, save_state=False)
 
         assert result.synced is True
@@ -638,16 +611,10 @@ class TestSyncFromGitHub:
 
     def test_sync_from_github_skips_prs_without_gh_pr_number(self, tmp_pm_root_github):
         """sync_from_github skips PRs without gh_pr_number."""
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        mock_result.stdout = json.dumps({
-            "state": "MERGED",
-            "isDraft": False,
-            "mergedAt": "2024-01-15T10:00:00Z"
-        })
-
-        with patch("subprocess.run", return_value=mock_result), \
-             patch("subprocess.Popen"):
+        with patch("pm_core.pr_sync.gh_ops.get_pr_state", return_value={
+            "state": "MERGED", "isDraft": False,
+            "mergedAt": "2024-01-15T10:00:00Z",
+        }), patch("subprocess.Popen"):
             result = pr_sync.sync_from_github(tmp_pm_root_github, save_state=False)
 
         # pr-003 has no gh_pr_number, should not appear in results
@@ -656,13 +623,211 @@ class TestSyncFromGitHub:
 
     def test_sync_from_github_handles_api_errors(self, tmp_pm_root_github):
         """sync_from_github handles GitHub API errors gracefully."""
-        mock_result = MagicMock()
-        mock_result.returncode = 1
-        mock_result.stdout = ""
-
-        with patch("subprocess.run", return_value=mock_result):
+        with patch("pm_core.pr_sync.gh_ops.get_pr_state", return_value=None):
             result = pr_sync.sync_from_github(tmp_pm_root_github, save_state=False)
 
         # Should still return synced=True but with no updates
         assert result.synced is True
         assert result.updated_count == 0
+
+    def test_sync_from_github_preserves_qa_status_when_open(self, tmp_pm_root_github):
+        """sync_from_github preserves local 'qa' status when GitHub shows OPEN."""
+        data = store.load(tmp_pm_root_github)
+        # Set pr-002 to qa status (simulating local QA in progress)
+        data["prs"][1]["status"] = "qa"
+        store.save(data, tmp_pm_root_github)
+
+        with patch("pm_core.pr_sync.gh_ops.get_pr_state", return_value={
+            "state": "OPEN", "isDraft": False, "mergedAt": None,
+        }):
+            result = pr_sync.sync_from_github(tmp_pm_root_github, save_state=False)
+
+        assert result.synced is True
+        # qa PR should NOT be in status_updates (it was skipped)
+        assert "pr-002" not in result.status_updates
+        # Verify the qa status is still intact in the data
+        data_after = store.load(tmp_pm_root_github)
+        pr_002 = next(p for p in data_after["prs"] if p["id"] == "pr-002")
+        assert pr_002["status"] == "qa"
+
+    def test_sync_from_github_qa_pr_still_transitions_on_merge(self, tmp_pm_root_github):
+        """sync_from_github transitions qa PR to merged when GitHub shows MERGED."""
+        data = store.load(tmp_pm_root_github)
+        data["prs"][1]["status"] = "qa"
+        store.save(data, tmp_pm_root_github)
+
+        with patch("pm_core.pr_sync.gh_ops.get_pr_state", return_value={
+            "state": "MERGED", "isDraft": False,
+            "mergedAt": "2024-01-15T10:00:00Z",
+        }):
+            result = pr_sync.sync_from_github(tmp_pm_root_github, save_state=False)
+
+        assert result.synced is True
+        assert "pr-002" in result.merged_prs
+
+    def test_sync_from_github_qa_pr_still_transitions_on_close(self, tmp_pm_root_github):
+        """sync_from_github transitions qa PR to closed when GitHub shows CLOSED."""
+        data = store.load(tmp_pm_root_github)
+        data["prs"][1]["status"] = "qa"
+        store.save(data, tmp_pm_root_github)
+
+        with patch("pm_core.pr_sync.gh_ops.get_pr_state", return_value={
+            "state": "CLOSED", "isDraft": False, "mergedAt": None,
+        }):
+            result = pr_sync.sync_from_github(tmp_pm_root_github, save_state=False)
+
+        assert result.synced is True
+        assert "pr-002" in result.closed_prs
+
+
+class TestSyncIncludesQaStatus:
+    """Tests that qa-status PRs are included in sync operations."""
+
+    def test_sync_prs_includes_qa_in_merge_detection(self, tmp_path):
+        """sync_prs checks qa-status PRs for merge status alongside in_review/in_progress."""
+        root = tmp_path / "pm"
+        root.mkdir()
+        (root / "project.yaml").write_text(
+            "project:\n"
+            "  name: test-project\n"
+            "  repo: https://github.com/test/repo.git\n"
+            "  base_branch: master\n"
+            "  backend: github\n"
+            "prs:\n"
+            "  - id: pr-qa\n"
+            "    title: QA PR\n"
+            "    status: qa\n"
+            "    branch: pm/pr-qa-branch\n"
+        )
+
+        workdir = tmp_path / "workdir"
+        workdir.mkdir()
+        (workdir / ".git").mkdir()
+
+        data = store.load(root)
+        data["prs"][0]["workdir"] = str(workdir)
+        store.save(data, root)
+
+        mock_backend = MagicMock()
+        mock_backend.is_merged.return_value = True
+
+        with patch("pm_core.pr_sync.get_backend", return_value=mock_backend), \
+             patch("pm_core.git_ops.is_git_repo", return_value=True):
+            result = pr_sync.sync_prs(root, force=True)
+
+        # qa-status PR should be checked and detected as merged
+        mock_backend.is_merged.assert_called_once()
+        assert "pr-qa" in result.merged_prs
+
+    def test_sync_prs_does_not_check_merged_or_closed(self, tmp_path):
+        """sync_prs skips merged/closed PRs but includes qa."""
+        root = tmp_path / "pm"
+        root.mkdir()
+        (root / "project.yaml").write_text(
+            "project:\n"
+            "  name: test-project\n"
+            "  repo: https://github.com/test/repo.git\n"
+            "  base_branch: master\n"
+            "  backend: github\n"
+            "prs:\n"
+            "  - id: pr-merged\n"
+            "    title: Merged PR\n"
+            "    status: merged\n"
+            "    branch: pm/pr-merged\n"
+            "  - id: pr-closed\n"
+            "    title: Closed PR\n"
+            "    status: closed\n"
+            "    branch: pm/pr-closed\n"
+            "  - id: pr-qa\n"
+            "    title: QA PR\n"
+            "    status: qa\n"
+            "    branch: pm/pr-qa\n"
+        )
+
+        workdir = tmp_path / "workdir"
+        workdir.mkdir()
+        (workdir / ".git").mkdir()
+
+        data = store.load(root)
+        data["prs"][2]["workdir"] = str(workdir)
+        store.save(data, root)
+
+        mock_backend = MagicMock()
+        mock_backend.is_merged.return_value = False
+
+        with patch("pm_core.pr_sync.get_backend", return_value=mock_backend), \
+             patch("pm_core.git_ops.is_git_repo", return_value=True):
+            pr_sync.sync_prs(root, force=True)
+
+        # Only qa PR should be checked (merged/closed are skipped)
+        assert mock_backend.is_merged.call_count == 1
+
+
+# ---------------------------------------------------------------------------
+# PR entries with no usable id must not raise out of a sync
+# ---------------------------------------------------------------------------
+
+class TestSyncIgnoresUnusablePrEntries:
+    """A partial/externally written project.yaml can hold a PR mapping with
+    a status but no ``id``.  Both sync loops index PRs by id (directly and
+    through ``graph.ready_prs``), so such an entry used to raise
+    ``KeyError: 'id'`` — the TUI catches it and logs a traceback every sync
+    interval (pr-fd581ec).
+    """
+
+    def _root(self, tmp_path, prs, backend="local"):
+        root = tmp_path / "pm"
+        root.mkdir()
+        workdir = tmp_path / "workdir"
+        workdir.mkdir()
+        (workdir / ".git").mkdir()
+        for pr in prs:
+            if isinstance(pr, dict) and pr.get("id"):
+                pr.setdefault("workdir", str(workdir))
+                pr.setdefault("branch", "pm/x")
+        store.save({
+            "project": {"name": "test-project", "repo": str(tmp_path),
+                        "base_branch": "master", "backend": backend},
+            "prs": prs,
+        }, root)
+        return root
+
+    @pytest.mark.parametrize("bad_entry", [
+        {"status": "merged", "title": "no id"},
+        {"status": "pending", "title": "no id", "depends_on": ["pr-a"]},
+        {"status": "in_review", "title": "no id", "depends_on": ["pr-a"]},
+        {"id": 7, "status": "pending", "title": "numeric id"},
+        {"id": "", "status": "pending", "title": "empty id"},
+    ])
+    def test_sync_prs_ignores_entry_without_usable_id(self, tmp_path, bad_entry):
+        root = self._root(tmp_path, [
+            {"id": "pr-a", "title": "A", "status": "in_progress"},
+            bad_entry,
+        ])
+        with patch("pm_core.git_ops.is_git_repo", return_value=True):
+            result = pr_sync.sync_prs(root, force=True)
+        assert result.synced is True
+        # An id-less entry can never be launched, so it is not "ready".
+        assert [p["id"] for p in result.ready_prs] == []
+
+    def test_sync_from_github_ignores_entry_without_usable_id(self, tmp_path):
+        root = self._root(tmp_path, [
+            {"id": "pr-a", "title": "A", "status": "pending",
+             "gh_pr_number": 101},
+            {"status": "in_review", "title": "no id", "gh_pr_number": 102},
+        ], backend="github")
+        with patch("pm_core.pr_sync.gh_ops.get_pr_state",
+                   return_value={"state": "OPEN", "isDraft": True,
+                                 "mergedAt": None}):
+            result = pr_sync.sync_from_github(root)
+        assert result.synced is True
+        assert result.status_updates == {"pr-a": "in_progress"}
+
+    def test_usable_prs_filters_unusable_entries(self):
+        from pm_core.pr_utils import usable_prs
+
+        prs = [{"id": "pr-a"}, {"id": 7}, {"title": "no id"}, {"id": ""},
+               "not-a-mapping", None]
+        assert usable_prs(prs) == [{"id": "pr-a"}]
+        assert usable_prs(None) == []
+        assert usable_prs([]) == []

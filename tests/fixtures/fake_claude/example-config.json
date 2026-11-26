@@ -1,0 +1,16 @@
+{
+  "_all": {},
+
+  "review": { "verdicts": ["NEEDS_WORK", "PASS"] },
+
+  "qa_planning": {
+    "verdicts": ["QA_PLAN"],
+    "body": "SCENARIO 1: Example scenario\nFOCUS: example behaviour\nINSTRUCTION: none\nSTEPS:\n  GIVEN a throwaway project\n  WHEN the loop runs\n  THEN the scripted verdict surfaces"
+  },
+  "qa_concretize": { "verdicts": ["REFINED_STEPS"] },
+  "qa_scenario": { "verdicts": { "PASS": 100 } },
+  "qa_verification": { "verdicts": { "VERIFIED": 100 } },
+  "qa_finalize": { "verdicts": { "FINALIZE_DONE": 100 } },
+
+  "watcher": { "verdicts": [{ "verdict": "READY", "delay": 1 }] }
+}

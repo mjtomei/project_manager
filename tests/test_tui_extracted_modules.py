@@ -126,9 +126,9 @@ class TestPrViewImports:
         sig = inspect.signature(start_pr)
         assert "app" in sig.parameters
 
-    def test_done_pr(self):
-        from pm_core.tui.pr_view import done_pr
-        sig = inspect.signature(done_pr)
+    def test_review_pr(self):
+        from pm_core.tui.pr_view import review_pr
+        sig = inspect.signature(review_pr)
         assert "app" in sig.parameters
 
     def test_hide_plan(self):

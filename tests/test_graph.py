@@ -289,7 +289,8 @@ class TestRenderStaticGraph:
     def test_status_icons(self):
         for status, icon in [
             ("pending", "⏳"), ("in_progress", "🔨"),
-            ("in_review", "👀"), ("merged", "✅"), ("blocked", "🚫"),
+            ("in_review", "👀"), ("qa", "🧪"),
+            ("merged", "✅"), ("closed", "🚫"), ("blocked", "🚫"),
         ]:
             prs = [{"id": "x", "title": "T", "status": status}]
             assert icon in render_static_graph(prs)

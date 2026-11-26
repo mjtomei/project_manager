@@ -15,6 +15,7 @@ from pm_core.paths import pane_registry_dir, debug_dir
 from pm_core.cli import cli
 from pm_core.cli.helpers import (
     _find_tui_pane,
+    _find_live_tui_pane,
     state_root,
 )
 
@@ -22,15 +23,104 @@ from pm_core.cli.helpers import (
 @cli.command("_tui", hidden=True)
 def tui_cmd():
     """Launch the interactive TUI (internal command)."""
-    from pm_core.tui.app import ProjectManagerApp
-    app = ProjectManagerApp()
-    app.run()
+    import sys
+    import traceback
+    from pm_core.paths import configure_logger, command_log_file
+
+    # Redirect stderr to a file so crash output is preserved after the pane dies
+    stderr_path = debug_dir() / "tui-stderr.log"
+    stderr_file = open(stderr_path, "a")
+    sys.stderr = stderr_file
+
+    log = configure_logger("pm.tui.crash")
+
+    # Protect the startup window from IPC signals: until the real asyncio
+    # handlers are installed, the default action for SIGUSR1/SIGUSR2 is
+    # terminate.  These no-ops are replaced on mount.
+    from pm_core.tui_pidfile import install_signal_guards
+    install_signal_guards()
+
+    # Catch SystemExit raised in threads (e.g. run_in_executor callbacks)
+    import threading
+    _orig_excepthook = threading.excepthook
+    def _thread_excepthook(args):
+        if args.exc_type is SystemExit:
+            tb = "".join(traceback.format_exception(args.exc_type, args.exc_value, args.exc_value.__traceback__))
+            log.error("Thread %s raised SystemExit(%s):\n%s", args.thread, args.exc_value.code, tb)
+            stderr_file.write(f"\n--- Thread SystemExit ---\n{tb}\n")
+            stderr_file.flush()
+        elif _orig_excepthook:
+            _orig_excepthook(args)
+    threading.excepthook = _thread_excepthook
+
+    try:
+        # Install Claude Code hooks so pm can receive idle_prompt / Stop
+        # events from every Claude process launched during this session.
+        # Refuses to clobber existing third-party hooks — surfaces the
+        # conflict to the user instead.
+        from pm_core.hook_install import ensure_hooks_installed, HookConflictError
+        try:
+            ensure_hooks_installed()
+        except HookConflictError as e:
+            stderr_file.write(f"\n--- Hook install conflict ---\n{e}\n")
+            stderr_file.flush()
+            log.error("hook install conflict: %s", e)
+            raise
+        from pm_core.tui.app import ProjectManagerApp, current_session_name
+        from pm_core.tui_pidfile import (
+            TuiPidfileConflict, claim_tui_pidfile, pidfile_path,
+        )
+
+        # Claim the session's pidfile before the app starts so a second
+        # TUI for the same session is refused with a visible message
+        # (stderr is redirected to tui-stderr.log, so print to stdout).
+        claim = None
+        session = current_session_name()
+        if session:
+            try:
+                claim = claim_tui_pidfile(pidfile_path(session), session)
+            except TuiPidfileConflict as e:
+                log.error("TUI startup refused: %s", e)
+                print(str(e), flush=True)
+                raise SystemExit(2)
+            except OSError as e:
+                log.error("Could not claim TUI pidfile (continuing without "
+                          "external IPC): %s", e)
+        app = ProjectManagerApp(pidfile_claim=claim)
+        app.run()
+        startup_error = getattr(app, "_startup_error", None)
+        if startup_error:
+            print(startup_error, flush=True)
+            raise SystemExit(2)
+    except SystemExit as e:
+        tb = traceback.format_exc()
+        log.error("TUI exited with SystemExit(%s):\n%s", e.code, tb)
+        stderr_file.write(f"\n--- TUI SystemExit({e.code}) ---\n{tb}\n")
+        stderr_file.flush()
+        raise
+    except Exception:
+        tb = traceback.format_exc()
+        log.error("TUI crashed with unhandled exception:\n%s", tb)
+        stderr_file.write(f"\n--- TUI CRASH ---\n{tb}\n")
+        stderr_file.flush()
+        raise
+    finally:
+        sys.stderr = sys.__stderr__
+        stderr_file.close()
 
 
-@cli.group()
-def tui():
-    """Control and monitor the TUI from the command line."""
-    pass
+@cli.group(invoke_without_command=True)
+@click.pass_context
+def tui(ctx):
+    """Launch the interactive TUI (alias for ``pm session``).
+
+    Subcommands control and monitor a running TUI from the command line.
+    """
+    if ctx.invoked_subcommand is not None:
+        return
+    from pm_core.cli.session import _session_start
+    _session_start(share_global=False, share_group=None,
+                   start_dir=None, disconnect_others=False)
 
 
 TUI_HISTORY_DIR = pane_registry_dir() / "tui-history"
@@ -94,7 +184,7 @@ def tui_view(no_history: bool, session: str | None):
     Captures the current TUI pane content and displays it.
     Also adds the frame to history for later review (unless --no-history).
     """
-    pane_id, sess = _find_tui_pane(session)
+    pane_id, sess = _find_live_tui_pane(session)
     if not pane_id:
         click.echo("No TUI pane found. Is there a pm tmux session running?", err=True)
         raise SystemExit(1)
@@ -161,7 +251,7 @@ def tui_send(keys: str, session: str | None):
       pm tui send C-c        # Press Ctrl+C
     """
     import subprocess
-    pane_id, sess = _find_tui_pane(session)
+    pane_id, sess = _find_live_tui_pane(session)
     if not pane_id:
         click.echo("No TUI pane found. Is there a pm tmux session running?", err=True)
         raise SystemExit(1)
@@ -178,21 +268,80 @@ TUI Keybindings:
 
 Navigation:
   Up/Down, j/k     Navigate PR list
+  Left/Right, h/l  Navigate tree columns
+  J/K              Jump to next/prev plan
   Enter            Select/expand PR
 
-Actions:
-  g                Launch guide pane
+PR Actions:
+  s                Start selected PR
+  d                Review (zz d: loop)
+  g                Merge PR
+  e                Edit selected PR
+  t                Start QA (z t: fresh, zz t: loop)
+
+Views:
+  p                Toggle plans view
+  q                Toggle QA library view
   n                Open notes
-  c                Launch Claude for selected PR
-  r                Refresh state
-
-Guide Mode:
-  x                Dismiss guide view
-
-General:
-  q                Quit TUI
+  c                Launch Claude session
+  L                View TUI log
   ?                Show help
+
+Auto-start (multiple targets; also `pm autostart --help`):
+  O                Add selected PR as target, wait for merge (repeat: re-arm)
+  A                Toggle selected PR as auto-merge target (no PR: all off)
+  a                Runs popup: targets + running/queued deps (Enter/f focus,
+                   r refresh, Esc/q/a close)
+  /autostart add|remove ID...   Command bar (also: list, status, clear)
+
+Other:
+  r                Refresh / sync
+  b                Rebalance panes
+  ctrl+b d         Detach from session
+
+Targets are additive — A/O/`autostart target X` do not replace the previous
+target. Bare `autostart` only turns auto-start off. There is no all-PR
+mode: auto-start runs only the explicit targets you add and their
+dependency closures.
 """)
+
+
+@tui.command("restart")
+@click.option("--breadcrumb", is_flag=True,
+              help="Write merge-restart marker to preserve auto-start and review loop state")
+@click.option("--session", "-s", default=None, help="Specify pm session name")
+def tui_restart(breadcrumb: bool, session: str | None):
+    """Restart the TUI.
+
+    Sends Ctrl+R to the TUI pane. With --breadcrumb, writes a
+    merge-restart marker so the TUI preserves auto-start and review loop
+    state across the restart (same behavior as merge-triggered restarts).
+
+    Examples:
+        pm tui restart                  # Clean restart (no state preserved)
+        pm tui restart --breadcrumb     # Restart preserving loop state
+    """
+    pane_id, sess = _find_live_tui_pane(session)
+    if not pane_id:
+        click.echo("No TUI pane found. Is there a pm tmux session running?", err=True)
+        raise SystemExit(1)
+
+    marker = None
+    if breadcrumb:
+        from pm_core import tui_pidfile
+        # Scoped to the session whose TUI is being restarted: the marker is
+        # a single shared file, and a concurrent restart in another session
+        # must not consume it (nor preserve its own state because of it).
+        marker = tui_pidfile.write_merge_restart_marker(sess)
+        click.echo("Wrote merge-restart marker for state persistence")
+
+    try:
+        tmux_mod.send_keys_literal(pane_id, "C-r")
+    except Exception:
+        if marker is not None:
+            tui_pidfile.clear_merge_restart_marker(sess)
+        raise
+    click.echo(f"Sent restart to TUI pane {pane_id} (session: {sess})")
 
 
 @tui.command("clear-history")
@@ -371,137 +520,3 @@ def tui_clear_frames(session: str | None):
         click.echo(f"No frames to clear for session {sess}.")
 
 
-@tui.command("test")
-@click.argument("test_id", required=False)
-@click.option("--list", "list_tests_flag", is_flag=True, help="List available tests")
-@click.option("--session", "-s", default=None, help="Specify pm session name")
-@click.option("--file-bugs", is_flag=True, default=False, help="Create PRs for any bugs found")
-@click.option("--fix-bugs", is_flag=True, default=False, help="Fix bugs found during testing")
-def tui_test(test_id: str | None, list_tests_flag: bool, session: str | None,
-             file_bugs: bool, fix_bugs: bool):
-    """Run TUI regression tests using Claude as the test executor.
-
-    These tests launch Claude with a specific test prompt that instructs it
-    to interact with the TUI and tmux, verify behavior, and report results.
-
-    Examples:
-        pm tui test --list              # List available tests
-        pm tui test pane-layout         # Run pane layout test
-        pm tui test session-resume      # Run session resume test
-    """
-    from pm_core import tui_tests
-
-    if list_tests_flag:
-        tests = tui_tests.list_tests()
-        click.echo("Available TUI tests:\n")
-        for t in tests:
-            click.echo(f"  {t['id']:20} {t['name']}")
-            click.echo(f"  {' '*20} {t['description']}\n")
-        return
-
-    if not test_id:
-        click.echo("Usage: pm tui test <test_id>")
-        click.echo("Run 'pm tui test --list' to see available tests.")
-        raise SystemExit(1)
-
-    test_info = tui_tests.ALL_TESTS.get(test_id)
-    if not test_info:
-        click.echo(f"Unknown test: {test_id}", err=True)
-        click.echo("Run 'pm tui test --list' to see available tests.")
-        raise SystemExit(1)
-
-    prompt = test_info["prompt"]
-    init_fn = test_info.get("init")
-    cleanup_fn = test_info.get("cleanup")
-    init_context = None
-    cwd = None
-
-    if init_fn:
-        # Test provides its own setup (e.g. creating a git repo).
-        # Claude will start the session itself during the test.
-        click.echo(f"Running init for test: {test_info['name']}...")
-        init_context = init_fn()
-        sess = init_context["session_name"]
-        pane_id = init_context.get("pane_id")
-        cwd = init_context["cwd"]
-        # Format placeholders into prompt
-        prompt_ctx = init_context.get("prompt_context", {})
-        prompt = prompt.format(**prompt_ctx)
-    else:
-        # Existing flow — find a running TUI session
-        pane_id, sess = _find_tui_pane(session)
-        if not sess:
-            click.echo("No pm tmux session found. Start one with 'pm session'.", err=True)
-            raise SystemExit(1)
-
-    # Build bug-handling addendum
-    bug_addendum = ""
-    if file_bugs:
-        bug_addendum = """
-
-## Bug Filing
-
-After completing all test scenarios, if you found ANY bugs or unexpected behavior:
-
-1. For each bug, create a PR entry using: `pm pr add --title "<short bug title>" --description "<what's wrong and how to reproduce>" --plan plan-001`
-2. Use clear, actionable titles like "Fix zoom not applied after rebalance in mobile mode"
-3. Include reproduction steps in the description
-4. After creating all bug PRs, list them in your report under a "Filed PRs" section
-5. If no bugs were found, note "No bugs found, no PRs filed"
-"""
-    elif fix_bugs:
-        bug_addendum = """
-
-## Bug Fixing
-
-After completing all test scenarios, if you found ANY bugs or unexpected behavior:
-
-1. First, complete your full test report as described above
-2. Then, for each bug you found, fix it:
-   a. Identify the source file and the root cause
-   b. Edit the file to fix the bug
-   c. Re-run the relevant test scenario to verify the fix
-   d. Note what you changed in a "Fixes Applied" section of your report
-3. Work through bugs one at a time, verifying each fix before moving to the next
-4. If a fix is unclear or risky, skip it and note why
-5. After all fixes, run `python3 -m pytest tests/ -x -q` to check for regressions
-6. If no bugs were found, note "No bugs found, no fixes needed"
-"""
-
-    # Add session context to the prompt
-    pane_line = f"\nThe TUI pane ID is: {pane_id}" if pane_id else ""
-    full_prompt = f"""\
-## Session Context
-
-You are testing against tmux session: {sess}{pane_line}
-
-To interact with this session, use commands like:
-- pm tui view -s {sess}
-- pm tui send <keys> -s {sess}
-- tmux list-panes -t {sess} -F "#{{pane_id}} #{{pane_width}}x#{{pane_height}} #{{pane_current_command}}"
-- cat ~/.pm/pane-registry/{sess}.json
-
-{prompt}
-{bug_addendum}
-"""
-
-    click.echo(f"Running test: {test_info['name']}")
-    click.echo(f"Session: {sess}")
-    click.echo(f"Claude cwd: {cwd}")
-    click.echo("-" * 60)
-
-    # Launch Claude with the test prompt (no session resume for tests)
-    from pm_core.claude_launcher import launch_claude
-    try:
-        root = state_root()
-    except FileNotFoundError:
-        root = Path.home() / ".pm"
-    rc = 1
-    try:
-        rc = launch_claude(full_prompt, session_key=f"tui-test:{test_id}",
-                           pm_root=root, cwd=cwd, resume=False)
-    finally:
-        if cleanup_fn and init_context:
-            click.echo("Cleaning up test session...")
-            cleanup_fn(init_context)
-    raise SystemExit(rc)

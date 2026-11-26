@@ -1,6 +1,5 @@
 """Tests for PR notes feature — hash-based note IDs, CLI commands, prompt gen."""
 
-import os
 import re
 from unittest.mock import patch
 
@@ -8,7 +7,11 @@ from click.testing import CliRunner
 
 from pm_core import store
 from pm_core.cli import cli
-from pm_core.prompt_gen import generate_prompt, generate_review_prompt
+from pm_core.prompt_gen import (
+    _format_pr_notes,
+    generate_prompt, generate_review_prompt,
+    generate_qa_planner_prompt, generate_qa_child_prompt,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -328,26 +331,15 @@ class TestPrEditNotes:
         root = _make_state(tmp_path, notes=notes)
         runner = CliRunner()
 
-        # Simulate editor that saves the template unchanged
-        def fake_editor(args):
-            # args is [editor_path, tmp_file] — just leave file as-is
-            return 0
+        def fake_watched_editor(template, on_save, **kwargs):
+            # Save unchanged template — should detect no changes
+            on_save(template)
+            return 0, True
 
-        with patch("subprocess.call", side_effect=fake_editor):
-            # Touch the file to update mtime (so the "no changes" check is bypassed)
-            original_call = os.path.getmtime
+        with patch("pm_core.editor.run_watched_editor", side_effect=fake_watched_editor):
+            result = runner.invoke(cli, ["-C", str(root), "pr", "edit", "pr-001"])
 
-            def patched_getmtime(path):
-                result = original_call(path)
-                patched_getmtime.call_count = getattr(patched_getmtime, 'call_count', 0) + 1
-                if patched_getmtime.call_count == 1:
-                    return result - 1  # first call returns older mtime
-                return result
-
-            with patch("os.path.getmtime", side_effect=patched_getmtime):
-                result = runner.invoke(cli, ["-C", str(root), "pr", "edit", "pr-001"])
-
-        # Notes should be unchanged — either "No changes" or notes not in changes list
+        # Notes should be unchanged
         data = store.load(root)
         pr = store.get_pr(data, "pr-001")
         assert len(pr["notes"]) == 2
@@ -361,28 +353,13 @@ class TestPrEditNotes:
         root = _make_state(tmp_path)
         runner = CliRunner()
 
-        def fake_editor(args):
-            # args is [editor_path, tmp_file] — inject a new note
-            tmp_file = args[1]
-            with open(tmp_file) as f:
-                content = f.read()
-            content = content.replace("# (no notes)\n", "- Brand new note\n")
-            with open(tmp_file, "w") as f:
-                f.write(content)
-            return 0
+        def fake_watched_editor(template, on_save, **kwargs):
+            content = template.replace("# (no notes)\n", "- Brand new note\n")
+            on_save(content)
+            return 0, True
 
-        with patch("subprocess.call", side_effect=fake_editor):
-            original_call = os.path.getmtime
-
-            def patched_getmtime(path):
-                result = original_call(path)
-                patched_getmtime.call_count = getattr(patched_getmtime, 'call_count', 0) + 1
-                if patched_getmtime.call_count == 1:
-                    return result - 1
-                return result
-
-            with patch("os.path.getmtime", side_effect=patched_getmtime):
-                result = runner.invoke(cli, ["-C", str(root), "pr", "edit", "pr-001"])
+        with patch("pm_core.editor.run_watched_editor", side_effect=fake_watched_editor):
+            result = runner.invoke(cli, ["-C", str(root), "pr", "edit", "pr-001"])
 
         assert result.exit_code == 0
         data = store.load(root)
@@ -403,31 +380,16 @@ class TestPrEditNotes:
         root = _make_state(tmp_path, notes=notes)
         runner = CliRunner()
 
-        def fake_editor(args):
-            # Add a third note to trigger the reconciliation path
-            tmp_file = args[1]
-            with open(tmp_file) as f:
-                content = f.read()
-            content = content.replace(
+        def fake_watched_editor(template, on_save, **kwargs):
+            content = template.replace(
                 "# Description (everything below this line):",
                 "- Third note\n\n# Description (everything below this line):"
             )
-            with open(tmp_file, "w") as f:
-                f.write(content)
-            return 0
+            on_save(content)
+            return 0, True
 
-        with patch("subprocess.call", side_effect=fake_editor):
-            original_call = os.path.getmtime
-
-            def patched_getmtime(path):
-                result = original_call(path)
-                patched_getmtime.call_count = getattr(patched_getmtime, 'call_count', 0) + 1
-                if patched_getmtime.call_count == 1:
-                    return result - 1
-                return result
-
-            with patch("os.path.getmtime", side_effect=patched_getmtime):
-                result = runner.invoke(cli, ["-C", str(root), "pr", "edit", "pr-001"])
+        with patch("pm_core.editor.run_watched_editor", side_effect=fake_watched_editor):
+            result = runner.invoke(cli, ["-C", str(root), "pr", "edit", "pr-001"])
 
         assert result.exit_code == 0
         data = store.load(root)
@@ -442,6 +404,152 @@ class TestPrEditNotes:
 # ---------------------------------------------------------------------------
 # Prompt generation
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Workdir note merging (_format_pr_notes)
+# ---------------------------------------------------------------------------
+
+def _make_workdir_state(tmp_path, pr_id, notes):
+    """Create a pm/project.yaml inside tmp_path with a single PR carrying notes."""
+    pr = {
+        "id": pr_id,
+        "plan": None,
+        "title": "Test PR",
+        "branch": f"pm/{pr_id}",
+        "status": "in_progress",
+        "depends_on": [],
+        "description": "desc",
+        "agent_machine": None,
+        "gh_pr": None,
+        "gh_pr_number": None,
+        "notes": notes,
+    }
+    data = {
+        "project": {"name": "test", "repo": str(tmp_path), "base_branch": "master"},
+        "plans": [],
+        "prs": [pr],
+    }
+    pm_dir = tmp_path / "pm"
+    pm_dir.mkdir(exist_ok=True)
+    store.save(data, pm_dir)
+    return str(tmp_path)
+
+
+class TestFormatPrNotesWorkdirMerge:
+    """Tests for _format_pr_notes merging notes from main + workdir."""
+
+    def test_no_workdir(self):
+        """Without workdir, behaves as before."""
+        pr = {"id": "pr-001", "notes": [
+            {"id": "n1", "text": "Main note", "created_at": "2026-01-01T00:00:00Z"},
+        ]}
+        result = _format_pr_notes(pr)
+        assert "Main note" in result
+        assert "## PR Notes" in result
+
+    def test_workdir_adds_unique_notes(self, tmp_path):
+        """Notes only in the workdir are included in the merged output."""
+        workdir = _make_workdir_state(tmp_path, "pr-001", [
+            {"id": "wd-1", "text": "Workdir note", "created_at": "2026-01-02T00:00:00Z"},
+        ])
+        pr = {"id": "pr-001", "notes": [
+            {"id": "n1", "text": "Main note", "created_at": "2026-01-01T00:00:00Z"},
+        ]}
+        result = _format_pr_notes(pr, workdir=workdir)
+        assert "Main note" in result
+        assert "Workdir note" in result
+
+    def test_dedup_prefers_later_last_edited(self, tmp_path):
+        """When both have the same note ID, the one with later last_edited wins."""
+        workdir = _make_workdir_state(tmp_path, "pr-001", [
+            {"id": "n1", "text": "Updated in workdir", "created_at": "2026-01-01T00:00:00Z",
+             "last_edited": "2026-01-03T00:00:00Z"},
+        ])
+        pr = {"id": "pr-001", "notes": [
+            {"id": "n1", "text": "Original in main", "created_at": "2026-01-01T00:00:00Z",
+             "last_edited": "2026-01-01T00:00:00Z"},
+        ]}
+        result = _format_pr_notes(pr, workdir=workdir)
+        assert "Updated in workdir" in result
+        assert "Original in main" not in result
+
+    def test_dedup_main_wins_when_newer(self, tmp_path):
+        """When main's last_edited is later, main version is kept."""
+        workdir = _make_workdir_state(tmp_path, "pr-001", [
+            {"id": "n1", "text": "Older workdir version", "created_at": "2026-01-01T00:00:00Z",
+             "last_edited": "2026-01-01T00:00:00Z"},
+        ])
+        pr = {"id": "pr-001", "notes": [
+            {"id": "n1", "text": "Newer main version", "created_at": "2026-01-01T00:00:00Z",
+             "last_edited": "2026-01-05T00:00:00Z"},
+        ]}
+        result = _format_pr_notes(pr, workdir=workdir)
+        assert "Newer main version" in result
+        assert "Older workdir version" not in result
+
+    def test_dedup_falls_back_to_created_at(self, tmp_path):
+        """When last_edited is missing, falls back to created_at for comparison."""
+        workdir = _make_workdir_state(tmp_path, "pr-001", [
+            {"id": "n1", "text": "Workdir version", "created_at": "2026-01-05T00:00:00Z"},
+        ])
+        pr = {"id": "pr-001", "notes": [
+            {"id": "n1", "text": "Main version", "created_at": "2026-01-01T00:00:00Z"},
+        ]}
+        result = _format_pr_notes(pr, workdir=workdir)
+        assert "Workdir version" in result
+        assert "Main version" not in result
+
+    def test_sorted_by_created_at(self, tmp_path):
+        """Merged notes are sorted by created_at."""
+        workdir = _make_workdir_state(tmp_path, "pr-001", [
+            {"id": "wd-1", "text": "Middle note", "created_at": "2026-01-02T00:00:00Z"},
+        ])
+        pr = {"id": "pr-001", "notes": [
+            {"id": "n1", "text": "First note", "created_at": "2026-01-01T00:00:00Z"},
+            {"id": "n2", "text": "Last note", "created_at": "2026-01-03T00:00:00Z"},
+        ]}
+        result = _format_pr_notes(pr, workdir=workdir)
+        first_pos = result.index("First note")
+        middle_pos = result.index("Middle note")
+        last_pos = result.index("Last note")
+        assert first_pos < middle_pos < last_pos
+
+    def test_workdir_missing_path(self):
+        """Non-existent workdir path degrades gracefully."""
+        pr = {"id": "pr-001", "notes": [
+            {"id": "n1", "text": "Main note", "created_at": "2026-01-01T00:00:00Z"},
+        ]}
+        result = _format_pr_notes(pr, workdir="/nonexistent/path")
+        assert "Main note" in result
+
+    def test_workdir_no_matching_pr(self, tmp_path):
+        """Workdir has project.yaml but not this PR — still works."""
+        workdir = _make_workdir_state(tmp_path, "pr-OTHER", [
+            {"id": "wd-1", "text": "Other PR note", "created_at": "2026-01-02T00:00:00Z"},
+        ])
+        pr = {"id": "pr-001", "notes": [
+            {"id": "n1", "text": "Main note", "created_at": "2026-01-01T00:00:00Z"},
+        ]}
+        result = _format_pr_notes(pr, workdir=workdir)
+        assert "Main note" in result
+        assert "Other PR note" not in result
+
+    def test_both_empty_returns_empty(self, tmp_path):
+        """Both sources with no notes returns empty string."""
+        workdir = _make_workdir_state(tmp_path, "pr-001", [])
+        pr = {"id": "pr-001", "notes": []}
+        result = _format_pr_notes(pr, workdir=workdir)
+        assert result == ""
+
+    def test_only_workdir_has_notes(self, tmp_path):
+        """Main has no notes but workdir does — workdir notes appear."""
+        workdir = _make_workdir_state(tmp_path, "pr-001", [
+            {"id": "wd-1", "text": "Workdir only", "created_at": "2026-01-01T00:00:00Z"},
+        ])
+        pr = {"id": "pr-001"}
+        result = _format_pr_notes(pr, workdir=workdir)
+        assert "Workdir only" in result
+
 
 class TestPromptGenNotes:
     def _data(self, notes=None):
@@ -465,14 +573,16 @@ class TestPromptGenNotes:
             "prs": [pr],
         }
 
-    @patch("pm_core.prompt_gen.notes.notes_section", return_value="")
+    @patch("pm_core.prompt_gen.notes.notes_for_prompt", return_value=("", ""))
     @patch("pm_core.prompt_gen.store.find_project_root")
     def test_no_notes(self, mock_root, mock_notes):
         data = self._data()
         prompt = generate_prompt(data, "pr-001")
-        assert "PR Notes" not in prompt
+        # The rendered-notes section is absent; the always-present handoff
+        # block ("## PR Notes — Handoff Channel") is not the notes section.
+        assert "\n## PR Notes\n" not in prompt
 
-    @patch("pm_core.prompt_gen.notes.notes_section", return_value="")
+    @patch("pm_core.prompt_gen.notes.notes_for_prompt", return_value=("", ""))
     @patch("pm_core.prompt_gen.store.find_project_root")
     def test_with_notes(self, mock_root, mock_notes):
         data = self._data(notes=[
@@ -480,11 +590,11 @@ class TestPromptGenNotes:
             {"id": "note-def", "text": "Don't touch auth module", "created_at": "2026-01-16T14:00:00Z"},
         ])
         prompt = generate_prompt(data, "pr-001")
-        assert "## PR Notes" in prompt
+        assert "\n## PR Notes\n" in prompt
         assert "Use the new API" in prompt
         assert "Don't touch auth module" in prompt
 
-    @patch("pm_core.prompt_gen.notes.notes_section", return_value="")
+    @patch("pm_core.prompt_gen.notes.notes_for_prompt", return_value=("", ""))
     @patch("pm_core.prompt_gen.store.find_project_root")
     def test_prompt_includes_timestamps(self, mock_root, mock_notes):
         data = self._data(notes=[
@@ -493,7 +603,7 @@ class TestPromptGenNotes:
         prompt = generate_prompt(data, "pr-001")
         assert "2026-01-15T10:30:00Z" in prompt
 
-    @patch("pm_core.prompt_gen.notes.notes_section", return_value="")
+    @patch("pm_core.prompt_gen.notes.notes_for_prompt", return_value=("", ""))
     @patch("pm_core.prompt_gen.store.find_project_root")
     def test_prompt_handles_missing_timestamp(self, mock_root, mock_notes):
         """Legacy notes without timestamps still render."""
@@ -506,14 +616,14 @@ class TestPromptGenNotes:
     def test_review_no_notes(self):
         data = self._data()
         prompt = generate_review_prompt(data, "pr-001")
-        assert "PR Notes" not in prompt
+        assert "\n## PR Notes\n" not in prompt
 
     def test_review_with_notes(self):
         data = self._data(notes=[
             {"id": "note-abc", "text": "Check edge cases", "created_at": "2026-01-15T10:30:00Z"},
         ])
         prompt = generate_review_prompt(data, "pr-001")
-        assert "## PR Notes" in prompt
+        assert "\n## PR Notes\n" in prompt
         assert "Check edge cases" in prompt
         assert "2026-01-15T10:30:00Z" in prompt
 
@@ -524,5 +634,186 @@ class TestPromptGenNotes:
         ])
         prompt = generate_review_prompt(data, "pr-001")
         assert "Legacy note" in prompt
+
+    @patch("pm_core.prompt_gen.notes.notes_for_prompt", return_value=("", ""))
+    @patch("pm_core.qa_instructions.instruction_summary_for_prompt", return_value="No instructions.")
+    @patch("pm_core.prompt_gen.store.find_project_root")
+    def test_qa_planner_no_notes(self, mock_root, mock_instr, mock_notes):
+        data = self._data()
+        prompt = generate_qa_planner_prompt(data, "pr-001")
+        assert "\n## PR Notes\n" not in prompt
+
+    @patch("pm_core.prompt_gen.notes.notes_for_prompt", return_value=("", ""))
+    @patch("pm_core.qa_instructions.instruction_summary_for_prompt", return_value="No instructions.")
+    @patch("pm_core.prompt_gen.store.find_project_root")
+    def test_qa_planner_with_notes(self, mock_root, mock_instr, mock_notes):
+        """QA planner should see prior QA results from PR notes."""
+        data = self._data(notes=[
+            {"id": "note-abc", "text": "QA NEEDS_WORK: Login: NEEDS_WORK", "created_at": "2026-01-15T10:30:00Z"},
+        ])
+        prompt = generate_qa_planner_prompt(data, "pr-001")
+        assert "\n## PR Notes\n" in prompt
+        assert "QA NEEDS_WORK: Login: NEEDS_WORK" in prompt
+        assert "2026-01-15T10:30:00Z" in prompt
+
+    def test_qa_child_no_notes(self):
+        from pm_core.qa_loop import QAScenario
+        data = self._data()
+        scenario = QAScenario(index=1, title="Test", focus="testing", steps="Run tests")
+        prompt = generate_qa_child_prompt(data, "pr-001", scenario, "/tmp/workdir")
+        assert "\n## PR Notes\n" not in prompt
+
+    def test_qa_child_with_notes(self):
+        """QA child sessions should see prior QA results from PR notes."""
+        from pm_core.qa_loop import QAScenario
+        data = self._data(notes=[
+            {"id": "note-abc", "text": "QA PASS: All passed", "created_at": "2026-01-15T10:30:00Z"},
+        ])
+        scenario = QAScenario(index=1, title="Test", focus="testing", steps="Run tests")
+        prompt = generate_qa_child_prompt(data, "pr-001", scenario, "/tmp/workdir")
+        assert "\n## PR Notes\n" in prompt
+        assert "QA PASS: All passed" in prompt
+
+
+class TestPrNotesHandoffGuidance:
+    """The ungated 'PR Notes — Handoff Channel' block must reach every work
+    session, including the container / non-TUI path (session_name=None).
+    """
+
+    def _data(self):
+        pr = {
+            "id": "pr-xyz",
+            "plan": None,
+            "title": "Handoff PR",
+            "branch": "pm/pr-xyz",
+            "status": "in_progress",
+            "depends_on": [],
+            "description": "Do the thing",
+            "agent_machine": None,
+            "gh_pr": None,
+            "gh_pr_number": None,
+        }
+        return {
+            "project": {"name": "test", "repo": "/tmp/fake", "base_branch": "master", "backend": "local"},
+            "plans": [],
+            "prs": [pr],
+        }
+
+    def _assert_handoff(self, prompt, pr_id="pr-xyz"):
+        # Heading present
+        assert "## PR Notes — Handoff Channel" in prompt
+        # Both handoff directions
+        assert f"pm pr note add {pr_id} '<text>'" in prompt  # same-PR
+        assert "pm pr note add <other-pr-id> '<text>'" in prompt  # cross-PR
+        # Prefer pm notes over GitHub
+        assert "Prefer pm PR notes over GitHub" in prompt
+        # Workdir -> master -> target-PR propagation is spelled out
+        assert "travels to master when your PR merges" in prompt
+
+    @patch("pm_core.prompt_gen.notes.notes_for_prompt", return_value=("", ""))
+    @patch("pm_core.prompt_gen.store.find_project_root")
+    def test_impl_prompt_has_handoff(self, mock_root, mock_notes):
+        self._assert_handoff(generate_prompt(self._data(), "pr-xyz"))
+
+    def test_review_prompt_has_handoff(self):
+        self._assert_handoff(generate_review_prompt(self._data(), "pr-xyz"))
+
+    @patch("pm_core.prompt_gen.notes.notes_for_prompt", return_value=("", ""))
+    @patch("pm_core.qa_instructions.instruction_summary_for_prompt", return_value="No instructions.")
+    @patch("pm_core.prompt_gen.store.find_project_root")
+    def test_qa_planner_prompt_has_handoff(self, mock_root, mock_instr, mock_notes):
+        self._assert_handoff(generate_qa_planner_prompt(self._data(), "pr-xyz"))
+
+    def test_qa_child_prompt_has_handoff(self):
+        from pm_core.qa_loop import QAScenario
+        scenario = QAScenario(index=1, title="Test", focus="testing", steps="Run tests")
+        self._assert_handoff(
+            generate_qa_child_prompt(self._data(), "pr-xyz", scenario, "/tmp/workdir"))
+
+    @patch("pm_core.prompt_gen.notes.notes_for_prompt", return_value=("", ""))
+    @patch("pm_core.prompt_gen.store.find_project_root")
+    def test_handoff_not_gated_on_session_name(self, mock_root, mock_notes):
+        """Container / non-TUI sessions (session_name=None) still get the
+        guidance — it must not live inside the gated TUI block."""
+        impl = generate_prompt(self._data(), "pr-xyz", session_name=None)
+        review = generate_review_prompt(self._data(), "pr-xyz", session_name=None)
+        assert "## Interacting with the TUI" not in impl  # TUI block is gated off
+        assert "## Interacting with the TUI" not in review
+        self._assert_handoff(impl)
+        self._assert_handoff(review)
+
+
+class TestQAVerdictFinalityGuidance:
+    """A QA scenario worker's PASS/NEEDS_WORK verdict cannot be replaced once
+    recorded, while INPUT_REQUIRED keeps the pane polled for a follow-up
+    after the user answers (pr-2c67d50).  A scenario refiner's decision is
+    one-shot — so cross-run handoff must go through a pm PR note. Review
+    loops re-run per iteration, so they get no such "verdict is final"
+    guidance.
+    """
+
+    def _data(self):
+        pr = {
+            "id": "pr-fin",
+            "plan": None,
+            "title": "Finality PR",
+            "branch": "pm/pr-fin",
+            "status": "qa",
+            "depends_on": [],
+            "description": "Do the thing",
+            "agent_machine": None,
+            "gh_pr": None,
+            "gh_pr_number": None,
+        }
+        return {
+            "project": {"name": "test", "repo": "/tmp/fake", "base_branch": "master", "backend": "local"},
+            "plans": [],
+            "prs": [pr],
+        }
+
+    def test_qa_child_states_verdict_is_final(self):
+        from pm_core.qa_loop import QAScenario
+        scenario = QAScenario(index=1, title="Test", focus="testing", steps="Run tests")
+        with patch("pm_core.prompt_gen.store.find_project_root"):
+            prompt = generate_qa_child_prompt(self._data(), "pr-fin", scenario, "/tmp/workdir")
+        assert "Your Verdict, and When It Is Final" in prompt
+        # PASS/NEEDS_WORK remain terminal...
+        assert "PASS and NEEDS_WORK are final for this run" in prompt
+        assert "there is no re-poll" in prompt
+        # ...while INPUT_REQUIRED keeps the pane polled for a follow-up.
+        assert "INPUT_REQUIRED is **not** final" in prompt
+        assert "follow-up verdict" in prompt
+        assert "next QA run on this PR" in prompt
+        # Points to the handoff channel with the concrete PR id.
+        assert "pm pr note add pr-fin '<text>'" in prompt
+
+    def test_review_prompt_has_no_verdict_finality_block(self):
+        """Review loops accept successive verdicts, so they must NOT carry the
+        QA 'verdict is final' guidance."""
+        prompt = generate_review_prompt(self._data(), "pr-fin")
+        assert "Your Verdict, and When It Is Final" not in prompt
+        assert "Your Verdict Is Final for This Run" not in prompt
+
+    def test_refiner_prompt_one_shot_handoff(self):
+        from pm_core.qa_loop import _build_concretization_prompt, QAScenario
+        scenario = QAScenario(index=1, title="Test", focus="testing", steps="Run tests")
+        prompt = _build_concretization_prompt(
+            scenario, "pm/pr-fin", "master", pr_id="pr-fin")
+        assert "This Decision Is Final" in prompt
+        assert "REFINER_REJECT defers the scenario" in prompt
+        # The refiner stays one-shot, scoped away from the worker's
+        # INPUT_REQUIRED continuation.  (Assert on the collapsed text so a
+        # re-wrap of the prompt source cannot break the test.)
+        assert ("not describe the scenario worker's INPUT_REQUIRED wait"
+                in " ".join(prompt.split()))
+        assert "pm pr note add pr-fin '<text>'" in prompt
+        assert "Prefer pm PR notes over GitHub" in prompt
+        assert "travels to master when this PR merges" in prompt
+
+    def test_refiner_prompt_placeholder_without_pr_id(self):
+        from pm_core.qa_loop import _build_concretization_prompt, QAScenario
+        scenario = QAScenario(index=1, title="Test", focus="testing", steps="Run tests")
+        prompt = _build_concretization_prompt(scenario, "pm/pr-fin", "master")
+        assert "pm pr note add <pr-id> '<text>'" in prompt
 
 

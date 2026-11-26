@@ -716,17 +716,30 @@ class TestActivitySortKey:
     """Tests for the _activity_sort_key used in crossing minimization seeding."""
 
     def test_status_priority_order(self):
-        """in_progress < in_review < pending < merged < closed."""
+        """in_progress < in_review/qa/sign_off < pending < merged < closed."""
         pr_map = {
             "a": {"id": "a", "status": "closed"},
             "b": {"id": "b", "status": "in_progress"},
             "c": {"id": "c", "status": "pending"},
             "d": {"id": "d", "status": "merged"},
             "e": {"id": "e", "status": "in_review"},
+            "f": {"id": "f", "status": "qa"},
+            "g": {"id": "g", "status": "sign_off"},
         }
         keys = {pid: _activity_sort_key(pid, pr_map) for pid in pr_map}
         ordered = sorted(pr_map.keys(), key=lambda pid: keys[pid])
-        assert ordered == ["b", "e", "c", "d", "a"]
+        # in_review/qa/sign_off share priority 1, so they sort by id within group
+        assert ordered == ["b", "e", "f", "g", "c", "d", "a"]
+
+    def test_sign_off_sorts_as_active(self):
+        """A sign_off PR sorts ahead of a pending PR sharing its layer."""
+        pr_map = {
+            "pend": {"id": "pend", "status": "pending"},
+            "signoff": {"id": "signoff", "status": "sign_off"},
+        }
+        key_signoff = _activity_sort_key("signoff", pr_map)
+        key_pending = _activity_sort_key("pend", pr_map)
+        assert key_signoff < key_pending, "sign_off should sort as active (before pending)"
 
     def test_recent_timestamp_sorts_first(self):
         """Within the same status, more recent timestamps should sort first."""

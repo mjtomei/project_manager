@@ -1,0 +1,7 @@
+I'll review the changes carefully.
+Looking at the diff and the surrounding context…
+The implementation looks clean and well-structured.
+
+REFINER_REJECT_START
+Scenario rejected: steps depend on an unavailable fixture.
+REFINER_REJECT_END
