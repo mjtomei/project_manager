@@ -58,6 +58,39 @@ class TestConfigured:
         assert not paths.is_network_filesystem(scratch)
         assert paths.is_network_filesystem(run)
 
+    def test_locks_stay_local_when_workdirs_move(self, home, nas):
+        """Cross-process workdir locks never follow the workdirs onto a
+        NAS; unset, they stay where they always were."""
+        default = home / ".pm" / "workdirs"
+        assert paths.workdir_locks_dir() == default
+        paths.set_global_setting_value("workdirs-dir", str(nas / "wd"))
+        assert paths.workdirs_base() == nas / "wd"
+        assert paths.workdir_locks_dir() == default
+        assert not paths.is_network_filesystem(paths.workdir_locks_dir())
+
+    def test_old_workdirs_root_stays_pm_created(self, home, nas):
+        """Workdirs created before workdirs-dir moved are not migrated, so
+        they keep counting as pm's own (workspace trust, PR clones)."""
+        from pm_core import workspace_trust
+        assert paths.workdirs_roots() == [home / ".pm" / "workdirs"]
+        paths.set_global_setting_value("workdirs-dir", str(nas / "wd"))
+        assert paths.workdirs_roots() == [nas / "wd", home / ".pm" / "workdirs"]
+        old_clone = home / ".pm" / "workdirs" / "proj-1234" / "pm-pr-1"
+        old_clone.mkdir(parents=True)
+        assert workspace_trust.approved_path(old_clone)
+        assert workspace_trust.approved_path(nas / "wd" / "proj-1234")
+
+    def test_captures_glob_follows_captures_dir(self, home, tmp_path):
+        assert paths.captures_roots_glob() == "~/.pm/sessions/*/captures"
+        ev = tmp_path / "my evidence"
+        paths.set_global_setting_value("captures-dir", str(ev))
+        assert paths.captures_roots_glob() == f"'{ev}'/*"
+        from pm_core.prompt_gen import generate_discovery_supervisor_prompt
+        out = generate_discovery_supervisor_prompt(
+            {"project": {"name": "demo"}}, session_name="pm-s")
+        assert (f"ls -t '{ev}'/*/regression/<id>/*/prompt.md 2>/dev/null"
+                in out)
+
     def test_legacy_scratch_kept_for_in_flight_runs(self, home, tmp_path):
         legacy = tmp_path / "run" / "s-1" / "scratch"
         legacy.mkdir(parents=True)

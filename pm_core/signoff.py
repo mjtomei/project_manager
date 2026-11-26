@@ -449,8 +449,8 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
     # exclusive per-PR lock makes the loser wait, then take the existing-
     # window fast path below.
     import fcntl
-    from pm_core.paths import workdirs_base
-    _launch_lock_path = workdirs_base() / f".signoff-launch-{pm_session}-{pr_id}.lock"
+    from pm_core.paths import workdir_locks_dir
+    _launch_lock_path = workdir_locks_dir() / f".signoff-launch-{pm_session}-{pr_id}.lock"
     _launch_lock_f = open(_launch_lock_path, "w")
     try:
         fcntl.flock(_launch_lock_f.fileno(), fcntl.LOCK_EX)
@@ -1231,8 +1231,8 @@ def _step_lock(pr_id: str):
 
     Yields False when another driver still holds it after _STEP_LOCK_WAIT.
     """
-    from pm_core.paths import workdirs_base
-    with store.bounded_flock(workdirs_base() / f".signoff-step-{pr_id}.lock",
+    from pm_core.paths import workdir_locks_dir
+    with store.bounded_flock(workdir_locks_dir() / f".signoff-step-{pr_id}.lock",
                              _STEP_LOCK_WAIT) as held:
         yield held
 

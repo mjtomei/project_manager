@@ -484,17 +484,21 @@ class TestWriteEngineConfig:
 
 
 class TestEnsureConsumerEngine:
-    def _unshare(self, monkeypatch, out, rc=0):
+    def _unshare(self, monkeypatch, owners, rc=0):
+        """Fake ``podman unshare stat -c '%n %u:%g' <probes>``: one line per
+        probe argument, its owner taken from *owners* in order."""
         calls = []
 
         def run(argv, **kw):
             calls.append(argv)
+            out = "".join(f"{path} {ids}\n"
+                          for path, ids in zip(argv[5:], owners))
             return _cp(rc, out=out)
         monkeypatch.setattr(image_cache.subprocess, "run", run)
         return calls
 
     def test_matching_probes_pass_once(self, consumer, tmp_path, monkeypatch):
-        calls = self._unshare(monkeypatch, "0:0\n1:1\n")
+        calls = self._unshare(monkeypatch, ["0:0", "1:1"])
         eng = str(tmp_path / "nested-home")
         image_cache.ensure_consumer_engine(eng)
         image_cache.ensure_consumer_engine(eng)
@@ -504,13 +508,29 @@ class TestEnsureConsumerEngine:
     def test_shifted_probes_fail_loudly(self, consumer, tmp_path, monkeypatch):
         """An entry mounted one keep-id level too deep reads 0:0 / 0:0 or
         65534 — never used with wrong ownership."""
-        self._unshare(monkeypatch, "0:0\n65534:65534\n")
-        with pytest.raises(ImageCacheError, match="another user-namespace level"):
+        self._unshare(monkeypatch, ["0:0", "65534:65534"])
+        with pytest.raises(ImageCacheError, match="another user-namespace "
+                           "level .uid1 is 65534:65534, expected 1:1"):
             image_cache.ensure_consumer_engine(str(tmp_path / "h"))
+
+    def test_unreadable_probes_are_an_actionable_error(self, consumer,
+                                                       tmp_path, monkeypatch):
+        """No podman (or a hung one) is a launch error naming the cause,
+        not an uncaught OSError out of create_container."""
+        def run(argv, **kw):
+            raise FileNotFoundError(2, "No such file", "podman")
+        monkeypatch.setattr(image_cache.subprocess, "run", run)
+        with pytest.raises(ImageCacheError, match="could not run 'podman "
+                           "unshare'"):
+            image_cache.ensure_consumer_engine(str(tmp_path / "h4"))
+        res = image_cache.consumer_check(home=str(tmp_path / "h4"))
+        assert not res.ok
+        assert any("could not run 'podman unshare'" in t
+                   for t in res.problems())
 
     def test_foreign_config_without_store_is_refused(self, consumer, tmp_path,
                                                      monkeypatch):
-        self._unshare(monkeypatch, "0:0\n1:1\n")
+        self._unshare(monkeypatch, ["0:0", "1:1"])
         eng = tmp_path / "h2"
         cfg = eng / ".config" / "containers" / "storage.conf"
         cfg.parent.mkdir(parents=True)

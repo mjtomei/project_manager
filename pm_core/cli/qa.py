@@ -1119,9 +1119,9 @@ def qa_standalone(instruction_id: str):
 
     # Create workdir
     timestamp = int(time.time())
-    workdir = os.path.expanduser(
-        f"~/.pm/workdirs/qa/standalone-{instruction_id}-{timestamp}"
-    )
+    from pm_core.paths import qa_workdirs_root
+    workdir = str(qa_workdirs_root()
+                  / f"standalone-{instruction_id}-{timestamp}")
     os.makedirs(workdir, exist_ok=True)
 
     click.echo(f"Running standalone QA: {item['title']}")

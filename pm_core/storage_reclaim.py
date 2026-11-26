@@ -24,7 +24,8 @@ A scratch dir is **held**, and skipped whole, when:
 * its QA run is live (run record without ``ended_at`` whose driver is
   alive) or resumable (a resume snapshot without ``ended_at``);
 * the runtime cannot list containers (fail safe);
-* a store has an active mount beneath it.
+* a store has an active mount beneath it in any mount namespace pm can
+  see (rootless engines mount their layers in their own namespace).
 
 The callers are the existing lifecycle owners — PR cleanup (merged/closed
 PRs, ``pm pr cleanup``), QA run start (earlier runs of the same PR) and
@@ -87,7 +88,7 @@ class Outcome:
     def summary(self) -> str:
         held = [p for p in self.plans if p.held]
         todo = [d for p in self.plans if not p.held for d in p.items]
-        parts = [f"{len(self.removed)} removed ({_human(self.removed_bytes)})"]
+        parts = [f"{len(self.removed)} removed ({human_bytes(self.removed_bytes)})"]
         if self.failed:
             parts.append(f"{len(self.failed)} failed")
         pending = len(todo) - len(self.removed) - len(self.failed)
@@ -100,7 +101,7 @@ class Outcome:
         return ", ".join(parts)
 
 
-def _human(n: int) -> str:
+def human_bytes(n: int) -> str:
     size = float(n)
     for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
         if size < 1024 or unit == "TiB":
@@ -231,20 +232,59 @@ def _run_held(run_dir: Path | None) -> str:
     return ""
 
 
-def _mounts_under(path: Path) -> bool:
+_PROC = "/proc"
+
+
+def _mount_points() -> list[str]:
+    """Mount points in every mount namespace visible from this process.
+
+    A rootless engine mounts its containers' layers inside its own user +
+    mount namespace (the pause process's), so a store with running
+    containers shows no mounts in this process's ``/proc/self/mountinfo``.
+    Read one ``mountinfo`` per distinct mount namespace among the visible
+    processes; a namespace counts as read only once one of its tables was
+    (a process can exit between the two reads).  A container's namespace
+    lists container-internal paths, which never match a host scratch path;
+    such containers hold their scratch through their own bind mounts
+    (:func:`container_mount_sources`).
+    """
     from pm_core import paths
-    real = os.path.realpath(path)
+    points: list[str] = []
+
+    def read(table: str) -> bool:
+        try:
+            lines = Path(table).read_text().splitlines()
+        except OSError:
+            return False
+        for line in lines:
+            parts = line.split()
+            if len(parts) > 4:
+                points.append(paths._unescape_mount_path(parts[4]))
+        return True
+
+    read(paths._MOUNTINFO)
+    seen: set[str] = set()
     try:
-        lines = Path(paths._MOUNTINFO).read_text().splitlines()
+        seen.add(os.readlink(f"{_PROC}/self/ns/mnt"))
     except OSError:
-        return False
-    for line in lines:
-        parts = line.split()
-        if len(parts) > 4:
-            mp = paths._unescape_mount_path(parts[4])
-            if mp == real or mp.startswith(real + "/"):
-                return True
-    return False
+        pass
+    try:
+        pids = [p for p in os.listdir(_PROC) if p.isdigit()]
+    except OSError:
+        pids = []
+    for pid in pids:
+        try:
+            ns = os.readlink(f"{_PROC}/{pid}/ns/mnt")
+        except OSError:
+            continue
+        if ns not in seen and read(f"{_PROC}/{pid}/mountinfo"):
+            seen.add(ns)
+    return points
+
+
+def _mounts_under(path: Path, mount_points: list[str]) -> bool:
+    real = os.path.realpath(path)
+    return any(mp == real or mp.startswith(real + "/") for mp in mount_points)
 
 
 def scenario_scratch_dirs(pr_id: str | None = None,
@@ -289,6 +329,7 @@ def plan(pr_id: str | None = None, exclude_run: str | None = None) -> Outcome:
     if sources is None:
         out.problem = "the container runtime could not list containers"
         return out
+    mount_points: list[str] | None = None   # read once, on the first store
     for run_dir, scratch in scenario_scratch_dirs(pr_id, exclude_run):
         p = ScratchPlan(scratch=scratch, run_dir=run_dir)
         held = next((s for s in sources if _related(s, str(scratch))), None)
@@ -299,7 +340,11 @@ def plan(pr_id: str | None = None, exclude_run: str | None = None) -> Outcome:
         if not p.held:
             p.items = find_disposables(scratch)
             for d in p.items:
-                if d.kind == "store" and _mounts_under(d.path):
+                if d.kind != "store":
+                    continue
+                if mount_points is None:
+                    mount_points = _mount_points()
+                if _mounts_under(d.path, mount_points):
                     p.held = f"{d.path} has an active mount"
                     break
         out.plans.append(p)

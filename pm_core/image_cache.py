@@ -840,28 +840,19 @@ def consumer_check(image_ref: str | None = None,
     except NonLocalPathError as exc:
         res.add(False, str(exc))
     env = {**os.environ, "HOME": home}
-    probe_dir = f"{CONSUMER_MOUNT}/probe"
     try:
-        r = subprocess.run(
-            ["podman", "unshare", "stat", "-c", "%n %u:%g"]
-            + [f"{probe_dir}/{p}" for p, _ in _PROBES],
-            capture_output=True, text=True, timeout=60, env=env)
-        seen = {Path(ln.split()[0]).name: ln.split()[1]
-                for ln in r.stdout.splitlines() if len(ln.split()) == 2}
-        bad = [f"{p} is {seen.get(p, '?')}, expected {want}"
-               for p, want in _PROBES if seen.get(p) != want]
-        if r.returncode != 0:
-            res.add(False, "could not read the mapping probes with 'podman "
-                           f"unshare': {_podman_error(r.stderr)}")
-        elif bad:
+        bad = _probe_mismatches(home)
+    except ImageCacheError as exc:
+        res.add(False, str(exc))
+    else:
+        if bad:
             res.add(False, "UID/GID mapping does not match the cache: "
-                           + "; ".join(bad)
-                           + ". The entry was prepared for engines at another "
-                             "nesting level; it cannot be used here")
+                           + "; ".join(bad) + ". The entry was prepared for "
+                           "engines at another nesting level; it cannot be "
+                           "used here")
         else:
-            res.add(True, "UID/GID mapping matches the cache (probes 0:0, 1:1)")
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        res.add(False, f"could not run 'podman unshare': {exc}")
+            res.add(True, "UID/GID mapping matches the cache "
+                          "(probes 0:0, 1:1)")
     want = image_ref or entry.get("image_id") or ""
     try:
         r = subprocess.run(["podman", "image", "inspect", want],
@@ -904,25 +895,43 @@ def ensure_consumer_engine(home: str | None = None) -> None:
     problem = engine_config_problem(home)
     if problem:
         raise ImageCacheError(problem)
+    bad = _probe_mismatches(home)
+    if bad:
+        raise ImageCacheError(
+            f"the shared image cache at {CONSUMER_MOUNT} was prepared for "
+            f"engines at another user-namespace level ({'; '.join(bad)}), "
+            f"so its files would show the wrong owners here; it cannot "
+            f"serve this engine. Launch from a container whose cache "
+            f"matches, " + _off_remedy())
+    _checked_homes.add(home)
+
+
+def _probe_mismatches(home: str) -> list[str]:
+    """Mapping probes whose owner, as the engine at *home* sees it through
+    ``podman unshare stat``, differs from the one recorded at preparation
+    (``["uid1 is 65534:65534, expected 1:1", ...]``; empty when all match).
+
+    Raises :class:`ImageCacheError` when the probes cannot be read.
+    """
     probe_dir = f"{CONSUMER_MOUNT}/probe"
-    r = subprocess.run(
-        ["podman", "unshare", "stat", "-c", "%u:%g"]
-        + [f"{probe_dir}/{p}" for p, _ in _PROBES],
-        capture_output=True, text=True, timeout=60,
-        env={**os.environ, "HOME": home})
-    got = r.stdout.split()
+    try:
+        r = subprocess.run(
+            ["podman", "unshare", "stat", "-c", "%n %u:%g"]
+            + [f"{probe_dir}/{p}" for p, _ in _PROBES],
+            capture_output=True, text=True, timeout=60,
+            env={**os.environ, "HOME": home})
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise ImageCacheError(
+            f"could not run 'podman unshare' to read the shared image "
+            f"cache's mapping probes (HOME={home}): {exc}") from exc
     if r.returncode != 0:
         raise ImageCacheError(
             f"could not read the shared image cache's mapping probes with "
             f"'podman unshare' (HOME={home}): {_podman_error(r.stderr)}")
-    if got != [want for _, want in _PROBES]:
-        raise ImageCacheError(
-            f"the shared image cache at {CONSUMER_MOUNT} was prepared for "
-            f"engines at another user-namespace level (probes read "
-            f"{' '.join(got)}, expected 0:0 1:1), so its files would show "
-            f"the wrong owners here; it cannot serve this engine. Launch "
-            f"from a container whose cache matches, " + _off_remedy())
-    _checked_homes.add(home)
+    seen = {Path(ln.split()[0]).name: ln.split()[1]
+            for ln in r.stdout.splitlines() if len(ln.split()) == 2}
+    return [f"{p} is {seen.get(p, '?')}, expected {want}"
+            for p, want in _PROBES if seen.get(p) != want]
 
 
 def _podman_error(stderr: str | None) -> str:

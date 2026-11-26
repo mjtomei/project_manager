@@ -485,7 +485,7 @@ def container_reclaim(pr_id: str | None, dry_run: bool):
                 click.echo(f"  keep {p.scratch}: {p.held}")
             continue
         for d in p.items:
-            size = storage_reclaim._human(d.bytes) if d.bytes else "?"
+            size = storage_reclaim.human_bytes(d.bytes) if d.bytes else "?"
             if dry_run:
                 state = "would remove"
             elif str(d.path) in removed:

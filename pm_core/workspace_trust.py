@@ -147,8 +147,9 @@ def remove_authorized_root(root: str) -> bool:
 
 def approved_roots() -> list[str]:
     """Roots under which pm may establish workspace trust automatically."""
-    from pm_core.paths import workdirs_base
-    return [_real(workdirs_base())] + [_real(r) for r in authorized_roots()]
+    from pm_core.paths import workdirs_roots
+    return ([_real(r) for r in workdirs_roots()]
+            + [_real(r) for r in authorized_roots()])
 
 
 def approved_path(path: str | Path) -> bool:

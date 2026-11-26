@@ -211,6 +211,34 @@ class TestPlan:
         out = sr.reclaim("pr-1")
         assert st.exists() and "active mount" in out.plans[0].held
 
+    def test_mount_in_another_namespace_holds(self, home, rt, tmp_path,
+                                              monkeypatch):
+        """A rootless engine mounts its containers' layers in its own mount
+        namespace, invisible in /proc/self/mountinfo: every namespace a
+        visible process is in is read — once, from whichever of its
+        processes still has a readable table (43 has none here)."""
+        from pm_core import paths
+        _, scratch = _run(home, "pr-1-ns")
+        st = _store(scratch / "eng")
+        own = tmp_path / "self-mountinfo"
+        own.write_text("1 0 0:1 / / rw - ext4 /dev/sda1 rw\n")
+        monkeypatch.setattr(paths, "_MOUNTINFO", str(own))
+        proc = tmp_path / "proc"
+        for pid, ns in (("self", "mnt:[1]"), ("10", "mnt:[1]"),
+                        ("42", "mnt:[2]"), ("43", "mnt:[2]")):
+            (proc / pid / "ns").mkdir(parents=True)
+            os.symlink(ns, proc / pid / "ns" / "mnt")
+        (proc / "42" / "mountinfo").write_text(
+            "1 0 0:1 / / rw - ext4 /dev/sda1 rw\n"
+            f"9 1 0:9 / {st}/overlay/l1/merged rw - fuse.fuse-overlayfs "
+            f"fuse-overlayfs rw\n")
+        (proc / "notapid").mkdir()
+        monkeypatch.setattr(sr, "_PROC", str(proc))
+        points = sr._mount_points()
+        assert f"{st}/overlay/l1/merged" in points
+        out = sr.reclaim("pr-1")
+        assert st.exists() and "active mount" in out.plans[0].held
+
 
 def test_podman_delete_claims_then_removes_in_unshare(tmp_path, monkeypatch):
     st = _store(tmp_path / "storage")

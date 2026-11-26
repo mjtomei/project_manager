@@ -2258,9 +2258,9 @@ def _pull_after_merge(data: dict, pr_entry: dict, repo_dir: str,
 def _publish_lock(data: dict):
     """Serialize pm publications into one repository (across PRs)."""
     import fcntl
-    from pm_core.paths import workdirs_base
+    from pm_core.paths import workdir_locks_dir
     repo_id = data["project"].get("repo_id", "")
-    path = workdirs_base() / f".publish-{repo_id}.lock"
+    path = workdir_locks_dir() / f".publish-{repo_id}.lock"
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w") as f:
         try:
@@ -2867,9 +2867,9 @@ def pr_merge(pr_id: str | None, resolve_window: bool | None, background: bool,
     # exception traceback keeps the fd alive, and a same-process second flock
     # on the same file blocks.
     import fcntl as _fcntl
-    from pm_core.paths import workdirs_base as _workdirs_base
+    from pm_core.paths import workdir_locks_dir as _workdir_locks_dir
     _repo_id = data["project"].get("repo_id", "")
-    _merge_lock_path = _workdirs_base() / f".merge-{_repo_id}-{pr_id}.lock"
+    _merge_lock_path = _workdir_locks_dir() / f".merge-{_repo_id}-{pr_id}.lock"
     _merge_lock_f = open(_merge_lock_path, "w")
     _fcntl.flock(_merge_lock_f.fileno(), _fcntl.LOCK_EX)
     try:

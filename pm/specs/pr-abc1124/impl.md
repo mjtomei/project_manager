@@ -235,9 +235,14 @@ the task and on the measurements above.
 * A scratch dir is **held** (skipped) when any existing container (running
   or stopped) mounts it or a parent/child of it, when its run is live (run
   record without `ended_at` whose owner process is alive), when the runtime
-  cannot be listed (fail safe), when a store has an active mount beneath it
-  (`/proc/self/mountinfo`), or — once pr-1139060 lands — when
-  `container_reaper.is_retained` says so for the scenario container.
+  cannot be listed (fail safe), or when a store has an active mount beneath
+  it in any mount namespace pm can see — one `/proc/<pid>/mountinfo` per
+  distinct `ns/mnt`, because a rootless engine mounts its containers'
+  layers in its own (pause-process) namespace, invisible in
+  `/proc/self/mountinfo` (review 62b4: verified with a live private-engine
+  container under scratch).  Retention markers (pr-1139060) are not read:
+  a retained container still exists and so already holds its scratch
+  through its mounts.
 * Deletion uses `podman unshare rm -rf` for stores (their files are owned by
   sub-UIDs) and `unlink` for archives; a `.pm-reclaim.json` record (paths,
   bytes, time, reason) is left in the scratch dir.
@@ -273,7 +278,19 @@ the task and on the measurements above.
   mounts), else `scratch_base()/qa/<qa_workdir.name>/s-N`.  Used by
   `create_scenario_workdir`, the tmux prompt and the relaunch path.
 * No migration of existing workdirs/captures; changing a setting affects
-  new paths only (documented in `pm set` help).
+  new paths only (documented in `pm set` help).  So that existing
+  workdirs keep working after `workdirs-dir` moves:
+  `paths.workdirs_roots()` (the configured root plus the default
+  `~/.pm/workdirs` when it differs) is what workspace trust and PR-clone
+  detection (`integration.py`) treat as pm-created.
+* Cross-process lock files that lived in the workdirs root (sign-off
+  launch/step, publish, merge) go through `paths.workdir_locks_dir()`:
+  the workdirs root when `workdirs-dir` is unset (unchanged), else the
+  local default `~/.pm/workdirs` — flock on a NAS is emulated or
+  unsupported and can hang while the share stalls.
+* Prompts that glob captures across sessions use
+  `paths.captures_roots_glob()` (`<captures-dir>/*` when set), e.g. the
+  discovery supervisor's `ls -t …/regression/<id>/*/prompt.md`.
 
 ### R6 — Shared recipe/instructions
 
@@ -373,7 +390,9 @@ the task and on the measurements above.
 * **A9 — Docker runtime.**  The cache is podman-only (it relies on rootless
   user config, `unshare`, fuse-overlayfs); Docker containers are unchanged.
 * **A10 — Coordination with #241/#290.**  No hard prerequisite.  Reclaim
-  uses `container_reaper.is_retained` only if that module exists;
+  needs no `container_reaper.is_retained`: a retained container exists and
+  its mounts hold its scratch (the reaper calls `storage_reclaim.reclaim`
+  after removing containers);
   `ImageCacheError` surfaces as `ContainerError`, which #290's
   `required_container_launch` already treats as a fail-closed launch
   failure.  Notes are left on both PRs.

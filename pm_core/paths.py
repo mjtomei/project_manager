@@ -109,6 +109,36 @@ def workdirs_base() -> Path:
     return d
 
 
+def workdirs_roots() -> list[Path]:
+    """Every root holding pm-created workdirs.
+
+    :func:`workdirs_base` plus, when ``workdirs-dir`` moved it, the default
+    ``~/.pm/workdirs``: workdirs created before the change stay there
+    (nothing is migrated) and are still pm's own clones — for workspace
+    trust and for recognising a PR clone.
+    """
+    base = workdirs_base()
+    default = pm_home() / "workdirs"
+    if default != base and default.is_dir():
+        return [base, default]
+    return [base]
+
+
+def workdir_locks_dir() -> Path:
+    """Return the directory for pm's cross-process workdir lock files.
+
+    The workdirs root by default, where these locks have always lived.
+    When ``workdirs-dir`` moves source workdirs elsewhere — possibly a NAS,
+    where flock is emulated or unsupported and can hang while the share
+    stalls — the locks stay local, at the default ``~/.pm/workdirs``.
+    """
+    if configured_dir(WORKDIRS_DIR_SETTING) is None:
+        return workdirs_base()
+    d = pm_home() / "workdirs"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
 def qa_workdirs_root() -> Path:
     """Return the root of QA run workdirs (``<workdirs>/qa``).
 
@@ -347,6 +377,17 @@ def _captures_root_for_tag(session_tag: str) -> Path:
     if configured is not None:
         return configured / session_tag
     return sessions_dir() / session_tag / "captures"
+
+
+def captures_roots_glob() -> str:
+    """Shell glob matching every session's captures root, for prompts that
+    list runs across sessions: ``~/.pm/sessions/*/captures`` by default,
+    ``<captures-dir>/*`` (shell-quoted) when ``captures-dir`` is set."""
+    configured = configured_dir(CAPTURES_DIR_SETTING)
+    if configured is not None:
+        import shlex
+        return f"{shlex.quote(str(configured))}/*"
+    return "~/.pm/sessions/*/captures"
 
 
 # Container-internal path where the host's captures_dir is bind-mounted
