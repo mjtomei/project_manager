@@ -1397,9 +1397,15 @@ This is recovery of an already-completed merge only. Do NOT push
 `--propagation-only`, `gh pr merge`, or any other backend merge, and do NOT
 create new commits on `{base_branch}` — pm publishes only signed-off code.
 
+`pm/project.yaml` is pm's live state: never stash, `git checkout`, reset
+or hand-edit it (a text stash/pop is what writes conflict markers into it
+and breaks every pm command). Stash other files by naming them
+(`git stash push -- <paths>`). If `pm/project.yaml` itself blocks the
+update, stop with **INPUT_REQUIRED**.
+
 ## Steps
 1. Investigate the error above and fix whatever is blocking the update
-   (e.g. stash uncommitted changes)
+   (e.g. stash the other uncommitted files that block it)
 2. Pull `{base_branch}` from origin into this repo directory (fast-forward)
 3. Restore any stashed changes
 4. Verify that `{base_branch}` is now up to date with origin
