@@ -3413,16 +3413,9 @@ def _restore_registry(repo: Path, plan: dict, *, restage: bool = True) -> None:
                    f"{mode},{sha},{_REGISTRY_REL}`.", err=True)
 
 
-def _stash_top(cwd: Path) -> str:
-    """Commit of ``stash@{0}``, or "" when the stash list is empty."""
-    top = git_ops.run_git("rev-parse", "-q", "--verify", "stash@{0}",
-                          cwd=cwd, check=False)
-    return top.stdout.strip() if top.returncode == 0 else ""
-
-
 def _stash_ref(cwd: Path, sha: str) -> str | None:
     """The ``stash@{N}`` currently naming stash commit *sha*, if any."""
-    if _stash_top(cwd) == sha:
+    if _ref(cwd, "stash@{0}") == sha:
         return "stash@{0}"
     listing = git_ops.run_git("stash", "list", "--format=%gd%x09%H",
                               cwd=cwd, check=False)
@@ -3473,7 +3466,7 @@ def _stash_for_merge(cwd: Path, pr_display_id: str = "",
         trigger_tui_merge_lock(pr_display_id)
     click.echo(f"Stashing {len(remaining)} dirty file(s) to proceed with "
                f"merge...")
-    before = _stash_top(cwd)
+    before = _ref(cwd, "stash@{0}")
     stash_r = git_ops.run_git(
         "stash", "push", "--include-untracked", "-m", _AUTO_STASH_MSG,
         "--", *(f":(literal){p}" for p in remaining), cwd=cwd, check=False)
@@ -3481,8 +3474,8 @@ def _stash_for_merge(cwd: Path, pr_display_id: str = "",
     # meanwhile would otherwise get popped instead.  An unchanged top means
     # nothing was saved ("No local changes to save", rc 0): the top is then
     # someone else's stash.
-    after = _stash_top(cwd)
-    saved = bool(after) and after != before
+    after = _ref(cwd, "stash@{0}")
+    saved = after is not None and after != before
     if saved and stash_r.returncode != 0:
         # git saved the stash and then failed reverting the files (e.g. a
         # path that vanished since the status).  If it reverted nothing,
@@ -3756,15 +3749,14 @@ def _registry_change_applied(cwd: Path, sha: str, rel: str,
 
 def _worktree_has(cwd: Path, blob_rev: str, rel: str) -> bool:
     """True if the working-tree file *rel* matches *blob_rev* (or both absent)."""
-    want = git_ops.run_git("rev-parse", "-q", "--verify", blob_rev, cwd=cwd,
-                           check=False)
+    want = _ref(cwd, blob_rev)
     path = cwd / rel
-    if want.returncode != 0:
+    if want is None:
         return not path.exists() and not path.is_symlink()
     if not path.is_file():
         return False
     have = git_ops.run_git("hash-object", "--", rel, cwd=cwd, check=False)
-    return have.returncode == 0 and have.stdout.strip() == want.stdout.strip()
+    return have.returncode == 0 and have.stdout.strip() == want
 
 
 def _stash_already_applied(cwd: Path, sha: str, registry_applied) -> bool:
@@ -3783,8 +3775,7 @@ def _stash_already_applied(cwd: Path, sha: str, registry_applied) -> bool:
         if rel != _REGISTRY_REL and not _worktree_has(cwd, f"{sha}:{rel}",
                                                       rel):
             return False
-    if git_ops.run_git("rev-parse", "-q", "--verify", f"{sha}^3", cwd=cwd,
-                       check=False).returncode == 0:
+    if _ref(cwd, f"{sha}^3") is not None:
         untracked = git_ops.run_git("ls-tree", "-r", "-z", "--name-only",
                                     f"{sha}^3", cwd=cwd, check=False)
         if untracked.returncode != 0:
