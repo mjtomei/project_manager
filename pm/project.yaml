@@ -31077,7 +31077,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/222
   gh_pr_number: 222
   created_at: '2026-05-21T04:06:05.061620+00:00'
-  updated_at: '2026-11-26T19:21:04.850567+00:00'
+  updated_at: '2026-11-26T19:52:23.903260+00:00'
   started_at: '2026-05-25T02:58:20.169677+00:00'
   reviewed_at: '2026-05-25T03:13:02.415469+00:00'
   merged_at: null
@@ -31470,6 +31470,25 @@ prs:
       3/3.'
     created_at: '2026-11-26T19:21:04Z'
     last_edited: '2026-11-26T19:21:04Z'
+  - id: note-bdfd090
+    text: 'Review loop c6a2 i7 (8973e278): NEEDS_WORK, fixed + pushed. (1) A refused
+      auto-stash pop told the user to run `git stash pop <ref>` once the error is
+      fixed. git >= 2.34 restores the tracked changes before it refuses an untracked
+      file that now exists (reproduced on 2.34.1), and a failed drop comes after a
+      full apply, so that second pop refuses on the restored part. The warning now
+      says nothing was lost, to compare the stash with the working tree (`git stash
+      show -p`, `git show <ref>^3:<path>`), restore what is missing, then `git stash
+      drop <ref>`. It does not list restored files: a pop merges each change into
+      the new HEAD, so blob equality cannot tell which were restored. The reaper keeps
+      using blob equality, which is only conservative there. (2) test_other_dirty_files_stashed_and_restored
+      never reached the stash (0 calls): the registry swap alone no longer blocks
+      the ff. So no test covered an untracked file stashed and restored by a clean
+      pop. It now overlaps code.txt and asserts the stash ran with 2 files. +2 tests
+      (untracked collision; failed drop), both fail on 47ad9c61. Nit: pm project set
+      uses a named apply function. Spec R2/2c/4/5 updated. Evidence /pm-captures/review-c6a2-i7:
+      full suite 5730 passed / 1 skipped.'
+    created_at: '2026-11-26T19:52:23Z'
+    last_edited: '2026-11-26T19:52:23Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-ca6981c-bug-pm-merge-s-git-stash-pop-corrupt-ac115969
 - id: pr-c41f029
   plan: bugs
