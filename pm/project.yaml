@@ -56421,7 +56421,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-11-26T15:03:37.862958+00:00'
-  updated_at: '2026-11-26T18:32:37.946147+00:00'
+  updated_at: '2026-11-26T19:33:59.026080+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -56456,6 +56456,14 @@ prs:
       launched prompts with a stand-in claude on PATH.'
     created_at: '2026-11-26T18:32:37Z'
     last_edited: '2026-11-26T18:32:37Z'
+  - id: note-0ba3967
+    text: 'QA S4 run 2026-11-26 PASS 4/4 (captures /pm-captures/scenarios/4). Fixture
+      step for next run: `git add project.yaml architecture.md notes.txt && git commit`
+      exits 1 at git add (notes.txt is in the pm dir .gitignore, pr-19e8114) so &&
+      skips the commit; use `git add project.yaml architecture.md; git commit -m fixture`
+      before TUI `s`.'
+    created_at: '2026-11-26T19:33:58Z'
+    last_edited: '2026-11-26T19:33:58Z'
   model: provider:claude-main-xhigh-pm
   effort: xhigh
 - id: pr-27ba89e
