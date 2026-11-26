@@ -47,7 +47,9 @@ class PlansPane(Widget):
                 self.selected_index = len(self._plans) - 1
         else:
             self.selected_index = 0
-        self.refresh()
+        # height: auto — re-measure, or a longer list keeps the old height
+        # and the shortcut footer is clipped off the bottom.
+        self.refresh(layout=True)
 
     @property
     def selected_plan_id(self) -> str | None:
