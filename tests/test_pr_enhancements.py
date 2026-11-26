@@ -463,24 +463,37 @@ class TestPullAfterMerge:
             [c[1].get("cwd") for c in g.run_git.call_args_list], launch
 
     def test_fetches_and_fast_forwards_in_repo_dir(self, tmp_path):
+        fetched = "f" * 40
+
         def rg(*args, **kw):
+            if args[0] == "rev-parse" and "origin/master^{commit}" in args:
+                return MagicMock(returncode=0, stdout=fetched + "\n",
+                                 stderr="")
             if args[0] == "rev-parse":
                 return MagicMock(returncode=0, stdout="master", stderr="")
             return MagicMock(returncode=0, stdout="", stderr="")
         ok, calls, cwds, launch = self._pull(tmp_path, rg)
         assert ok
         assert ("fetch", "origin") in calls
-        assert ("merge", "--ff-only", "origin/master") in calls
-        assert set(cwds) == {str(tmp_path)}
+        # To the fetched commit, pinned (a later fetch cannot move it).
+        assert ("merge", "--ff-only", "--no-autostash", fetched) in calls
+        assert {str(c) for c in cwds} == {str(tmp_path)}
         launch.assert_not_called()
 
     def test_dirty_overlap_stashes_then_succeeds(self, tmp_path):
-        n = {"merge": 0}
+        n = {"merge": 0, "stashed": False}
 
         def rg(*args, **kw):
+            if args[:2] == ("stash", "push"):
+                n["stashed"] = True
+            if args[0] == "rev-parse" and "stash@{0}" in args:
+                # The stash pm pushed is popped by its commit.
+                return MagicMock(returncode=0 if n["stashed"] else 1,
+                                 stdout="abc123\n" if n["stashed"] else "",
+                                 stderr="")
             if args[0] == "rev-parse":
                 return MagicMock(returncode=0, stdout="master", stderr="")
-            if args[0] == "status":
+            if "status" in args:        # after `-c status.renames=true`
                 return MagicMock(returncode=0, stdout=" M file.py\n", stderr="")
             if args[0] == "merge":
                 n["merge"] += 1
@@ -507,6 +520,27 @@ class TestPullAfterMerge:
         assert ok is False
         launch.assert_called_once()
         assert launch.call_args.kwargs["cwd"] == str(tmp_path)
+
+    def test_busy_registry_lock_exits_without_recovery_window(self, tmp_path):
+        """A busy registry lock touched nothing: no recovery session (told to
+        "stash and pull", it would text-stash the registry), just exit 1 with
+        the re-run hint."""
+        data = {"project": {"name": "p", "base_branch": "master"},
+                "prs": [{"id": "pr-001", "title": "T", "status": "sign_off"}]}
+        busy = pr_mod._RegistryLockBusy(
+            ["git", "merge"], 1, "", "Could not acquire lock on x")
+        with mock.patch("pm_core.cli.pr.git_ops") as g, \
+             mock.patch.object(pr_mod, "_ff_with_autostash",
+                               return_value=busy), \
+             mock.patch.object(pr_mod, "_launch_merge_window") as launch, \
+             pytest.raises(SystemExit) as exc:
+            g.run_git.return_value = MagicMock(returncode=0, stdout="master",
+                                               stderr="")
+            pr_mod._pull_after_merge(data, data["prs"][0], str(tmp_path),
+                                     "master", resolve_window=True,
+                                     background=False, transcript=None)
+        assert exc.value.code == 1
+        launch.assert_not_called()
 
     def test_skips_when_repo_not_on_base_branch(self, tmp_path):
         def rg(*args, **kw):

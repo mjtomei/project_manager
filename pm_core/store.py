@@ -114,6 +114,27 @@ def is_internal_pm_dir(root: Path) -> bool:
     return root.name == "pm" and (root.parent / ".git").exists()
 
 
+# Git conflict-marker line prefixes. A bare ``=======`` (exactly seven equals)
+# is also a marker; we match it separately so a legitimate YAML value never
+# trips the check.
+_CONFLICT_MARKER_PREFIXES = ("<<<<<<< ", "||||||| ", ">>>>>>> ")
+
+
+def find_conflict_markers(text: str) -> list[tuple[int, str]]:
+    """Return ``(1-based line number, line)`` for any git conflict markers.
+
+    Detects the markers left by a failed ``git stash pop`` / merge:
+    ``<<<<<<< ``, ``||||||| `` (diff3 base), ``>>>>>>> `` and a bare
+    ``=======`` separator.  The separator must be exactly seven equals so a
+    normal YAML scalar/key never counts as a false positive.
+    """
+    hits: list[tuple[int, str]] = []
+    for i, line in enumerate(text.splitlines(), 1):
+        if line.startswith(_CONFLICT_MARKER_PREFIXES) or line.rstrip() == "=======":
+            hits.append((i, line))
+    return hits
+
+
 def load(root: Optional[Path] = None, validate: bool = True) -> dict:
     """Load project.yaml from root directory.
 
@@ -126,9 +147,33 @@ def load(root: Optional[Path] = None, validate: bool = True) -> dict:
     path = root / "project.yaml"
     try:
         with open(path) as f:
-            data = yaml.load(f, Loader=_yaml_loader())
+            text = f.read()
     except FileNotFoundError as e:
+        # Still a FileNotFoundError ("no project" for guide.detect_state,
+        # tui.sync, session init) and also an unloadable-file error (see
+        # ProjectYamlMissingError).  Only *other* read errors (permission,
+        # IsADirectory, …) are wrapped as a plain parse error below.
         raise ProjectYamlMissingError(e.errno, e.strerror, e.filename) from e
+    except OSError as e:
+        raise ProjectYamlParseError(f"Could not read {path}: {e}") from e
+
+    # Guard against git conflict markers (e.g. a failed auto-stash pop during
+    # a merge).  project.yaml is the lock-protected source of truth, so a raw
+    # YAML scanner traceback here would be opaque; report the offending line
+    # and remediation instead.
+    markers = find_conflict_markers(text)
+    if markers:
+        lineno, marker = markers[0]
+        raise ProjectYamlParseError(
+            f"{path} contains git conflict markers from a failed stash/merge: "
+            f"line {lineno}: {marker.rstrip()!r}. Resolve the markers by hand "
+            f"(the file is read-only: chmod u+w it first), then re-run. "
+            f"'git checkout -- {path}' restores the committed file instead, "
+            f"but discards pm's uncommitted state."
+        )
+
+    try:
+        data = yaml.load(text, Loader=_yaml_loader())
     except yaml.YAMLError as e:
         raise ProjectYamlParseError(f"project.yaml is not valid YAML: {e}") from e
 
@@ -210,6 +255,14 @@ def _validate_plans(data: dict) -> None:
             current = parent_map.get(current)
 
 
+def dump_text(data: dict) -> str:
+    """The exact text :func:`save` writes for *data*."""
+    return _YAML_HEADER + yaml.dump(
+        data, Dumper=_yaml_dumper(data),
+        default_flow_style=False, sort_keys=False, allow_unicode=True,
+    )
+
+
 def save(data: dict, root: Optional[Path] = None) -> None:
     """Write project.yaml to root directory.
 
@@ -221,6 +274,15 @@ def save(data: dict, root: Optional[Path] = None) -> None:
     """
     if root is None:
         root = find_project_root()
+    save_text(dump_text(data), root)
+
+
+def save_text(text: str, root: Path) -> None:
+    """Write *text* as ``root/project.yaml`` the way :func:`save` does.
+
+    For a caller that already holds the exact bytes (e.g. a merge swapping
+    in a pre-merged registry).  The caller is responsible for the lock.
+    """
     path = root / "project.yaml"
     # Make writable if it exists and is read-only
     if path.exists():
@@ -228,11 +290,7 @@ def save(data: dict, root: Optional[Path] = None) -> None:
     # Atomic write: write to temp file, then rename
     tmp = path.with_suffix(".yaml.tmp")
     with open(tmp, "w") as f:
-        f.write(_YAML_HEADER)
-        yaml.dump(
-            data, f, Dumper=_yaml_dumper(data),
-            default_flow_style=False, sort_keys=False, allow_unicode=True,
-        )
+        f.write(text)
         f.flush()
         os.fsync(f.fileno())
     tmp.rename(path)

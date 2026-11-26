@@ -878,6 +878,26 @@ def pr_spec_approve(pr_id: str):
     trigger_tui_refresh()
 
 
+def _persist_with_backoff(root: Path, apply, *, attempts: int = 5,
+                          timeout: float = 5.0) -> dict:
+    """``store.locked_update`` with exponential backoff across the timeout.
+
+    For persisting an irreversible external side effect (e.g. a just-created
+    GitHub PR number) so a transient ``project.yaml.lock`` contention burst
+    can't strand it.  Raises the last :class:`StoreLockTimeout` if every
+    attempt times out.
+    """
+    delay = 0.2
+    for attempt in range(1, attempts + 1):
+        try:
+            return store.locked_update(root, apply, timeout=timeout)
+        except store.StoreLockTimeout:
+            if attempt == attempts:
+                raise
+            time.sleep(delay)
+            delay = min(delay * 2, 2.0)
+
+
 @pr.command("start")
 @click.argument("pr_id", default=None, required=False)
 @click.option("--workdir", default=None, help="Custom work directory")
@@ -1151,7 +1171,15 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
             pr["gh_pr_number"] = gh_pr_info["number"]
         data["project"]["active_pr"] = pr_id
 
-    data = store.locked_update(root, apply)
+    if gh_pr_info:
+        # A draft PR was just created on GitHub — an irreversible external side
+        # effect.  If persisting its number is lost to a transient lock timeout
+        # under concurrent pm operations, the PR is orphaned (created on GitHub
+        # but gh_pr_number=None) with no record to reconcile it. Retry the
+        # persist with backoff so a contention burst can't strand it.
+        data = _persist_with_backoff(root, apply)
+    else:
+        data = store.locked_update(root, apply)
     if blocked_at_lock:
         _report_launch_blocked(
             pr_id, blocked_at_lock, doing="starting",
@@ -2189,12 +2217,13 @@ def _pull_after_merge(data: dict, pr_entry: dict, repo_dir: str,
     If on a different branch (implying local work in progress), the pull
     is skipped to avoid disrupting the user's working state.
 
-    Dirty files are tolerated — git merge succeeds when they don't overlap
-    with incoming changes.  If they do overlap, the dirty files are stashed,
-    the merge is retried, and the stash is popped afterward.
+    Dirty files are tolerated (:func:`_ff_with_autostash`): pm's registry is
+    merged structurally, other overlapping files are stashed and restored.
 
-    Returns True if the pull completed (or was skipped), False if a merge
-    window was launched (caller should skip ``_finalize_merge``).
+    Returns True if the pull completed (or was skipped), False if it failed
+    (a merge window was launched when *resolve_window*; caller should skip
+    ``_finalize_merge``).  Exits 1 without a window when the registry lock
+    stayed busy: nothing was touched, re-running is the whole fix.
     """
     # Detect current branch — skip pull if not already on base branch
     head_result = git_ops.run_git("rev-parse", "--abbrev-ref", "HEAD",
@@ -2204,31 +2233,26 @@ def _pull_after_merge(data: dict, pr_entry: dict, repo_dir: str,
         click.echo(f"Repo is on '{current_branch}', skipping pull of {base_branch}.")
         return True
 
-    repo_path = Path(repo_dir)
     pr_display = _pr_display_id(pr_entry)
 
-    # Fetch + merge (not pull --rebase, which requires a fully clean tree)
+    # Fetch + merge (not pull --rebase, which requires a fully clean tree).
+    # The fetch stays outside the registry lock _ff_with_autostash holds.
     git_ops.run_git("fetch", "origin", cwd=repo_dir, check=False)
-    merge_result = git_ops.run_git("merge", "--ff-only",
-                                   f"origin/{base_branch}",
-                                   cwd=repo_dir, check=False)
-
-    # If merge failed due to dirty-file overlap, stash and retry
-    stash_info = None
-    if merge_result.returncode != 0 and _is_dirty_overlap_error(merge_result):
-        stash_info = _stash_for_merge(repo_path, pr_display)
-        if stash_info:
-            merge_result = git_ops.run_git("merge", "--ff-only",
-                                           f"origin/{base_branch}",
-                                           cwd=repo_dir, check=False)
+    merge_result = _ff_with_autostash(repo_dir, f"origin/{base_branch}",
+                                      pr_display)
 
     if merge_result.returncode != 0:
-        if stash_info:
-            _unstash_after_merge(repo_path, stash_info)
         error_detail = (merge_result.stdout.strip() + "\n"
                         + merge_result.stderr.strip()).strip()
         error_msg = (f"Pull failed in {repo_dir}:\n{error_detail}")
         click.echo(error_msg, err=True)
+        if isinstance(merge_result, _RegistryLockBusy):
+            # Nothing to resolve, and a recovery session told to "stash and
+            # pull" would push the registry through git's text stash.
+            click.echo("Once that pm process is done, run 'pm pr merge "
+                       f"--propagation-only {pr_entry['id']}' to finish.",
+                       err=True)
+            raise SystemExit(1)
         if resolve_window:
             _launch_merge_window(data, pr_entry, error_msg,
                                  background=background, transcript=transcript,
@@ -2238,8 +2262,6 @@ def _pull_after_merge(data: dict, pr_entry: dict, repo_dir: str,
                    f"--propagation-only {pr_entry['id']}' to finalize.", err=True)
         return False
 
-    if stash_info:
-        _unstash_after_merge(repo_path, stash_info)
     click.echo(f"Pulled latest {base_branch}.")
     return True
 
@@ -2461,17 +2483,8 @@ def _publish_local(data: dict, root: Path, pr_entry: dict, workdir: str,
                                f"{base_branch} in {repo_dir} moved during "
                                f"the merge ({git_ops.git_detail(upd)})")
     else:
-        repo_path = Path(repo_dir)
-        merge_r = git_ops.run_git("merge", "--ff-only", merge_sha,
-                                  cwd=repo_dir, check=False)
-        stash_info = None
-        if merge_r.returncode != 0 and _is_dirty_overlap_error(merge_r):
-            stash_info = _stash_for_merge(repo_path, _pr_display_id(pr_entry))
-            if stash_info:
-                merge_r = git_ops.run_git("merge", "--ff-only", merge_sha,
-                                          cwd=repo_dir, check=False)
-        if stash_info:
-            _unstash_after_merge(repo_path, stash_info)
+        merge_r = _ff_with_autostash(repo_dir, merge_sha,
+                                     _pr_display_id(pr_entry))
         if merge_r.returncode != 0 and _ref(
                 repo_dir, f"refs/heads/{base_branch}") != base_sha:
             # A commit landed on the checked-out base after the CAS check.
@@ -3178,72 +3191,352 @@ def _is_dirty_overlap_error(result: subprocess.CompletedProcess) -> bool:
 
 
 def _dirty_file_paths(cwd: Path) -> list[str]:
-    """Return relative paths of dirty files in the working tree."""
-    result = git_ops.run_git("status", "--porcelain", cwd=cwd, check=False)
+    """Repo-relative paths of the dirty files a pathspec stash can carry.
+
+    Parsed from ``git status --porcelain -z``: the paths are raw (never
+    C-quoted), so they can be fed back to git as pathspecs, and a
+    worktree-only change (`` M file``) keeps its leading status column.
+    ``-unormal`` overrides a user's ``status.showUntrackedFiles=no``, which
+    would hide an untracked file that blocks the fast-forward.
+
+    Two kinds of staged change are left out, so they stay staged in place
+    (the fast-forward keeps them unless it changes those paths, and the
+    stash records the whole index anyway):
+
+    - a staged deletion: the path is in neither the index nor the working
+      tree, so ``git stash push -- <path>`` saves the stash and then fails
+      on it ("did not match any files");
+    - a staged rename, both paths: its source is such a deletion, and a
+      stash of the destination alone makes the pop a rename/delete
+      conflict.  ``status.renames=true`` reports it as one rename even
+      when the user's config turns rename detection off.
+    """
+    result = git_ops.run_git("-c", "status.renames=true", "status",
+                             "--porcelain", "-z", "-unormal",
+                             cwd=cwd, check=False)
+    entries = (result.stdout or "").split("\0")
     paths = []
-    for line in result.stdout.strip().splitlines():
-        if not line.strip():
+    i = 0
+    while i < len(entries):
+        entry = entries[i]
+        i += 1
+        if len(entry) < 4:
             continue
-        # porcelain format: XY filename  (or XY orig -> renamed)
-        path = line[3:]
-        if " -> " in path:
-            path = path.split(" -> ", 1)[1]
-        paths.append(path)
+        xy = entry[:2]
+        if "R" in xy or "C" in xy:
+            i += 1          # the rename/copy source follows as its own entry
+        if xy[0] not in "DR":
+            paths.append(entry[3:])
     return paths
+
+
+# pm's registry inside the repo a merge updates (the live state when the pm
+# dir is internal).  It is structured, lock-guarded data, so it never goes
+# through git's text stash: a text pop against a concurrently rewritten
+# registry is what wrote conflict markers into it (pr-ca6981c).  Its lock and
+# the atomic-save temp file are never stashed either: sweeping a writer's
+# ``project.yaml.tmp`` into the stash made its rename fail (#253 S74).
+_REGISTRY_REL = "pm/project.yaml"
+_NEVER_STASH_RELS = frozenset({_REGISTRY_REL, "pm/project.yaml.lock",
+                               "pm/project.yaml.tmp"})
+_AUTO_STASH_MSG = "pm: auto-stash for merge"
+# How long a merge waits for the registry lock before giving up without
+# touching the checkout.  The lock is then held across local git operations
+# only (never a network call).
+_MERGE_STASH_LOCK_TIMEOUT = 10.0
+
+
+def _registry_root(cwd: Path) -> Path | None:
+    """The pm dir inside *cwd* whose registry a merge there may rewrite."""
+    root = cwd / "pm"
+    return root if (root / "project.yaml").is_file() else None
+
+
+def _tree_entry(cwd: Path, rev: str, rel: str) -> tuple[str, str] | None:
+    """``(mode, blob sha)`` of *rel* in *rev*, or None when absent."""
+    r = git_ops.run_git("ls-tree", "-z", rev, "--", rel, cwd=cwd,
+                        check=False)
+    entry = r.stdout.split("\0", 1)[0] if r.returncode == 0 else ""
+    meta, _, path = entry.partition("\t")
+    parts = meta.split()
+    if path != rel or len(parts) != 3 or parts[1] != "blob":
+        return None
+    return parts[0], parts[2]
+
+
+def _plan_registry(repo: Path, target: str) -> dict | None:
+    """Pre-merge the live registry with *target*'s, for :func:`_apply_registry`.
+
+    ``store.merge_3way(base=HEAD, ours=target, theirs=live)``: the live state
+    wins true conflicts and the incoming committed changes are kept wherever
+    the live state still has the ancestor's value — the same roles as
+    :func:`_resolve_project_yaml_pop`.  Runs before the registry lock is taken
+    (parsing and dumping a large registry is the slow part); the apply step
+    re-checks the live text under the lock.
+
+    None when the target does not change the registry, the update is not a
+    fast-forward, or the registry cannot be merged structurally (unreadable,
+    invalid, conflict markers, untracked, an unmerged index entry) — git
+    then handles it like any other file.
+    """
+    from pm_core import integration
+    root = _registry_root(repo)
+    if root is None:
+        return None
+    head = _tree_entry(repo, "HEAD", _REGISTRY_REL)
+    incoming = _tree_entry(repo, target, _REGISTRY_REL)
+    if head is None or incoming is None or head == incoming:
+        return None
+    if not integration.is_ancestor(repo, "HEAD", target):
+        # Not a fast-forward: HEAD already contains the target ("Already up
+        # to date": another update got further first) or has diverged, and
+        # git leaves the registry alone.  Merging toward the target's older
+        # blob would revert committed registry changes in the live state.
+        return None
+    ls = git_ops.run_git("ls-files", "-s", "-z", "--", _REGISTRY_REL,
+                         cwd=repo, check=False)
+    entries = [e for e in ls.stdout.split("\0") if e]
+    if len(entries) != 1 or entries[0].split()[2] != "0":
+        return None
+    index = tuple(entries[0].split()[:2])
+    blobs = []
+    for _mode, sha in (head, incoming):
+        r = git_ops.run_git("cat-file", "blob", sha, cwd=repo, check=False)
+        if r.returncode != 0:
+            return None
+        blobs.append(r.stdout)
+    # Parsed once, here: a re-merge under the lock (the live file changed
+    # meanwhile) then parses only the live text.  merge_3way never mutates
+    # its inputs, so the parsed values can be merged again.
+    parsed = [_parse_registry(t) for t in blobs]
+    if None in parsed:
+        return None
+    plan = {"root": root, "base": parsed[0], "incoming_data": parsed[1],
+            "incoming_text": blobs[1], "head": head, "incoming": incoming,
+            "index": index}
+    try:
+        live_text = (root / "project.yaml").read_text()
+    except OSError:
+        return None
+    return plan if _merge_registry_plan(plan, live_text) else None
+
+
+def _parse_registry(text: str) -> dict | None:
+    """*text* parsed as a registry mapping, or None (markers, invalid YAML,
+    not a mapping)."""
+    if store.find_conflict_markers(text):
+        return None
+    try:
+        data = yaml.load(text, Loader=store._yaml_loader())
+    except yaml.YAMLError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _merge_registry_plan(plan: dict, live_text: str) -> bool:
+    """Fill *plan* with the merge of *live_text*; False if not mergeable."""
+    live = _parse_registry(live_text)
+    if live is None:
+        return False
+    incoming = plan["incoming_data"]
+    merged = store.merge_3way(plan["base"], incoming, live)
+    if merged == live:
+        new_text = live_text            # keep the exact local bytes
+    elif merged == incoming:
+        new_text = plan["incoming_text"]
+    else:
+        new_text = store.dump_text(merged)
+    plan.update(live_text=live_text, new_text=new_text,
+                combined=merged != live and merged != incoming)
+    return True
+
+
+def _apply_registry(repo: Path, plan: dict) -> bool:
+    """Swap the pre-merged registry in and stage the incoming blob.
+
+    The caller holds the registry lock.  The live file is replaced in one
+    atomic rename, and its index entry is set to *target*'s blob, so the
+    fast-forward keeps that entry without rewriting the file (two-way merge:
+    index == target).  Lock-free readers (a writer's pre-lock load, the TUI)
+    therefore never see it missing, half-written or reverted.  Returns False
+    (nothing changed) if the registry can no longer be merged.
+    """
+    root = plan["root"]
+    try:
+        live_text = (root / "project.yaml").read_text()
+    except OSError:
+        return False
+    if live_text != plan["live_text"] and \
+            not _merge_registry_plan(plan, live_text):
+        return False
+    if plan["new_text"] != live_text:
+        store.save_text(plan["new_text"], root)
+    if not _stage_registry(repo, plan["incoming"]):
+        # A failed update-index leaves the index as it was.
+        _restore_registry(repo, plan, restage=False)
+        return False
+    return True
+
+
+def _stage_registry(repo: Path, entry: tuple[str, str]) -> bool:
+    """Set the registry's index entry to ``(mode, sha)`` (worktree untouched)."""
+    mode, sha = entry
+    return git_ops.run_git("update-index", "--cacheinfo",
+                           f"{mode},{sha},{_REGISTRY_REL}", cwd=repo,
+                           check=False).returncode == 0
+
+
+def _restore_registry(repo: Path, plan: dict, *, restage: bool = True) -> None:
+    """Undo :func:`_apply_registry` after a failed update (exact bytes).
+
+    If the original index entry cannot be put back (e.g. another git
+    process holds ``index.lock``), the incoming blob stays staged on the old
+    HEAD, and a later ``git commit`` would commit it.  Nothing undoes that
+    silently, so say how to fix it.
+    """
+    path = plan["root"] / "project.yaml"
+    try:
+        current = path.read_text()
+    except OSError:
+        current = None
+    if current != plan["live_text"]:
+        store.save_text(plan["live_text"], plan["root"])
+    if restage and not _stage_registry(repo, plan["index"]):
+        mode, sha = plan["index"]
+        click.echo(f"Warning: could not restore the index entry of "
+                   f"{_REGISTRY_REL}, so the incoming version is still "
+                   f"staged. Restore it with `git update-index --cacheinfo "
+                   f"{mode},{sha},{_REGISTRY_REL}`.", err=True)
+
+
+def _stash_top(cwd: Path) -> str:
+    """Commit of ``stash@{0}``, or "" when the stash list is empty."""
+    top = git_ops.run_git("rev-parse", "-q", "--verify", "stash@{0}",
+                          cwd=cwd, check=False)
+    return top.stdout.strip() if top.returncode == 0 else ""
+
+
+def _stash_ref(cwd: Path, sha: str) -> str | None:
+    """The ``stash@{N}`` currently naming stash commit *sha*, if any."""
+    if _stash_top(cwd) == sha:
+        return "stash@{0}"
+    listing = git_ops.run_git("stash", "list", "--format=%gd%x09%H",
+                              cwd=cwd, check=False)
+    for line in (listing.stdout or "").splitlines():
+        ref, _, entry_sha = line.partition("\t")
+        if entry_sha.strip() == sha:
+            return ref
+    return None
+
+
+def _stashable_paths(cwd: Path, dirty: list[str]) -> list[str]:
+    """*dirty* minus :data:`_NEVER_STASH_RELS`.
+
+    Porcelain collapses an untracked directory to one ``dir/`` entry; one
+    that contains the registry (an uncommitted ``pm/``) is expanded to its
+    files so the registry and its lock still stay out of the stash.
+    """
+    out = []
+    for p in dirty:
+        if p in _NEVER_STASH_RELS:
+            continue
+        if p.endswith("/") and any(r.startswith(p) for r in _NEVER_STASH_RELS):
+            ls = git_ops.run_git("ls-files", "-z", "--others",
+                                 "--exclude-standard", "--", f":(literal){p}",
+                                 cwd=cwd, check=False)
+            out.extend(f for f in ls.stdout.split("\0")
+                       if f and f not in _NEVER_STASH_RELS)
+            continue
+        out.append(p)
+    return out
 
 
 def _stash_for_merge(cwd: Path, pr_display_id: str = "",
                      lock_tui: bool = True) -> dict | None:
-    """Stash dirty files so a merge can proceed.
+    """Stash the dirty files (never the registry) so a merge can proceed.
 
-    If pm/ files are among the dirty files and *lock_tui* is True, writes
-    a merge-lock marker so the TUI shows an overlay while the files are
-    temporarily reverted.
-
-    Returns a dict with stash metadata (``has_pm``, ``count``) on success,
-    or None if stashing failed or there was nothing to stash.
+    Explicit pathspecs leave out :data:`_NEVER_STASH_RELS` — the registry is
+    reconciled structurally by :func:`_ff_with_autostash` instead.  If pm/
+    files get stashed and *lock_tui* is True, the TUI shows its merge-lock
+    overlay meanwhile.  Returns the stash info for
+    :func:`_unstash_after_merge`, or None when nothing was stashed.
     """
-    dirty = _dirty_file_paths(cwd)
-    if not dirty:
+    remaining = _stashable_paths(cwd, _dirty_file_paths(cwd))
+    if not remaining:
         return None
-
-    has_pm = any(p.startswith("pm/") or p.startswith("pm\\") for p in dirty)
-
+    has_pm = any(p.startswith("pm/") for p in remaining)
     if has_pm and lock_tui:
         trigger_tui_merge_lock(pr_display_id)
-
-    click.echo(f"Stashing {len(dirty)} dirty file(s) to proceed with merge...")
-    stash_r = git_ops.run_git("stash", "push", "--include-untracked",
-                               "-m", "pm: auto-stash for merge",
-                               cwd=cwd, check=False)
-    if stash_r.returncode != 0:
-        click.echo(f"Failed to stash: {stash_r.stderr.strip()}", err=True)
+    click.echo(f"Stashing {len(remaining)} dirty file(s) to proceed with "
+               f"merge...")
+    before = _stash_top(cwd)
+    stash_r = git_ops.run_git(
+        "stash", "push", "--include-untracked", "-m", _AUTO_STASH_MSG,
+        "--", *(f":(literal){p}" for p in remaining), cwd=cwd, check=False)
+    # Popped by commit later, not by position: anything else pushing a stash
+    # meanwhile would otherwise get popped instead.  An unchanged top means
+    # nothing was saved ("No local changes to save", rc 0): the top is then
+    # someone else's stash.
+    after = _stash_top(cwd)
+    saved = bool(after) and after != before
+    if saved and stash_r.returncode != 0:
+        # git saved the stash and then failed reverting the files (e.g. a
+        # path that vanished since the status).  If it reverted nothing,
+        # drop it, so a failed stash never leaks one; otherwise the pop
+        # after the update restores what it did revert.  No live registry
+        # is passed: a registry change in it (a staged hunk) counts as not
+        # applied, so such a stash is kept and popped.
+        if _stash_already_applied(cwd, after, lambda: None):
+            ref = _stash_ref(cwd, after)
+            if ref is not None:
+                git_ops.run_git("stash", "drop", "-q", ref, cwd=cwd,
+                                check=False)
+            saved = False
+        else:
+            click.echo(f"Warning: git stash failed after saving the stash; "
+                       f"pm restores it after the update:\n"
+                       f"{git_ops.git_detail(stash_r)}", err=True)
+    if not saved:
+        click.echo(f"Failed to stash: {git_ops.git_detail(stash_r)}",
+                   err=True)
         if has_pm and lock_tui:
             trigger_tui_merge_unlock()
         return None
+    return {"has_pm": has_pm, "lock_tui": lock_tui, "stash": after,
+            "count": len(remaining)}
 
-    return {"has_pm": has_pm, "count": len(dirty), "lock_tui": lock_tui}
+
+def _unmerged_paths(cwd: Path) -> list[str]:
+    """Repo-relative paths with unmerged index entries (raw, ``-z``)."""
+    r = git_ops.run_git("diff", "--name-only", "-z", "--diff-filter=U",
+                        cwd=cwd, check=False)
+    return [p for p in (r.stdout or "").split("\0") if p]
 
 
-def _resolve_project_yaml_pop(cwd: Path) -> bool:
+def _resolve_project_yaml_pop(cwd: Path, ref: str = "stash@{0}") -> bool:
     """Resolve a ``project.yaml`` conflict left by a failed ``stash pop``.
 
     pm keeps its live state uncommitted in the main repo, so a merge that
     brings committed ``project.yaml`` changes (an agent's cross-PR note on
     its branch) makes the restoring pop conflict and leaves markers that
     break every pm command.  Merges the file structurally instead; drops the
-    stash when nothing else conflicted.  Returns True when the pop is fully
-    resolved.
+    stash *ref* when nothing else conflicted.  Returns True when the pop is
+    fully resolved.
+
+    pm's merge auto-stash never holds the repo's own registry
+    (:data:`_NEVER_STASH_RELS`), so this only fires for another pm registry
+    the stash carried (a nested pm project; its lock is not the one
+    :func:`_ff_with_autostash` holds).  Only pm registries are merged — a
+    file that merely has this name is left for the user.
     """
-    unmerged = git_ops.run_git("diff", "--name-only", "--diff-filter=U",
-                               cwd=cwd, check=False).stdout.split()
+    unmerged = _unmerged_paths(cwd)
     yaml_paths = [p for p in unmerged if Path(p).name == "project.yaml"]
     if not yaml_paths:
         return False
     loader = store._yaml_loader()
     for rel in yaml_paths:
         texts = []
-        for rev in ("stash@{0}^1", "HEAD", "stash@{0}"):
+        for rev in (f"{ref}^1", "HEAD", ref):
             r = git_ops.run_git("show", f"{rev}:{rel}", cwd=cwd, check=False)
             if r.returncode != 0:
                 return False
@@ -3253,6 +3546,9 @@ def _resolve_project_yaml_pop(cwd: Path) -> bool:
                                   for t in texts)
         except yaml.YAMLError:
             return False
+        if not all(isinstance(d, dict) and "project" in d
+                   for d in (ours, theirs)):
+            return False
         root = (cwd / rel).parent
         with store._lock(root):
             store.save(store.merge_3way(base, ours, theirs), root)
@@ -3261,26 +3557,292 @@ def _resolve_project_yaml_pop(cwd: Path) -> bool:
     if len(yaml_paths) < len(unmerged):
         return False
     git_ops.run_git("reset", "-q", cwd=cwd, check=False)
-    git_ops.run_git("stash", "drop", "-q", cwd=cwd, check=False)
+    git_ops.run_git("stash", "drop", "-q", ref, cwd=cwd, check=False)
     return True
 
 
+def _restore_merge_stash(cwd: Path, sha: str, count: int) -> bool:
+    """Pop pm's auto-stash *sha*; on failure keep it and say how to finish."""
+    ref = _stash_ref(cwd, sha)
+    if ref is None:
+        click.echo(f"Warning: pm's auto-stash {sha[:12]} is no longer in the "
+                   f"stash list, so it was not restored. If your changes are "
+                   f"missing, recover them with `git stash apply {sha}`.",
+                   err=True)
+        return False
+    pop_r = git_ops.run_git("stash", "pop", ref, cwd=cwd, check=False)
+    if pop_r.returncode == 0:
+        click.echo(f"Restored {count} stashed file(s).")
+        return True
+    unmerged = _unmerged_paths(cwd)
+    try:
+        resolved = bool(unmerged) and _resolve_project_yaml_pop(cwd, ref)
+    except (store.StoreLockTimeout, OSError):
+        resolved = False
+    if resolved:
+        click.echo(f"Restored {count} stashed file(s).")
+        return True
+    if unmerged:
+        click.echo(f"Warning: restoring your auto-stashed local changes "
+                   f"conflicted in: {', '.join(unmerged)}.\n  Those files "
+                   f"now hold conflict markers. The stash is kept as {ref} "
+                   f"('{_AUTO_STASH_MSG}'): resolve the files, then run "
+                   f"`git stash drop {ref}`.", err=True)
+        return False
+    # A refused pop can still have applied part of the stash: git >= 2.34
+    # restores the tracked changes before it refuses an untracked file that
+    # now exists (and a failed drop comes after a full apply), so a second
+    # `git stash pop` would refuse on the restored part.
+    click.echo(f"Warning: git could not restore all of your auto-stashed "
+               f"local changes:\n{git_ops.git_detail(pop_r)}\n  Nothing was "
+               f"lost: {ref} ('{_AUTO_STASH_MSG}') still holds every change, "
+               f"but git may have restored part of them already, and "
+               f"`git stash pop {ref}` then refuses again. Compare it with "
+               f"the working tree (`git stash show -p {ref}`; an untracked "
+               f"file: `git show {ref}^3:<path>`), restore what is missing, "
+               f"then run `git stash drop {ref}`.", err=True)
+    return False
+
+
 def _unstash_after_merge(cwd: Path, info: dict) -> bool:
-    """Pop the stash and remove the TUI merge-lock if one was set.
+    """Pop the auto-stash by its commit; keep it with instructions on failure.
 
-    Returns True if the stash popped cleanly.
+    Returns True if it was restored.
     """
-    pop_r = git_ops.run_git("stash", "pop", cwd=cwd, check=False)
-    clean = pop_r.returncode == 0 or _resolve_project_yaml_pop(cwd)
+    try:
+        return _restore_merge_stash(cwd, info["stash"], info.get("count", 0))
+    finally:
+        if info.get("has_pm") and info.get("lock_tui"):
+            trigger_tui_merge_unlock()
 
-    if info.get("has_pm") and info.get("lock_tui"):
-        trigger_tui_merge_unlock()
 
-    if clean:
-        click.echo(f"Restored {info['count']} stashed file(s).")
-    else:
-        click.echo("Warning: stash pop had conflicts. Resolve manually.", err=True)
-    return clean
+def _no_autostash() -> tuple[str, ...]:
+    """``--no-autostash`` for ``git merge``, on a git that has it.
+
+    A user's ``merge.autoStash=true`` would otherwise make the fast-forward
+    text-stash the swapped-in registry, reset it and pop it back over the
+    incoming one (conflict markers + a leaked stash, rc 0).  git < 2.27 has
+    neither the option nor the config, and rejects the unknown option.  An
+    unknown version ((0, 0)) still gets the flag.
+    """
+    from pm_core import integration
+    return () if (0, 0) < integration._git_version() < (2, 27) \
+        else ("--no-autostash",)
+
+
+class _RegistryLockBusy(subprocess.CompletedProcess):
+    """:func:`_ff_with_autostash` gave up waiting for the registry lock.
+
+    Nothing was touched, so there is nothing to recover: the update just
+    needs re-running once the other pm process (e.g. an open ``pm edit``)
+    lets go.
+    """
+
+
+def _ff_with_autostash(repo_dir: str | Path, target: str,
+                       pr_display_id: str = "") -> subprocess.CompletedProcess:
+    """``git merge --ff-only target`` in *repo_dir*, keeping local state.
+
+    - pm's live registry (``pm/project.yaml``), when *target* changes it, is
+      merged structurally (:func:`_plan_registry`) and swapped in atomically
+      before the fast-forward, which then leaves the file alone.  It is
+      restored byte-for-byte if the update fails.
+    - Other dirty files that block the fast-forward are auto-stashed and
+      restored (:func:`_stash_for_merge`).
+
+    The registry lock is held across all of it, so a concurrent pm write can
+    neither interleave with the update nor save a registry it read before
+    over the merged one (#253 S74).  If the lock stays busy the checkout is
+    left untouched and a :class:`_RegistryLockBusy` result is returned.
+    After a successful update with everything restored, leaked auto-stashes
+    are reaped (still under the lock; so only in a repo that holds pm's
+    registry).
+    """
+    repo_path = Path(repo_dir)
+    # The plan runs before the lock (seconds on a large registry): pin the
+    # target to one commit, since a concurrent fetch can move a ref like
+    # ``origin/<base>`` meanwhile and the index is staged for the plan's.
+    target = _ref(repo_dir, f"{target}^{{commit}}") or target
+
+    def ff():
+        return git_ops.run_git("merge", "--ff-only", *_no_autostash(),
+                               target, cwd=repo_dir, check=False)
+
+    restored = True
+    planned_head = _ref(repo_dir, "HEAD")
+    plan = _plan_registry(repo_path, target)
+    reg_root = _registry_root(repo_path)
+    with contextlib.ExitStack() as held:
+        if reg_root is not None:
+            try:
+                held.enter_context(store._lock(
+                    reg_root, timeout=_MERGE_STASH_LOCK_TIMEOUT))
+            except store.StoreLockTimeout as e:
+                return _RegistryLockBusy(
+                    ["git", "merge", "--ff-only", target], 1, "",
+                    f"{e}\npm did not touch {repo_dir}.")
+        if _ref(repo_dir, "HEAD") != planned_head:
+            # Another update moved HEAD while this one planned.  The plan's
+            # merge base and the HEAD entry the auto-stash is taken against
+            # are stale (a stash carrying a registry change is refused on
+            # pop), so plan again, under the lock this time.
+            plan = _plan_registry(repo_path, target)
+        if plan is not None and not _apply_registry(repo_path, plan):
+            plan = None
+        merge_r = None
+        try:
+            merge_r = ff()
+            if merge_r.returncode != 0 and _is_dirty_overlap_error(merge_r):
+                # A stash records the whole index.  Stash against HEAD's
+                # registry entry, so the stash never carries a registry
+                # change that a later manual pop would text-merge.
+                if plan is not None:
+                    _stage_registry(repo_path, plan["head"])
+                info = _stash_for_merge(repo_path, pr_display_id)
+                if plan is not None:
+                    _stage_registry(repo_path, plan["incoming"])
+                if info:
+                    try:
+                        merge_r = ff()
+                    finally:
+                        restored = _unstash_after_merge(repo_path, info)
+        finally:
+            if plan is not None:
+                if merge_r is not None and merge_r.returncode == 0:
+                    if plan["combined"]:
+                        click.echo(f"Merged {_REGISTRY_REL} (local pm state "
+                                   f"+ merged changes).")
+                else:
+                    _restore_registry(repo_path, plan)
+        if merge_r.returncode == 0 and restored and reg_root is not None:
+            # Under the lock, like every pm auto-stash push and pop: another
+            # update's in-flight auto-stash (stored, files not yet reverted,
+            # or applied but not yet dropped) is then never taken for an
+            # applied leftover, nor shifted under its positional drop.  A
+            # repo without pm's registry (a standalone pm dir) has no such
+            # lock, so its leaked stashes are left to the user.
+            _reap_auto_stashes(repo_path)
+    return merge_r
+
+
+def _registry_change_applied(cwd: Path, sha: str, rel: str,
+                             current: dict | None) -> bool:
+    """True if stash *sha*'s registry changes are all in *current*."""
+    if current is None:
+        return False
+    parsed = []
+    for rev in (f"{sha}^1", sha):
+        r = git_ops.run_git("show", f"{rev}:{rel}", cwd=cwd, check=False)
+        parsed.append(_parse_registry(r.stdout) if r.returncode == 0
+                      else None)
+        if parsed[-1] is None:
+            return False
+    # Live (current) wins conflicts, so the result differs from current only
+    # where the stash changed something current still has at base value.
+    return store.merge_3way(*parsed, current) == current
+
+
+def _worktree_has(cwd: Path, blob_rev: str, rel: str) -> bool:
+    """True if the working-tree file *rel* matches *blob_rev* (or both absent)."""
+    want = git_ops.run_git("rev-parse", "-q", "--verify", blob_rev, cwd=cwd,
+                           check=False)
+    path = cwd / rel
+    if want.returncode != 0:
+        return not path.exists() and not path.is_symlink()
+    if not path.is_file():
+        return False
+    have = git_ops.run_git("hash-object", "--", rel, cwd=cwd, check=False)
+    return have.returncode == 0 and have.stdout.strip() == want.stdout.strip()
+
+
+def _stash_already_applied(cwd: Path, sha: str, current) -> bool:
+    """True if every change stash *sha* holds is already in the working tree.
+
+    *current* returns the live registry (or None).  The registry, which
+    takes parsing, is checked last and only for a stash that changed it.
+    ``--no-renames``: a renamed file's old path must be gone too.
+    """
+    tracked = git_ops.run_git("diff", "--name-only", "--no-renames", "-z",
+                              f"{sha}^1", sha, cwd=cwd, check=False)
+    if tracked.returncode != 0:
+        return False
+    paths = [p for p in tracked.stdout.split("\0") if p]
+    for rel in paths:
+        if rel != _REGISTRY_REL and not _worktree_has(cwd, f"{sha}:{rel}",
+                                                      rel):
+            return False
+    if git_ops.run_git("rev-parse", "-q", "--verify", f"{sha}^3", cwd=cwd,
+                       check=False).returncode == 0:
+        untracked = git_ops.run_git("ls-tree", "-r", "-z", "--name-only",
+                                    f"{sha}^3", cwd=cwd, check=False)
+        if untracked.returncode != 0:
+            return False
+        for rel in filter(None, untracked.stdout.split("\0")):
+            if not _worktree_has(cwd, f"{sha}^3:{rel}", rel):
+                return False
+    return _REGISTRY_REL not in paths or _registry_change_applied(
+        cwd, sha, _REGISTRY_REL, current())
+
+
+def _reap_auto_stashes(cwd: Path) -> int:
+    """Drop leaked ``pm: auto-stash for merge`` entries already applied.
+
+    A stash is dropped only when every change it holds is already in the
+    working tree (the registry compared structurally), so nothing is lost;
+    other auto-stashes are kept and listed.  Other stashes (WIP, the user's)
+    are never touched.  The caller holds the registry lock, which every pm
+    auto-stash push and pop also runs under.  Returns the number dropped.
+    """
+    listing = git_ops.run_git("stash", "list", "--format=%gd%x09%H%x09%gs",
+                              cwd=cwd, check=False)
+    if listing.returncode != 0:
+        return 0
+    candidates = []
+    for line in (listing.stdout or "").splitlines():
+        parts = line.split("\t", 2)
+        if len(parts) != 3:
+            continue
+        ref, sha, subject = parts
+        # subject: "On <branch>: <message>" (ref names cannot contain ':')
+        if subject.partition(": ")[2] == _AUTO_STASH_MSG:
+            candidates.append((ref, sha))
+    if not candidates:
+        return 0
+    loaded: list = []
+
+    def current() -> dict | None:
+        # Only a stash from an older pm carries a registry change; skip the
+        # parse (the caller holds the registry lock) unless one does.
+        if not loaded:
+            reg_root = _registry_root(cwd)
+            try:
+                loaded.append(store.load(reg_root, validate=False)
+                              if reg_root is not None else None)
+            except store.ProjectYamlParseError:
+                loaded.append(None)
+        return loaded[0]
+
+    dropped, kept = 0, []
+    # Highest index first, so the lower refs stay valid while dropping.
+    for ref, sha in sorted(candidates, key=lambda c: int(c[0][7:-1]),
+                           reverse=True):
+        if not _stash_already_applied(cwd, sha, current):
+            kept.append(sha)
+            continue
+        if _stash_ref(cwd, sha) == ref and git_ops.run_git(
+                "stash", "drop", "-q", ref, cwd=cwd,
+                check=False).returncode == 0:
+            dropped += 1
+    if dropped:
+        click.echo(f"Dropped {dropped} leaked pm auto-stash(es) whose changes "
+                   f"are already in the working tree.")
+    if kept:
+        refs = [r for r in (_stash_ref(cwd, s) for s in kept) if r]
+        click.echo(f"Note: {len(refs)} older pm auto-stash(es) hold changes "
+                   f"not in the working tree: {', '.join(refs)}. Inspect with "
+                   f"`git stash show -p <ref>`; drop with "
+                   f"`git stash drop <ref>`.", err=True)
+    return dropped
 
 
 def _cleanup_pr(pr_entry: dict, root: Path, force: bool) -> bool:

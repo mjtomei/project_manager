@@ -327,6 +327,8 @@ def test_merge_prompt_is_recovery_only():
     assert "already-completed merge" in text
     assert "Do NOT push" in text
     assert "gh pr merge" in text
+    # The registry never goes through a text stash (pr-ca6981c).
+    assert "`pm/project.yaml` is pm's live state: never stash" in text
 
 
 def test_list_line_shows_return_marker():

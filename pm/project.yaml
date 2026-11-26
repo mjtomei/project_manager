@@ -22968,7 +22968,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/200
   gh_pr_number: 200
   created_at: '2026-05-04T19:50:22.167828+00:00'
-  updated_at: '2026-05-25T00:42:58.086578+00:00'
+  updated_at: '2026-11-26T17:10:48.568568+00:00'
   started_at: '2026-05-04T19:53:30.713246+00:00'
   reviewed_at: '2026-05-05T17:29:39.794582+00:00'
   merged_at: null
@@ -22987,6 +22987,20 @@ prs:
       completes AND on review/qa/merge transitions, not just the start-gate row.'
     created_at: '2026-05-25T00:42:57Z'
     last_edited: '2026-05-25T00:42:57Z'
+  - id: note-c42e0ca
+    text: 'From pr-ca6981c (#222) review c6a2 i2: pm merge''s main-repo update (_ff_with_autostash,
+      pm_core/cli/pr.py) holds pm/project.yaml.lock (store._lock on the pm root) across
+      the whole fast-forward. During that time it stages the target''s pm/project.yaml
+      blob in the REAL index (update-index --cacheinfo) and relies on HEAD and that
+      index entry not changing under the lock. store_commit (this PR) does update-ref
+      refs/heads/<base> plus update-index --cacheinfo pm/project.yaml on the real
+      index (and the rollback after a failed push) under its own yaml-commit lock
+      only. It can therefore interleave with a merge: it would overwrite the staged
+      entry or move the checked-out base mid-update (the update then fails, or the
+      PR returns to sign-off). Take store._lock(<pm root>) around those local ref/index
+      writes as well (never across the git push), once #222 is on master.'
+    created_at: '2026-11-26T17:10:48Z'
+    last_edited: '2026-11-26T17:10:48Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-f74988c-improvement-pm-pr-start-auto-commits-203ee4e9
 - id: pr-23d97f8
   plan: null
@@ -31063,7 +31077,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/222
   gh_pr_number: 222
   created_at: '2026-05-21T04:06:05.061620+00:00'
-  updated_at: '2026-10-21T23:45:02.916394+00:00'
+  updated_at: '2026-11-26T20:25:03.729968+00:00'
   started_at: '2026-05-25T02:58:20.169677+00:00'
   reviewed_at: '2026-05-25T03:13:02.415469+00:00'
   merged_at: null
@@ -31121,6 +31135,185 @@ prs:
       so picker merges self-heal like real merge conflicts do.'
     created_at: '2026-05-24T21:48:25Z'
     last_edited: '2026-05-24T21:48:25Z'
+  - id: note-87e64d7
+    text: 'Implemented (commits 51c2a27, dafc30f). STASH/POP CORRUPTION (primary):
+      root cause was reconciling concurrent project.yaml edits with git TEXT stash/pop.
+      Fix keeps project.yaml OUT of the text stash entirely — _stash_for_merge captures
+      local edits + committed ancestor and `git checkout --` reverts the file so the
+      merge replaces it cleanly; _unstash_after_merge re-applies the local edits structurally
+      via new store.three_way_merge() under store.locked_update (re-reads merged on-disk
+      state under the lock → no text conflict possible). Added _reap_auto_stashes
+      (drops only "pm: auto-stash for merge", never other WIP). Added store.load()
+      conflict-marker guard (clear error w/ file+line+remediation, store.find_conflict_markers).
+      On a genuine NON-project.yaml stash-pop conflict, _unstash_after_merge now launches
+      _launch_merge_window (PR-note 3). Also fixed incidental _dirty_file_paths off-by-one:
+      .strip() on whole `git status` output ate the leading status-column space of
+      a worktree-only change, mangling pm/project.yaml→m/project.yaml (broke has_pm
+      + project.yaml detection). Tests: tests/test_merge_stash.py (real-git reconciliation
+      asserting valid YAML / no markers / no leaked stash / PR→merged+merged_at; three_way_merge;
+      guard; _dirty_file_paths). #210 ORPHAN CLASS (partial): added _persist_with_backoff
+      for pr_start gh_pr_number persist so a transient lock timeout cannot orphan
+      a just-created GitHub PR. STILL OPEN: create-after-reserve ordering + branch-based
+      orphan reconciliation in sync-github (matches by gh_pr_number, cannot backfill).
+      Full suite green except pre-existing unrelated test_hook_events::test_installer_writes_standalone_receiver
+      (fails on clean master too).'
+    created_at: '2026-05-25T03:11:51Z'
+    last_edited: '2026-05-25T03:11:51Z'
+  - id: note-e167cfb
+    text: 'Review (loop eea3 i1): fixed a regression where store.load wrapped FileNotFoundError
+      as ProjectYamlParseError, breaking session.py/guide.py/tui-sync callers that
+      catch FileNotFoundError for "no project" (would crash session startup on missing
+      project.yaml) — now re-raises FileNotFoundError, wraps only other read errors.
+      Added test_stash_pop_conflict_launches_merge_window for R5. NON-BLOCKING: when
+      _unstash_after_merge launches a merge window for a stash-pop conflict at sites
+      1/2 it forwards pull_from_origin/pull_from_workdir, so generate_merge_prompt
+      describes a pull conflict rather than the actual stash-pop conflict (error_output
+      string is accurate; cwd correct; rare path). Consider a dedicated stash-pop
+      prompt variant in a follow-up.'
+    created_at: '2026-05-25T03:19:41Z'
+    last_edited: '2026-05-25T03:19:41Z'
+  - id: note-157729d
+    text: 'Review (loop eea3 i2): resolved the i1 NON-BLOCKING follow-up. Added a
+      dedicated generate_merge_prompt(stash_pop_conflict=True) variant + threaded
+      it through _launch_merge_window and the _unstash_after_merge conflict launch,
+      so a genuine stash-pop conflict now opens a window whose prompt correctly describes
+      a stash-pop recovery (merge SUCCEEDED, only auto-stash restore conflicted; steps
+      = resolve markers, git add, git stash drop) instead of the misleading pull-failure
+      framing. The variant takes precedence over any pull_from_* flag still forwarded
+      in window_kwargs. Also fixed an inverted/wrong inline comment in store._three_way_dict
+      (ours-deleted/delete-modify branch). Tests added: test_stash_pop_conflict_prompt_describes_stash_not_pull
+      + assert stash_pop_conflict=True forwarded. Full suite green (2705 passed, same
+      pre-existing unrelated test_hook_events failure on clean master).'
+    created_at: '2026-05-25T03:28:54Z'
+    last_edited: '2026-05-25T03:28:54Z'
+  - id: note-74fa8ce
+    text: 'QA s5 (R9 pr-start orphan-under-lock) refiner findings: (1) NO `pm pr show`
+      command — observe the record via `pm pr list` (it renders `#<gh_pr_number> [in_progress]`
+      once the number is recorded, vs `pr-xxx [pending]` before). (2) The R9 `_persist_with_backoff`
+      path only fires when a draft PR was actually created (gh_pr_info set) → must
+      drive the github backend with a SUCCESSFUL branch push + fake `gh pr create`;
+      local/vanilla take the plain locked_update. (3) `_persist_with_backoff` uses
+      timeout=5.0 (not the 2.0 default), so a contending holder must hold the lock
+      >5s past the persist start to force a real backoff retry. (4) CRITICAL: during
+      the clone phase `_resolve_repo_id` (helpers.py) does its OWN `store.locked_update`
+      at the 2.0s default — if a holder is contending the lock from the start, that
+      call times out and pr_start dies BEFORE creating the draft PR (no R9 path).
+      Pre-cache project.repo_id first (run one un-contended `pm pr start` on a throwaway
+      PR) so the contended start touches the lock ONLY at the final persist. (5) The
+      fake `_pr_create` ALWAYS mints a new number (no head-branch dedup), so two genuinely-concurrent
+      `pm pr start <same id>` create TWO fake PRs (one orphan) — that is the documented
+      OUT-OF-SCOPE create-after-reserve follow-up, NOT a lock-contention orphan; do
+      not assert "exactly one PR / no orphan" for concurrent creates. Reshaped triple
+      2 to the contend-from-another-pane variant with honest invariants (valid YAML,
+      no held lock, number recorded).'
+    created_at: '2026-05-25T03:52:53Z'
+    last_edited: '2026-05-25T03:52:53Z'
+  - id: note-3eafb36
+    text: 'QA scenario 5 (R9 orphan-prevention) PASS on real CLI surface + fake-github.
+      Triple1: held project.yaml.lock via external flock for 18s; pm pr start created
+      draft PR #2 then _persist_with_backoff blocked through the hold and recorded
+      gh_pr_number=2 only after release (start exit 0 after 22.2s — without R9 backoff
+      the single 5s persist would StoreLockTimeout->exit1->orphan). Triple2: 4 overlapping
+      2s lock bursts during start; PR #3 recorded in_progress, project.yaml stayed
+      valid YAML with no conflict markers, no lock left held (subsequent pm pr list
+      0.25s). Casts under captures scenarios/5. DEVIATION (not an R9 failure): the
+      scenario THEN expects the fake PR head == pm/<branch>, but gh_ops.create_draft_pr
+      does not pass --head so the fake defaults head=branch-N (fake_github.py:580);
+      linkage confirmed instead via title match + recorded number == fake PR number.
+      Pre-existing fake-stub limitation, out of R9 scope.'
+    created_at: '2026-05-25T04:00:11Z'
+    last_edited: '2026-05-25T04:00:11Z'
+  - id: note-db3070c
+    text: 'QA scenario-1 refiner notes (local-backend merge reconcile): (1) There
+      is NO `pm pr show` command — observe merged status via `pm pr list` / `pm pr
+      list --status merged`, notes via `pm pr note list <id>`, and merged_at/field
+      values by inspecting pm/project.yaml directly (it is the artifact the bug corrupts).
+      (2) For backend:local, `pm pr merge` does the branch merge in the PR workdir
+      (clean) then reconciles divergent project.yaml at the `_pull_from_workdir` site
+      — i.e. in the MAIN repo dir on base_branch, where the uncommitted local project.yaml
+      edit triggers _stash_for_merge -> structural three_way_merge reapply. So "the
+      local working copy" = the main repo (TEST_DIR), and that repo MUST be on base_branch
+      and dirty for the bug path to fire. (3) `pm pr add` already sets pr["branch"]=pm/<id>-<slug>;
+      so you can pre-seed a committed divergent branch in TEST_DIR (git checkout -b
+      <that branch>, pm pr edit/note add, commit, git checkout master) and let `pm
+      pr merge` materialize the workdir via _ensure_workdir (no need for `pm pr start`
+      or a tmux window). (4) Local field edit should be a field finalize wont overwrite
+      (use title, NOT status — finalize forces status=merged). Branch edit = description.
+      (5) Pre-seed stashes BEFORE dirtying project.yaml so plain `git stash push`
+      does not capture project.yaml.'
+    created_at: '2026-05-25T03:55:56Z'
+    last_edited: '2026-05-25T03:55:56Z'
+  - id: note-f68718f
+    text: 'QA scenario-1 PASS all 3 stories (2026-05-25, local-backend CLI). Both
+      divergent project.yaml edits reconcile structurally: description=branch edit
+      + title=local edit BOTH survive, notes are unioned (branch+local), no conflict
+      markers, merged_at set; story2 reaps only the stale "pm: auto-stash for merge"
+      and keeps "important WIP refactor"; story3 text-stashes/restores a non-project.yaml
+      dirty file (code.txt intact) and ends with empty stash list. GOTCHA for next
+      QA run: this container ships ~/.local/bin/git as a host push-proxy that intercepts
+      fetch/pull/ls-remote and forwards to the host HOST_WORKDIR. For a local-backend
+      test that breaks pm pr merge with "does not appear to be a git repository" (the
+      container-local merge workdir path does not exist on the host) AND silently
+      makes _ensure_workdir create the local PR branch at base via checkout -b (proxied
+      ls-remote returns nothing) so the branch divergence never merges. Fix: run the
+      whole test with REAL git on PATH (ln -s /usr/bin/git /tmp/realgit-bin/git; export
+      PATH=/tmp/realgit-bin:$PATH) — local backend needs no GitHub proxy. Bare git
+      -C bypasses the proxy (only $1=fetch matches) which can mask the issue.'
+    created_at: '2026-05-25T04:05:14Z'
+    last_edited: '2026-05-25T04:05:14Z'
+  - id: note-63dd9a2
+    text: 'QA s3 (concurrent-writer-during-merge) refiner findings, verified on real
+      local-backend surface 2026-05-25. ENV PREREQS (all three required or scenario
+      tests the wrong thing): (1) export PYTHONPATH=/workspace before every pm call
+      — default container PYTHONPATH=/opt/pm-src runs MASTER (pre-fix) code; confirm
+      with `pm which`→/workspace/pm_core. (2) The git at ~/.local/bin/git is a push-proxy
+      SHIM that hijacks fetch/pull/push/ls-remote to a host socket bound to ONE hardcoded
+      repo — it breaks local-backend `git fetch <workdir>` ("does not appear to be
+      a git repository"). Move it aside / drop ~/.local/bin from PATH so git=/usr/bin/git.
+      (3) `git config --global protocol.file.allow always` — pm does NOT pass it and
+      this env`s real-git default blocks local file fetch, so propagation fails without
+      it. CMD CORRECTIONS: `pm pr show` and `pm pr update` do NOT exist — use `pm
+      pr list` (status), `pm pr note list <id>` (notes), and read pm/project.yaml
+      for merged_at; use `pm pr edit` for updates. CONFIRMED RESIDUAL BUG: the fix
+      narrows but does NOT close the concurrency race. _stash_for_merge has an unguarded
+      window between _project_yaml_dirty_entry`s `git checkout -- project.yaml` (revert)
+      and `git stash push`; a concurrent `pm pr note add` re-dirties project.yaml
+      in that window so it gets TEXT-stashed after all, then the pop conflicts ->
+      conflict markers in project.yaml + leaked `pm: auto-stash for merge`. Repro
+      (fix, src verified): 15 iters, stash path engaged 2x, 1 of those corrupted (markers=3,
+      leaked_stash=1, every pm cmd then fails on load-guard). Note: the stash/reconcile
+      path only engages when the local uncommitted project.yaml edit OVERLAPS the
+      incoming branch change (so git merge --ff-only fails dirty-overlap); else ff
+      succeeds and reconcile is skipped (still clean). To hit the race, run MANY merge
+      iterations with a tight concurrent note loop on a DIFFERENT pr during each merge.'
+    created_at: '2026-05-25T04:20:10Z'
+    last_edited: '2026-05-25T04:20:10Z'
+  - id: note-8f194dd
+    text: 'QA scenario 3 (concurrent project.yaml writer during merge): NEEDS_WORK
+      — reproduced the residual race from note-63dd9a2 on the real local-backend CLI
+      surface, then FIXED + verified. PRE-FIX (pr.py at HEAD): an 8-concurrent-writer
+      batch hit it within 1-3 iters — `pm pr merge` left pm/project.yaml with 3 conflict
+      markers (<<<<<<</=======/>>>>>>> at lines 22/31/40) AND a leaked `pm: auto-stash
+      for merge`, merge did not complete (PR stayed in_review, merged_at unset), the
+      writers notes were clobbered (0/320), and every subsequent pm command died on
+      store.load`s marker guard. ROOT CAUSE: _stash_for_merge reverts project.yaml
+      then re-scans+`git stash push`es all dirty; a concurrent `pm pr note add` landing
+      between the revert and the stash re-dirties project.yaml so it gets TEXT-stashed,
+      and the pop then conflicts it with the merged file. FIX (pm_core/cli/pr.py):
+      (1) hold the project.yaml lock across the whole revert->stash->merge->reapply
+      so concurrent writers serialize against the merge (store.locked_update uses
+      the same lock); _reapply_project_yaml gained lock_held mode to avoid self-deadlock;
+      lock released in _unstash_after_merge`s finally; hold spans local git only (no
+      network). (2) never text-stash project.yaml/its .lock — the auto-stash now uses
+      explicit pathspecs that exclude _NEVER_STASH_RELS, so project.yaml can never
+      enter the text stash even if re-dirtied. POST-FIX: 20/20 iters @8 writers and
+      5/5 @ the scenario`s single writer (80/80 notes each) — 0 markers, 0 leaks,
+      0 failed merges, all PRs merged+merged_at, all notes unioned. Tests: +2 regression
+      tests in test_merge_stash.py (writer re-dirty excluded from text stash [fails
+      pre-fix]; lock held-then-released); 21 pass; full suite 2725 passed / 1 pre-existing
+      unrelated test_hook_events failure. Casts under captures scenarios/3 {pre,post}-fix.'
+    created_at: '2026-05-25T04:47:29Z'
+    last_edited: '2026-05-25T04:47:29Z'
   - id: note-cf984e7
     text: 'QA NEEDS_WORK: Local merge with divergent project.yaml reconciles cleanly
       and reaps stashes: PASS; store.load surfaces a clear error on conflict markers
@@ -31165,6 +31358,155 @@ prs:
       this PR''s lock/_NEVER_STASH approach when rebasing.'
     created_at: '2026-10-21T23:45:02Z'
     last_edited: '2026-10-21T23:45:02Z'
+  - id: note-41971d4
+    text: 'Review loop c6a2 i1 (60bc272f): NEEDS_WORK, fixed + pushed. (1) BLOCKING,
+      fixed 5645a2cc: a user git config merge.autoStash=true made `git merge --ff-only`
+      in _ff_with_autostash itself text-stash the swapped-in registry, reset it and
+      pop it over the incoming blob, giving conflict markers in pm/project.yaml +
+      a leaked `autostash` entry with rc 0 (the original bug). The ff now passes --no-autostash;
+      regression test test_user_merge_autostash_config_never_text_stashes_registry
+      fails without the flag. (2) Busy registry lock: _ff_with_autostash returns _RegistryLockBusy
+      and _pull_after_merge exits 1 with a --propagation-only hint instead of opening
+      a recovery window (its "stash and pull" steps would text-stash the registry).
+      In TUI auto-merge that PR then stays sign_off until propagation-only is re-run.
+      (3) 60bc272f: the recovery prompt forbids stashing/checking out/resetting pm/project.yaml
+      (stash other files by path; INPUT_REQUIRED if the registry blocks). (4) store.save_text
+      is now the one atomic write shared by store.save and the registry swap (dropped
+      the duplicate _write_registry_text). Evidence /pm-captures/review-c6a2-i1: S74
+      harness at 5645a2cc PASS 4/4 + dirty 3/3; full suite at 60bc272f 5712 passed
+      / 1 skipped.'
+    created_at: '2026-11-26T16:40:49Z'
+    last_edited: '2026-11-26T16:40:49Z'
+  - id: note-a42a0a0
+    text: 'Review loop c6a2 i2 (10de2ad1): NEEDS_WORK, fixed + pushed. The registry
+      plan runs before the lock (seconds on a big registry; dump alone ~3.7 s here),
+      so three concurrency gaps were fixed in _ff_with_autostash: (1) the target is
+      pinned to one commit up front, because a concurrent fetch moving origin/<base>
+      made the ff go to a commit whose registry the index was not staged with (spurious
+      "would be overwritten: pm/project.yaml"); (2) a re-plan under the lock when
+      another update moved HEAD meanwhile, because a stale HEAD entry made the auto-stash
+      carry a registry change, so git refused its pop and the user files stayed stashed;
+      (3) _reap_auto_stashes now runs under the registry lock, because outside it
+      it could drop another update''s in-flight auto-stash or shift its positional
+      drop onto the user''s WIP; the live registry is now loaded lazily and checked
+      last. Minor: unmerged paths are read with -z; the store.load marker message
+      gives the full path and warns that a checkout discards uncommitted pm state.
+      3 new regression tests (6 tests fail on 5f0c0b6e code). Evidence /pm-captures/review-c6a2-i2:
+      S74 harness at 10de2ad1 PASS 4/4 + dirty 3/3. Cross-PR note on pr-f74988c (#200):
+      its store_commit writes the main repo base ref + real index under its own lock,
+      not the registry lock.'
+    created_at: '2026-11-26T17:10:43Z'
+    last_edited: '2026-11-26T17:10:43Z'
+  - id: note-f4e607b
+    text: 'Review loop c6a2 i3 (e5507843): NEEDS_WORK, fixed + pushed. BLOCKING, fixed:
+      _plan_registry pre-merged the live registry toward the target without checking
+      the update is a fast-forward. When HEAD already contains the target, `git merge
+      --ff-only` is a no-op ("Already up to date", rc 0), but the plan still reverted
+      every field the newer HEAD had changed in the live registry, and it staged the
+      target''s older blob (MM pm/project.yaml, a staged reversion). Live path: the
+      post-publish pull runs outside the publish lock, so update A pins origin/master=M1
+      and plans, B fast-forwards to M2 first, and A re-plans under the lock with base
+      M2 and reverts M2''s committed registry changes; also any pull to a commit HEAD
+      already contains. Fix: plan only when HEAD is an ancestor of the target (integration.is_ancestor);
+      otherwise git leaves the file alone. +2 regression tests (test_target_already_in_head_leaves_registry_alone,
+      test_other_update_moving_head_past_the_target_reverts_nothing), both fail on
+      10de2ad1. Spec 2c/4/5 updated. Evidence /pm-captures/review-c6a2-i3: S74 harness
+      PASS 4/4 + dirty 3/3; full suite 5717 passed / 1 skipped (12 test_markdown_render
+      failures = missing markdown dep in the venv, 13/13 on rerun with it). Considered,
+      not changed: the reaper re-parses old unapplied pre-fix auto-stashes'' registries
+      under the lock on every merge (about 0.35 s per parse with the C loader), the
+      same order as any pm write.'
+    created_at: '2026-11-26T17:51:33Z'
+    last_edited: '2026-11-26T17:51:33Z'
+  - id: note-ebb3e12
+    text: 'Review loop c6a2 i4 (246adb24): NEEDS_WORK, fixed + pushed. (1) `git merge
+      --no-autostash` and merge.autoStash appeared in git 2.27; an older git (e.g.
+      Ubuntu 20.04 2.25) rejects the unknown option (rc 129), so every local publish
+      and post-publish pull would fail. `_no_autostash()` passes it only on git >=
+      2.27, or when the version is unknown; nothing else in the merge path needs newer
+      git. (2) `_plan_registry` parses the HEAD and target registries once and keeps
+      them in the plan. A re-merge under the lock (the live file changed after planning,
+      the usual case with concurrent writers) now parses only the live text instead
+      of three full registries. `_parse_registry` is shared with the reaper check.
+      +5 test cases (version gate x4; writer between plan and lock survives, with
+      a single parse under the lock). Spec 2c/5 updated. Evidence /pm-captures/review-c6a2-i4:
+      full suite 5722 passed / 1 skipped; S74 harness PASS 4/4 + dirty 3/3. Considered,
+      not changed: moving the ~600-line stash/registry section out of pr.py (master
+      section; mocked tests patch pm_core.cli.pr.git_ops).'
+    created_at: '2026-11-26T18:20:04Z'
+    last_edited: '2026-11-26T18:20:04Z'
+  - id: note-5a9970b
+    text: 'Review loop c6a2 i5 (8ace9106): NEEDS_WORK, fixed + pushed. (1) The leaked-stash
+      reaper relies on the registry lock that serializes every pm auto-stash push
+      and pop. The target repo of a standalone pm dir has no pm/project.yaml, so _ff_with_autostash
+      took no lock there and the reaper ran unserialized: it could drop another update''s
+      in-flight auto-stash. It now reaps only while the lock is held. The pre-existing
+      lack of any serialization in such repos is filed as pr-7a1516e. (2) _restore_registry
+      ignored a failed re-stage of the original index entry (e.g. another git process
+      holding index.lock, which also fails the ff). The incoming registry blob then
+      stayed staged on the old HEAD, so a later commit would commit it. It now prints
+      the `git update-index --cacheinfo` command that restores the entry. (3) test_failed_ff_restores_exact_local_registry
+      and test_failed_update_keeps_a_staged_registry_hunk had become vacuous after
+      i3: a diverged base plans nothing, so _restore_registry never ran. They now
+      fail the retried ff after the swap and assert that the restore ran. +2 tests,
+      both fail on 8d4907e6. Spec R2/2c/5 updated. Also filed pr-c904cd3 for the spec
+      section 7 follow-ups (create-before-record ordering; sync-github cannot backfill
+      an orphan). Evidence /pm-captures/review-c6a2-i5: full suite 5724 passed / 1
+      skipped; S74 harness at 8ace9106 PASS 4/4 + dirty 3/3.'
+    created_at: '2026-11-26T18:50:32Z'
+    last_edited: '2026-11-26T18:50:32Z'
+  - id: note-5169f9f
+    text: 'Review loop c6a2 i6 (1836b950): NEEDS_WORK, fixed + pushed. (1) _dirty_file_paths
+      now passes -unormal: a user status.showUntrackedFiles=no hid an untracked file
+      that blocks the fast-forward, so the pathspec auto-stash never took it and the
+      update failed (master unrestricted stash push took it). (2) _stash_already_applied
+      lists the stash tracked paths with --no-renames: with rename detection only
+      a renamed file new path was checked, so a stashed rename counted as applied
+      while the old path still existed. (3) Incidental, R5: pm project set (cli/project.py
+      _set_project_bool) did an unlocked load + save, which could write a registry
+      loaded before a merge back over the merged one; it now uses store.locked_update.
+      +4 tests (5 cases), all fail on 64e2fea2. Spec 2c/5 updated. Evidence /pm-captures/review-c6a2-i6:
+      full suite 5728 passed / 1 skipped; S74 harness at 1836b950 PASS 4/4 + dirty
+      3/3.'
+    created_at: '2026-11-26T19:21:04Z'
+    last_edited: '2026-11-26T19:21:04Z'
+  - id: note-bdfd090
+    text: 'Review loop c6a2 i7 (8973e278): NEEDS_WORK, fixed + pushed. (1) A refused
+      auto-stash pop told the user to run `git stash pop <ref>` once the error is
+      fixed. git >= 2.34 restores the tracked changes before it refuses an untracked
+      file that now exists (reproduced on 2.34.1), and a failed drop comes after a
+      full apply, so that second pop refuses on the restored part. The warning now
+      says nothing was lost, to compare the stash with the working tree (`git stash
+      show -p`, `git show <ref>^3:<path>`), restore what is missing, then `git stash
+      drop <ref>`. It does not list restored files: a pop merges each change into
+      the new HEAD, so blob equality cannot tell which were restored. The reaper keeps
+      using blob equality, which is only conservative there. (2) test_other_dirty_files_stashed_and_restored
+      never reached the stash (0 calls): the registry swap alone no longer blocks
+      the ff. So no test covered an untracked file stashed and restored by a clean
+      pop. It now overlaps code.txt and asserts the stash ran with 2 files. +2 tests
+      (untracked collision; failed drop), both fail on 47ad9c61. Nit: pm project set
+      uses a named apply function. Spec R2/2c/4/5 updated. Evidence /pm-captures/review-c6a2-i7:
+      full suite 5730 passed / 1 skipped.'
+    created_at: '2026-11-26T19:52:23Z'
+    last_edited: '2026-11-26T19:52:23Z'
+  - id: note-380fb04
+    text: 'Review loop c6a2 i8 (85a2eab5): NEEDS_WORK, fixed + pushed. The pathspec
+      auto-stash mishandled two kinds of staged change in the main repo when another
+      dirty file blocked the fast-forward (both regressions vs master unrestricted
+      stash, git 2.34): (1) a staged deletion: `git stash push --include-untracked
+      -- <path>` saved the stash, then its internal `git add` died ("did not match
+      any files"), so the update failed and a pm auto-stash leaked; (2) a staged rename:
+      stashing only the destination made the pop a rename/delete conflict (UA new.txt,
+      stash kept). _dirty_file_paths now never names a staged deletion or either path
+      of a staged rename (status with -c status.renames=true, so a rename is one entry
+      under status.renames=false); they stay staged in place, the stash records the
+      whole index anyway. A stash push that fails after saving is dropped when it
+      reverted nothing (_stash_already_applied), popped after the update when it did.
+      +5 test cases, 1 updated; all 6 fail on 9b72be22. Mocked test_dirty_overlap_stashes_then_succeeds
+      matches status after the -c option. Spec 2c/4/5 updated. Evidence /pm-captures/review-c6a2-i8
+      (probe pre/post-fix): full suite 5735 passed / 1 skipped.'
+    created_at: '2026-11-26T20:25:03Z'
+    last_edited: '2026-11-26T20:25:03Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-ca6981c-bug-pm-merge-s-git-stash-pop-corrupt-ac115969
 - id: pr-c41f029
   plan: bugs
@@ -32043,6 +32385,33 @@ prs:
     created_at: '2026-10-21T21:39:28Z'
     last_edited: '2026-10-21T21:39:28Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8d8b360-bug-merge-conflict-resolution-pushes-37062cb3
+- id: pr-60aa9e3
+  plan: bugs
+  title: 'Bug: pm init gitignore template omits project.yaml.lock, so the transient
+    lock file gets committed'
+  branch: pm/pr-60aa9e3-bug-pm-init-gitignore-template-omits-project-yaml-
+  status: pending
+  depends_on: []
+  description: 'Repro: pm init --backend local --no-import in a fresh git repo, then
+    pm pr add (triggers store.locked_update which creates pm/project.yaml.lock), then
+    pm push && git merge --ff-only pm/sync-* — the commit includes "create mode 100644
+    pm/project.yaml.lock". git ls-files pm/ then shows pm/project.yaml.lock tracked.
+    Root: pm_core/cli/__init__.py:154 seeds pm/.gitignore with only ("notes.txt",
+    ".pm-sessions.json"); project.yaml.lock (the transient flock target written by
+    store.locked_update) is not ignored, so pm push stages and commits it. Fix direction:
+    add "project.yaml.lock" (and likely "*.lock") to the init gitignore template,
+    and have pm push/sync staging exclude it; consider untracking already-committed
+    lock files. Low severity (0-byte lock target) but causes spurious tracked file
+    in every pm-managed repo. Found during QA of pr-ca6981c scenario 4.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-05-25T04:08:22.178796+00:00'
+  updated_at: '2026-05-25T04:08:22.178796+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
 - id: pr-8409c64
   plan: bugs
   title: 'Bug: zz d review-loop popup spinner never switches to the review window
@@ -56359,6 +56728,67 @@ prs:
   gh_pr_number: null
   created_at: '2026-11-02T08:57:36.104793+00:00'
   updated_at: '2026-11-02T08:57:36.104793+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-7a1516e
+  plan: bugs
+  title: 'Bug: pm merge main-repo update is unserialized when the pm dir is standalone'
+  branch: pm/pr-7a1516e-bug-pm-merge-main-repo-update-is-unserialized-when
+  status: pending
+  depends_on: []
+  description: 'pm_core/cli/pr.py _ff_with_autostash serializes a main-repo update
+    (fast-forward, auto-stash push/pop, leaked-stash reaping) with the registry lock
+    <repo>/pm/project.yaml.lock. With a standalone pm dir (pm init --dir) the target
+    repo holds no pm/project.yaml, so _registry_root() is None and no lock is taken.
+    The post-publish pull (_pull_after_merge, github/vanilla backends) runs outside
+    _publish_lock, so two PRs merged close together can update the same checkout at
+    once. Two concurrent ''git merge --ff-only'' calls contend for index.lock: one
+    fails and _pull_after_merge opens a needless recovery window. An update pushing
+    its auto-stash between the other''s _stash_ref() and its ''stash pop stash@{N}''
+    makes that pop take the wrong stash. Since pr-ca6981c review c6a2 i5 the leaked-stash
+    reaper is skipped in such repos for this reason, so leaked pm auto-stashes are
+    not reaped there. Fix direction: take a lock for the no-registry case too, e.g.
+    the project''s own registry lock (state_root()/project.yaml.lock, passed in by
+    the callers) or a lock file in the target repo''s git common dir, then reap there
+    as well. Repro shape: standalone pm dir + github backend, two PRs auto-merged
+    back to back while the main checkout has dirty files that overlap the incoming
+    change.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-26T18:50:03.919860+00:00'
+  updated_at: '2026-11-26T18:50:03.919860+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-c904cd3
+  plan: bugs
+  title: 'Bug: pr start can still orphan a created GitHub PR (created before the record;
+    sync-github cannot backfill)'
+  branch: pm/pr-c904cd3-bug-pr-start-can-still-orphan-a-created-github-pr-
+  status: pending
+  depends_on: []
+  description: 'pr_start (pm_core/cli/pr.py) runs ''gh pr create'', an irreversible
+    external side effect, before the PR record holds gh_pr_number. pr-ca6981c added
+    _persist_with_backoff, so a transient project.yaml.lock timeout no longer orphans
+    the created PR. A persist that still fails (every attempt times out), or a crash
+    or kill between the create and the persist, still leaves the GitHub PR created
+    with gh_pr_number=None. ''pm pr sync-github'' matches records by gh_pr_number,
+    not by head branch, so it cannot backfill such an orphan; only re-running ''pm
+    pr start'' recovers it (create_draft_pr detects ''already exists'' and reads the
+    PR with ''gh pr view''). Fix direction: record the intent before creating, so
+    the next run (or sync) reconciles; and have sync-github backfill gh_pr_number
+    by head branch for records that lack it. Context: the pr-d887f4c / gh #210 incident,
+    see the pr-ca6981c PR notes and pm/specs/pr-ca6981c/impl.md section 7 (left out
+    of that PR''s scope).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-26T18:50:15.279071+00:00'
+  updated_at: '2026-11-26T18:50:15.279071+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
