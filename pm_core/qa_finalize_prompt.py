@@ -31,13 +31,13 @@ def _scenarios_pointer(pr_id: str) -> str:
     resolved status file (or the run directory when no run exists yet) is
     the on-demand source the omission marker names.
     """
-    from pm_core.paths import latest_qa_status_path, workdirs_base
+    from pm_core.paths import latest_qa_status_path, qa_workdirs_root
     latest = latest_qa_status_path(pr_id)
     if latest is not None:
         return (f"read `{latest}` for every scenario "
                 f"(qa_resume.json beside it lists each worktree)")
     return (f"the QA run's qa_status.json / qa_resume.json under "
-            f"{workdirs_base() / 'qa' / (pr_id + '-*')} list every scenario")
+            f"{qa_workdirs_root() / (pr_id + '-*')} list every scenario")
 
 
 def build_qa_finalize_prompt(

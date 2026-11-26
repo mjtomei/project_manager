@@ -25,7 +25,10 @@ A scratch dir is **held**, and skipped whole, when:
   alive) or resumable (a resume snapshot without ``ended_at``);
 * the runtime cannot list containers (fail safe);
 * a store has an active mount beneath it in any mount namespace pm can
-  see (rootless engines mount their layers in their own namespace).
+  see (rootless engines mount their layers in their own namespace);
+* the scratch dir is itself a store (an engine ran with ``--root`` on it):
+  its store files cannot be told apart from the scenario's other files
+  there, and deleting the dir would delete those too.
 
 The callers are the existing lifecycle owners — PR cleanup (merged/closed
 PRs, ``pm pr cleanup``), QA run start (earlier runs of the same PR) and
@@ -147,10 +150,14 @@ def is_image_archive(f: Path) -> bool:
 
 
 def find_disposables(root: Path) -> list[Disposable]:
-    """Container stores and image archives under *root* (not descending
-    into stores; unreadable subtrees are skipped)."""
+    """Container stores and image archives below *root* (not descending
+    into stores; unreadable subtrees are skipped).
+
+    *root* itself is never returned: when it is a store, nothing is (see
+    :func:`plan`, which holds such a scratch dir).
+    """
     out: list[Disposable] = []
-    if not root.is_dir():
+    if not root.is_dir() or is_container_store(root):
         return out
     for dirpath, dirnames, filenames in os.walk(root, onerror=lambda e: None):
         d = Path(dirpath)
@@ -165,8 +172,6 @@ def find_disposables(root: Path) -> list[Disposable]:
             if fn.endswith((".tar", ".oci", ".docker")) or "." not in fn:
                 if is_image_archive(f):
                     out.append(Disposable(f, "archive"))
-    if is_container_store(root):
-        out = [Disposable(root, "store")]
     return out
 
 
@@ -296,10 +301,10 @@ def scenario_scratch_dirs(pr_id: str | None = None,
     ``<scratch>/qa/<run>/s-N`` layouts, including scratch whose run dir is
     already gone.  *exclude_run* is a run dir name (``<pr>-<loop>``).
     """
-    from pm_core.paths import qa_workdirs_root, scratch_base
+    from pm_core.paths import qa_scratch_root, qa_workdirs_root
     pattern = f"{pr_id}-*" if pr_id else "*"
     qa_root = qa_workdirs_root()
-    scratch_qa = scratch_base() / "qa"
+    scratch_qa = qa_scratch_root()
     out: list[tuple[Path | None, Path]] = []
     seen: set[str] = set()
     run_names = set()
@@ -335,6 +340,11 @@ def plan(pr_id: str | None = None, exclude_run: str | None = None) -> Outcome:
         held = next((s for s in sources if _related(s, str(scratch))), None)
         if held:
             p.held = f"a container still mounts {held}"
+        elif is_container_store(scratch):
+            p.held = ("the scratch dir is itself a container store (an "
+                      "engine ran with --root on it), mixed with the "
+                      "scenario's other files; remove what is not needed "
+                      "by hand")
         else:
             p.held = _run_held(run_dir)
         if not p.held:

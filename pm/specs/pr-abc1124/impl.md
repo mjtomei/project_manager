@@ -242,7 +242,9 @@ the task and on the measurements above.
   `/proc/self/mountinfo` (review 62b4: verified with a live private-engine
   container under scratch).  Retention markers (pr-1139060) are not read:
   a retained container still exists and so already holds its scratch
-  through its mounts.
+  through its mounts.  A scratch dir that is itself a store (an engine run
+  with `--root` on it) is held too: its store files cannot be told apart
+  from the scenario's other files there (review 62b4 i2).
 * Deletion uses `podman unshare rm -rf` for stores (their files are owned by
   sub-UIDs) and `unlink` for archives; a `.pm-reclaim.json` record (paths,
   bytes, time, reason) is left in the scratch dir.
@@ -273,6 +275,9 @@ the task and on the measurements above.
   fuse.rclone, fuse.s3fs, fuse.glusterfs, …) raise `NonLocalPathError` with
   the setting to change.  Applied to scratch, the image cache and engine
   graphroots.
+* A regression run that never launched removes its scratch dir
+  (`paths.run_scratch_dir`) along with its workdir: scratch no longer lives
+  inside the workdir (review 62b4 i2).
 * `paths.scenario_scratch_dir(qa_workdir, index)` = the legacy
   `{qa_workdir}/s-N/scratch` if it already exists (in-flight runs keep their
   mounts), else `scratch_base()/qa/<qa_workdir.name>/s-N`.  Used by

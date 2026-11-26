@@ -160,6 +160,22 @@ def scratch_base() -> Path:
     return d
 
 
+def qa_scratch_root() -> Path:
+    """Return the root of QA runs' local scratch (``<scratch>/qa``).
+
+    Holds one ``<run>/s-N`` dir per scenario, where ``<run>`` is the QA
+    run workdir's name.  Not created here.
+    """
+    return scratch_base() / "qa"
+
+
+def run_scratch_dir(qa_workdir: Path) -> Path:
+    """Return the local scratch dir of the QA run at *qa_workdir*
+    (``<scratch>/qa/<run>``); its scenarios' scratch dirs live below it.
+    Not created here."""
+    return qa_scratch_root() / Path(qa_workdir).name
+
+
 def scenario_scratch_dir(qa_workdir: Path, scenario_index: int) -> Path:
     """Return the scratch dir of scenario *scenario_index* of a QA run.
 
@@ -172,7 +188,7 @@ def scenario_scratch_dir(qa_workdir: Path, scenario_index: int) -> Path:
     legacy = qa_workdir / f"s-{scenario_index}" / "scratch"
     if legacy.is_dir():
         return legacy
-    return scratch_base() / "qa" / qa_workdir.name / f"s-{scenario_index}"
+    return run_scratch_dir(qa_workdir) / f"s-{scenario_index}"
 
 
 # Filesystem types that are network storage.  Container storage, runtime

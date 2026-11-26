@@ -337,13 +337,17 @@ def _discard_unlaunched_run(qa_workdir: Path,
                             run_captures: Path | None = None) -> None:
     """Remove what a regression run that never launched created.
 
-    Drops the run's own workdir and, when given, its captures dir and the
-    test's dir if that was its first run.  Only empty captures dirs are
-    removed (``rmdir``), so no evidence is lost; the dir exists then only
-    because container creation made it for its mount.
+    Drops the run's own workdir and its scratch dir (which lives apart, on
+    local disk — see :func:`pm_core.paths.scenario_scratch_dir`) and, when
+    given, its captures dir and the test's dir if that was its first run.
+    Only empty captures dirs are removed (``rmdir``), so no evidence is
+    lost; the dir exists then only because container creation made it for
+    its mount.
     """
     import shutil
+    from pm_core.paths import run_scratch_dir
     shutil.rmtree(qa_workdir, ignore_errors=True)
+    shutil.rmtree(run_scratch_dir(qa_workdir), ignore_errors=True)
     if run_captures is None:
         return
     for d in (run_captures, run_captures.parent):

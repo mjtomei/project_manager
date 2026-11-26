@@ -116,6 +116,11 @@ class TestDetection:
         (d / "half").mkdir(parents=True)
         assert [x.path for x in sr.find_disposables(tmp_path)] == [d]
 
+    def test_root_store_is_never_returned(self, tmp_path):
+        root = _store(tmp_path / "scratch")
+        _archive(root / "pm-dev.tar")
+        assert sr.find_disposables(root) == []
+
 
 class TestPlan:
     def test_finished_run_is_reclaimed_other_files_kept(self, home, rt):
@@ -190,6 +195,23 @@ class TestPlan:
         sr.reclaim("pr-1", exclude_run="pr-1-new")
         assert not s_mine.exists()
         assert s_cur.exists() and s_other.exists()
+
+    def test_scratch_that_is_itself_a_store_is_held(self, home, rt):
+        """An engine run with --root on the scratch dir mixes its store
+        with the scenario's own files: deleting the dir would take those
+        too, so nothing in it is touched."""
+        run, scratch = _run(home, "pr-1-root")
+        (run / "qa_run.json").write_text(json.dumps(
+            {"pr_id": "pr-1", "loop_id": "root", "ended_at": 1.0}))
+        _store(scratch)
+        (scratch / "draft.md").write_text("keep me")
+        ar = _archive(scratch / "proj" / "img.tar")
+        out = sr.reclaim("pr-1")
+        assert "itself a container store" in out.plans[0].held
+        assert out.removed == [] and out.failed == []
+        assert scratch.is_dir() and (scratch / "storage.lock").exists()
+        assert (scratch / "draft.md").read_text() == "keep me"
+        assert ar.exists()
 
     def test_legacy_and_orphan_scratch(self, home, rt):
         _, legacy = _run(home, "pr-1-leg", legacy=True)

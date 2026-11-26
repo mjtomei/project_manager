@@ -123,6 +123,12 @@ def _qa_workdirs(home: Path) -> list[Path]:
     return sorted(d.iterdir()) if d.is_dir() else []
 
 
+def _qa_scratch(home: Path) -> list[Path]:
+    """Runs' scratch dirs, which live apart from the QA workdirs."""
+    d = home / ".pm" / "scratch" / "qa"
+    return sorted(d.iterdir()) if d.is_dir() else []
+
+
 def _run_captures(home: Path) -> list[Path]:
     return sorted((home / ".pm" / "sessions").rglob("prompt.md"))
 
@@ -525,9 +531,11 @@ def test_container_create_failure_launches_nothing(project, home):
     spies.build.assert_not_called()
     spies.execvpe.assert_not_called()
     # A run that never launched leaves no evidence of one: no captures dir
-    # with a prompt, and this run's own workdir/clone is gone.
+    # with a prompt, and this run's own workdir/clone and scratch (with the
+    # recipes copied into it) are gone.
     assert _run_captures(home) == []
     assert _qa_workdirs(home) == []
+    assert _qa_scratch(home) == []
     assert _clone_overrides(home) == []
 
 
@@ -588,6 +596,7 @@ def test_missing_branch_is_a_clean_error(project, home):
     assert "Could not clone 'nope'" in result.output
     spies.execvpe.assert_not_called()
     assert _qa_workdirs(home) == []
+    assert _qa_scratch(home) == []
     assert _run_captures(home) == []
 
 
