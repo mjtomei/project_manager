@@ -104,8 +104,10 @@ R2. **No leaked stash.**
       the working tree. Others are listed, never silently dropped. Other
       stashes (WIP, the user's own) are never touched. Reaping happens only
       in a repo that holds pm's registry, whose lock serializes every pm
-      auto-stash push and pop. A standalone pm dir's target repo has no such
-      lock, so its leaked stashes are left to the user (review c6a2 i5).
+      auto-stash push and pop. The drops take that lock; judging the
+      entries does not (review c6a2 i9). A standalone pm dir's target repo
+      has no such lock, so its leaked stashes are left to the user (review
+      c6a2 i5).
 
 R3. **`store.load` conflict-marker guard.** A registry that contains markers
     raises `ProjectYamlParseError`. The message names the file, the first
@@ -198,7 +200,7 @@ with store._lock(repo/pm, timeout=10):         # busy -> failed result, untouche
             try:     r = git merge --ff-only --no-autostash target
             finally: restored = _unstash_after_merge(repo, info)
     finally: if r failed: _restore_registry(repo, plan)
-    if r ok and restored and locked: _reap_auto_stashes(repo)  # under it
+if r ok and restored and root: _reap_auto_stashes(repo, root)  # lock released
 ```
 
 The plan runs before the lock and can take seconds on a large registry
@@ -215,8 +217,8 @@ change meanwhile (review c6a2 i2):
   under the lock when HEAD moved. That case is rare, and it costs about what
   any pm write costs.
 
-The reaper runs under the lock too. Every pm auto-stash push and pop
-happens under it, so a reaper outside it could treat another update's
+The reaper's drops run under the lock too. Every pm auto-stash push and
+pop happens under it, so a drop outside it could treat another update's
 in-flight auto-stash as an applied leftover. Two windows allow that: after
 the stash is stored but before its files are reverted, and after the pop's
 apply but before its drop. Dropping it there either loses that stash, or
@@ -224,6 +226,17 @@ shifts the positions so the pop's own `stash drop stash@{N}` removes a
 different entry (e.g. the user's WIP). A repo without pm's registry (the
 target repo of a standalone pm dir) takes no lock, so nothing serializes
 pm's updates there, and the reaper does not run (review c6a2 i5).
+
+Judging the entries runs after the update releases the lock (review c6a2
+i9). A stash from an older pm carries a registry change, and judging it
+parses two full registries. A probe with 7 such stashes (the main repo
+held 7 leaked pre-fix ones) on this repo's 3.4 MB registry kept the lock
+~11.6 s on every update, while pm writers wait at most 2 s for it. Under the
+lock (taken with the default 2 s timeout; busy means the next update
+retries) each entry judged applied is re-checked before its drop:
+- its files against the working tree (a few git calls);
+- its registry verdict, which stands only if the live registry text is
+  still the one it was made against (compared as text, never re-parsed).
 
 `--no-autostash` overrides a user's `merge.autoStash=true`, which would
 otherwise make git itself text-stash the swapped-in registry, reset it and
@@ -321,12 +334,11 @@ for merge` when its changes are already applied:
 - `pm/project.yaml`: `merge_3way(stash^1, stash, current) == current`, i.e.
   every change the stash made is present or superseded in the live registry.
   This is checked last, and the live registry is loaded only if some
-  candidate changed it. Only stashes from an older pm do, so the lock hold
-  normally stays at a few git calls.
+  candidate changed it (only stashes from an older pm do, or a staged
+  registry hunk).
 
-Entries are dropped highest index first, after re-checking that each ref
-still names the same commit. Entries that are not applied are listed with
-inspect/drop hints.
+Each entry is dropped by the `stash@{N}` that names its commit at that
+moment. Entries that are not applied are listed with inspect/drop hints.
 
 `_resolve_project_yaml_pop(cwd, ref="stash@{0}")` is master's resolver. It is
 now parameterized by ref, and it merges only files whose two sides parse as
@@ -433,8 +445,11 @@ lock is a different one.
 - Locking:
   - the lock is held during every rewriting git step (first fast-forward
     included) and released afterwards;
-  - reaping (`stash list` / `stash drop`) runs under the lock, and not at
-    all in a repo without pm's registry;
+  - reaping drops under the lock and parses the stashes' registries
+    without it, and does not run at all in a repo without pm's registry;
+  - an entry judged applied is kept if its file changed before the locked
+    drop, or if the live registry changed (dropped on the next update);
+    a busy lock drops nothing;
   - a busy lock leaves the checkout untouched, and the post-publish pull
     then exits 1 without a recovery window (`test_pr_enhancements.py`);
   - a concurrent writer thread loses no notes (3 runs);

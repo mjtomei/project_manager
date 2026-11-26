@@ -12,6 +12,7 @@ Real-git tests drive :func:`pr_mod._ff_with_autostash`, the helper both
 production call sites (``_publish_local`` and ``_pull_after_merge``) use.
 """
 
+import contextlib
 import re
 import subprocess
 import threading
@@ -896,7 +897,7 @@ class TestRegistryLock:
 
         def run_git(*args, **kw):
             # Every step that rewrites files (reaping: see
-            # test_reaping_runs_under_the_lock).
+            # test_reaping_judges_without_the_lock_and_drops_under_it).
             if args[0] in ("merge", "checkout", "update-index") or \
                     args[:2] in (("stash", "push"), ("stash", "pop")):
                 try:
@@ -913,25 +914,34 @@ class TestRegistryLock:
         with store._lock(pm, timeout=0):
             pass                                  # released afterwards
 
-    def test_reaping_runs_under_the_lock(self, tmp_path):
-        """Every pm auto-stash push and pop happens under the registry lock.
-        A reaper running outside it could take another update's in-flight
-        auto-stash (stored, files not yet reverted) for an applied leftover
-        and drop it, or drop by a position that update's pop then reuses."""
+    def test_reaping_judges_without_the_lock_and_drops_under_it(
+            self, tmp_path):
+        """Every pm auto-stash push and pop happens under the registry lock,
+        so the drops do too: a drop outside it could take another update's
+        in-flight auto-stash for an applied leftover, or remove by a position
+        that update's pop then reuses.  Judging an older pm's stash parses
+        two full registries, so that part runs without the lock: on a large
+        registry it held the lock for over a second per kept stash on every
+        update, while pm writers wait at most 2 s for it."""
         repo = _init_repo(tmp_path)
         pm = _seed_project(repo)
         (repo / "a.txt").write_text("base\n")
         _git("add", "a.txt", cwd=repo)
         _git("commit", "-q", "-m", "a", cwd=repo)
+        _incoming(repo, pm, files={"c.txt": "c\n"})
+        msg = "pm: auto-stash for merge"
+        # An older pm's auto-stash carrying a registry note, applied since.
+        _edit(pm, _add_note("note-old", "x"))
+        _git("stash", "push", "-m", msg, cwd=repo)
+        _edit(pm, _add_note("note-old", "x"))
         (repo / "a.txt").write_text("applied\n")
-        _git("stash", "push", "-m", "pm: auto-stash for merge", cwd=repo)
+        _git("stash", "push", "-m", msg, "--", "a.txt", cwd=repo)
         (repo / "a.txt").write_text("applied\n")          # leaked, applied
-        _incoming(repo, pm, _add_note("note-in", "x"))
         probes = []
         real = pr_mod.git_ops.run_git
 
         def run_git(*args, **kw):
-            if args[:2] in (("stash", "list"), ("stash", "drop")):
+            if args[:2] == ("stash", "drop") or args[0] == "show":
                 try:
                     with store._lock(pm, timeout=0):
                         probes.append((args[:2], "free"))
@@ -942,9 +952,68 @@ class TestRegistryLock:
         with mock.patch.object(pr_mod.git_ops, "run_git",
                                side_effect=run_git):
             assert pr_mod._ff_with_autostash(repo, "incoming").returncode == 0
-        assert (("stash", "drop"), "held") in probes, probes
-        assert all(state == "held" for _, state in probes), probes
+        drops = [st for a, st in probes if a == ("stash", "drop")]
+        shows = [st for a, st in probes if a[0] == "show"]
+        assert drops == ["held", "held"], probes
+        assert shows and set(shows) == {"free"}, probes   # registry parses
         assert _stash_list(repo) == ""
+
+    def _leaked_applied_stash(self, tmp_path):
+        repo = _init_repo(tmp_path)
+        pm = _seed_project(repo)
+        (repo / "a.txt").write_text("base\n")
+        _git("add", "a.txt", cwd=repo)
+        _git("commit", "-q", "-m", "a", cwd=repo)
+        (repo / "a.txt").write_text("applied\n")
+        _git("stash", "push", "-m", "pm: auto-stash for merge", cwd=repo)
+        (repo / "a.txt").write_text("applied\n")
+        return repo, pm
+
+    def _before_lock(self, hook):
+        """Run *hook* when the reaper asks for the lock (after judging)."""
+        real = store._lock
+
+        @contextlib.contextmanager
+        def lock(root, timeout=store.LOCK_TIMEOUT_SECONDS):
+            hook()
+            with real(root, timeout) as fd:
+                yield fd
+        return mock.patch.object(pr_mod.store, "_lock", lock)
+
+    def test_reap_rechecks_the_worktree_under_the_lock(self, tmp_path):
+        """Judged applied without the lock, but the file changed before the
+        drop (e.g. another update reverted it for its own auto-stash): kept."""
+        repo, pm = self._leaked_applied_stash(tmp_path)
+        with self._before_lock(
+                lambda: (repo / "a.txt").write_text("changed\n")):
+            assert pr_mod._reap_auto_stashes(repo, pm) == 0
+        assert "pm: auto-stash for merge" in _stash_list(repo)
+
+    def test_reap_registry_verdict_needs_the_same_live_registry(
+            self, tmp_path):
+        """The structural verdict on a stash's registry change is made
+        against the live registry read without the lock.  A pm write landing
+        before the drop invalidates it (never re-parsed under the lock): the
+        stash is kept, and the next update drops it."""
+        repo = _init_repo(tmp_path)
+        pm = _seed_project(repo)
+        _edit(pm, _add_note("note-old", "x"))
+        _git("stash", "push", "-m", "pm: auto-stash for merge", cwd=repo)
+        _edit(pm, _add_note("note-old", "x"))
+        with self._before_lock(lambda: _edit(
+                pm, lambda d: _pr(d, "pr-002").update(title="writer"))):
+            assert pr_mod._reap_auto_stashes(repo, pm) == 0
+        assert "pm: auto-stash for merge" in _stash_list(repo)
+        assert pr_mod._reap_auto_stashes(repo, pm) == 1
+        assert _stash_list(repo) == ""
+
+    def test_reap_with_a_busy_lock_drops_nothing(self, tmp_path, capsys):
+        repo, pm = self._leaked_applied_stash(tmp_path)
+        with store._lock(pm), \
+             mock.patch.object(pr_mod, "_REAP_LOCK_TIMEOUT", 0.2):
+            assert pr_mod._reap_auto_stashes(repo, pm) == 0
+        assert "pm: auto-stash for merge" in _stash_list(repo)
+        assert "left for the next update" in capsys.readouterr().err
 
     def test_no_reaping_without_the_registry_lock(self, tmp_path):
         """A repo without pm's registry (a standalone pm dir) has no lock

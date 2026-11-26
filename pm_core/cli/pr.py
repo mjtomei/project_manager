@@ -3244,12 +3244,23 @@ _AUTO_STASH_MSG = "pm: auto-stash for merge"
 # touching the checkout.  The lock is then held across local git operations
 # only (never a network call).
 _MERGE_STASH_LOCK_TIMEOUT = 10.0
+# Dropping leaked auto-stashes is best-effort cleanup: a busy lock leaves
+# them for the next update.
+_REAP_LOCK_TIMEOUT = store.LOCK_TIMEOUT_SECONDS
 
 
 def _registry_root(cwd: Path) -> Path | None:
     """The pm dir inside *cwd* whose registry a merge there may rewrite."""
     root = cwd / "pm"
     return root if (root / "project.yaml").is_file() else None
+
+
+def _read_registry_text(root: Path) -> str | None:
+    """The live registry's text, or None when it cannot be read."""
+    try:
+        return (root / "project.yaml").read_text()
+    except OSError:
+        return None
 
 
 def _tree_entry(cwd: Path, rev: str, rel: str) -> tuple[str, str] | None:
@@ -3314,9 +3325,8 @@ def _plan_registry(repo: Path, target: str) -> dict | None:
     plan = {"root": root, "base": parsed[0], "incoming_data": parsed[1],
             "incoming_text": blobs[1], "head": head, "incoming": incoming,
             "index": index}
-    try:
-        live_text = (root / "project.yaml").read_text()
-    except OSError:
+    live_text = _read_registry_text(root)
+    if live_text is None:
         return None
     return plan if _merge_registry_plan(plan, live_text) else None
 
@@ -3362,9 +3372,8 @@ def _apply_registry(repo: Path, plan: dict) -> bool:
     (nothing changed) if the registry can no longer be merged.
     """
     root = plan["root"]
-    try:
-        live_text = (root / "project.yaml").read_text()
-    except OSError:
+    live_text = _read_registry_text(root)
+    if live_text is None:
         return False
     if live_text != plan["live_text"] and \
             not _merge_registry_plan(plan, live_text):
@@ -3394,12 +3403,7 @@ def _restore_registry(repo: Path, plan: dict, *, restage: bool = True) -> None:
     HEAD, and a later ``git commit`` would commit it.  Nothing undoes that
     silently, so say how to fix it.
     """
-    path = plan["root"] / "project.yaml"
-    try:
-        current = path.read_text()
-    except OSError:
-        current = None
-    if current != plan["live_text"]:
+    if _read_registry_text(plan["root"]) != plan["live_text"]:
         store.save_text(plan["live_text"], plan["root"])
     if restage and not _stage_registry(repo, plan["index"]):
         mode, sha = plan["index"]
@@ -3483,10 +3487,10 @@ def _stash_for_merge(cwd: Path, pr_display_id: str = "",
         # git saved the stash and then failed reverting the files (e.g. a
         # path that vanished since the status).  If it reverted nothing,
         # drop it, so a failed stash never leaks one; otherwise the pop
-        # after the update restores what it did revert.  No live registry
-        # is passed: a registry change in it (a staged hunk) counts as not
-        # applied, so such a stash is kept and popped.
-        if _stash_already_applied(cwd, after, lambda: None):
+        # after the update restores what it did revert.  A registry change
+        # in it (a staged hunk) counts as not applied, so such a stash is
+        # kept and popped.
+        if _stash_already_applied(cwd, after, lambda _sha: False):
             ref = _stash_ref(cwd, after)
             if ref is not None:
                 git_ops.run_git("stash", "drop", "-q", ref, cwd=cwd,
@@ -3655,8 +3659,8 @@ def _ff_with_autostash(repo_dir: str | Path, target: str,
     over the merged one (#253 S74).  If the lock stays busy the checkout is
     left untouched and a :class:`_RegistryLockBusy` result is returned.
     After a successful update with everything restored, leaked auto-stashes
-    are reaped (still under the lock; so only in a repo that holds pm's
-    registry).
+    are reaped (:func:`_reap_auto_stashes`; only in a repo that holds pm's
+    registry, whose lock its drops take).
     """
     repo_path = Path(repo_dir)
     # The plan runs before the lock (seconds on a large registry): pin the
@@ -3714,14 +3718,12 @@ def _ff_with_autostash(repo_dir: str | Path, target: str,
                                    f"+ merged changes).")
                 else:
                     _restore_registry(repo_path, plan)
-        if merge_r.returncode == 0 and restored and reg_root is not None:
-            # Under the lock, like every pm auto-stash push and pop: another
-            # update's in-flight auto-stash (stored, files not yet reverted,
-            # or applied but not yet dropped) is then never taken for an
-            # applied leftover, nor shifted under its positional drop.  A
-            # repo without pm's registry (a standalone pm dir) has no such
-            # lock, so its leaked stashes are left to the user.
-            _reap_auto_stashes(repo_path)
+    if merge_r.returncode == 0 and restored and reg_root is not None:
+        # After the lock is released: the reaper judges the leaked stashes
+        # without it and drops them under it.  A repo without pm's registry
+        # (a standalone pm dir) has no lock serializing pm's auto-stash
+        # pushes and pops, so its leaked stashes are left to the user.
+        _reap_auto_stashes(repo_path, reg_root)
     return merge_r
 
 
@@ -3755,11 +3757,11 @@ def _worktree_has(cwd: Path, blob_rev: str, rel: str) -> bool:
     return have.returncode == 0 and have.stdout.strip() == want.stdout.strip()
 
 
-def _stash_already_applied(cwd: Path, sha: str, current) -> bool:
+def _stash_already_applied(cwd: Path, sha: str, registry_applied) -> bool:
     """True if every change stash *sha* holds is already in the working tree.
 
-    *current* returns the live registry (or None).  The registry, which
-    takes parsing, is checked last and only for a stash that changed it.
+    *registry_applied(sha)* decides the registry part; it takes parsing, so
+    it is called last and only for a stash that changed the registry.
     ``--no-renames``: a renamed file's old path must be gone too.
     """
     tracked = git_ops.run_git("diff", "--name-only", "--no-renames", "-z",
@@ -3780,59 +3782,84 @@ def _stash_already_applied(cwd: Path, sha: str, current) -> bool:
         for rel in filter(None, untracked.stdout.split("\0")):
             if not _worktree_has(cwd, f"{sha}^3:{rel}", rel):
                 return False
-    return _REGISTRY_REL not in paths or _registry_change_applied(
-        cwd, sha, _REGISTRY_REL, current())
+    return _REGISTRY_REL not in paths or registry_applied(sha)
 
 
-def _reap_auto_stashes(cwd: Path) -> int:
+def _auto_stashes(cwd: Path) -> list[str]:
+    """Commits of the ``pm: auto-stash for merge`` entries, newest first."""
+    listing = git_ops.run_git("stash", "list", "--format=%H%x09%gs",
+                              cwd=cwd, check=False)
+    if listing.returncode != 0:
+        return []
+    shas = []
+    for line in (listing.stdout or "").splitlines():
+        sha, _, subject = line.partition("\t")
+        # subject: "On <branch>: <message>" (ref names cannot contain ':')
+        if subject.partition(": ")[2] == _AUTO_STASH_MSG:
+            shas.append(sha)
+    return shas
+
+
+def _reap_auto_stashes(cwd: Path, root: Path) -> int:
     """Drop leaked ``pm: auto-stash for merge`` entries already applied.
 
     A stash is dropped only when every change it holds is already in the
     working tree (the registry compared structurally), so nothing is lost;
     other auto-stashes are kept and listed.  Other stashes (WIP, the user's)
-    are never touched.  The caller holds the registry lock, which every pm
-    auto-stash push and pop also runs under.  Returns the number dropped.
+    are never touched.  Returns the number dropped.
+
+    *root* is the pm dir whose registry lock every pm auto-stash push and
+    pop runs under.  The candidates are judged without it: a stash from an
+    older pm carries a registry change, and comparing it parses two full
+    registries (well over a second per stash on a large registry, again on
+    every update while it is kept), and pm writers wait at most 2 s for the
+    lock.  The drops happen under the lock, each after re-checking the
+    stash against the working tree, so another update's in-flight
+    auto-stash (stored with its files not yet reverted, or applied but not
+    yet dropped) is never taken for an applied leftover nor shifted under
+    its positional drop.
     """
-    listing = git_ops.run_git("stash", "list", "--format=%gd%x09%H%x09%gs",
-                              cwd=cwd, check=False)
-    if listing.returncode != 0:
-        return 0
-    candidates = []
-    for line in (listing.stdout or "").splitlines():
-        parts = line.split("\t", 2)
-        if len(parts) != 3:
-            continue
-        ref, sha, subject = parts
-        # subject: "On <branch>: <message>" (ref names cannot contain ':')
-        if subject.partition(": ")[2] == _AUTO_STASH_MSG:
-            candidates.append((ref, sha))
+    candidates = _auto_stashes(cwd)
     if not candidates:
         return 0
-    loaded: list = []
+    live: dict = {}
+    registry_ok: set[str] = set()
 
-    def current() -> dict | None:
-        # Only a stash from an older pm carries a registry change; skip the
-        # parse (the caller holds the registry lock) unless one does.
-        if not loaded:
-            reg_root = _registry_root(cwd)
-            try:
-                loaded.append(store.load(reg_root, validate=False)
-                              if reg_root is not None else None)
-            except store.ProjectYamlParseError:
-                loaded.append(None)
-        return loaded[0]
+    def registry_applied(sha: str) -> bool:
+        if not live:                    # loaded once, only if needed
+            live["text"] = _read_registry_text(root)
+            live["data"] = (_parse_registry(live["text"])
+                            if live["text"] is not None else None)
+        if _registry_change_applied(cwd, sha, _REGISTRY_REL, live["data"]):
+            registry_ok.add(sha)
+            return True
+        return False
 
-    dropped, kept = 0, []
-    # Highest index first, so the lower refs stay valid while dropping.
-    for ref, sha in sorted(candidates, key=lambda c: int(c[0][7:-1]),
-                           reverse=True):
-        if not _stash_already_applied(cwd, sha, current):
-            kept.append(sha)
-            continue
-        if _stash_ref(cwd, sha) == ref and git_ops.run_git(
-                "stash", "drop", "-q", ref, cwd=cwd,
-                check=False).returncode == 0:
-            dropped += 1
+    applied = [sha for sha in candidates
+               if _stash_already_applied(cwd, sha, registry_applied)]
+    kept = [sha for sha in candidates if sha not in applied]
+    dropped = 0
+    if applied:
+        try:
+            with store._lock(root, timeout=_REAP_LOCK_TIMEOUT):
+                # A structural verdict stands only for the registry it was
+                # made against: compare the text, never parse under the lock.
+                same = not registry_ok or \
+                    _read_registry_text(root) == live["text"]
+                for sha in applied:
+                    ref = _stash_ref(cwd, sha)
+                    if ref is None:
+                        continue        # gone meanwhile (popped and dropped)
+                    if not _stash_already_applied(
+                            cwd, sha, lambda s: same and s in registry_ok):
+                        kept.append(sha)
+                    elif git_ops.run_git("stash", "drop", "-q", ref, cwd=cwd,
+                                         check=False).returncode == 0:
+                        dropped += 1
+        except store.StoreLockTimeout:
+            click.echo(f"Note: the registry lock is busy, so {len(applied)} "
+                       f"leaked pm auto-stash(es) already in the working tree "
+                       f"are left for the next update to drop.", err=True)
     if dropped:
         click.echo(f"Dropped {dropped} leaked pm auto-stash(es) whose changes "
                    f"are already in the working tree.")
