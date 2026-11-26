@@ -3196,9 +3196,11 @@ def _dirty_file_paths(cwd: Path) -> list[str]:
     Parsed from ``git status --porcelain -z``: the paths are raw (never
     C-quoted), so they can be fed back to git as pathspecs, and a
     worktree-only change (`` M file``) keeps its leading status column.
+    ``-unormal`` overrides a user's ``status.showUntrackedFiles=no``, which
+    would hide an untracked file that blocks the fast-forward.
     """
-    result = git_ops.run_git("status", "--porcelain", "-z", cwd=cwd,
-                             check=False)
+    result = git_ops.run_git("status", "--porcelain", "-z", "-unormal",
+                             cwd=cwd, check=False)
     entries = (result.stdout or "").rstrip("\n").split("\0")
     paths = []
     i = 0
@@ -3718,9 +3720,10 @@ def _stash_already_applied(cwd: Path, sha: str, current) -> bool:
 
     *current* returns the live registry (or None).  The registry, which
     takes parsing, is checked last and only for a stash that changed it.
+    ``--no-renames``: a renamed file's old path must be gone too.
     """
-    tracked = git_ops.run_git("diff", "--name-only", "-z", f"{sha}^1", sha,
-                              cwd=cwd, check=False)
+    tracked = git_ops.run_git("diff", "--name-only", "--no-renames", "-z",
+                              f"{sha}^1", sha, cwd=cwd, check=False)
     if tracked.returncode != 0:
         return False
     paths = [p for p in tracked.stdout.split("\0") if p]

@@ -219,6 +219,16 @@ class TestDirtyFilePaths:
         # Not C-quoted, rename gives the new path only.
         assert sorted(paths) == ["café \"q\".txt", "new name.txt"]
 
+    def test_untracked_listed_despite_user_status_config(self, tmp_path):
+        """A user's ``status.showUntrackedFiles=no`` hid untracked files from
+        the porcelain status, so one blocking the fast-forward was never
+        stashed (the stash names its paths)."""
+        repo = _init_repo(tmp_path)
+        _seed_project(repo)
+        _git("config", "status.showUntrackedFiles", "no", cwd=repo)
+        (repo / "new.txt").write_text("u\n")
+        assert pr_mod._dirty_file_paths(repo) == ["new.txt"]
+
 
 # ---------------------------------------------------------------------------
 # pr start: persist a created GitHub PR with backoff (#210 class)
@@ -849,6 +859,18 @@ class TestRegistryLock:
         assert (repo / "a.txt").read_text() == "applied\n"    # applied...
         assert "pm: auto-stash for merge" in _stash_list(repo)  # ...kept
 
+    def test_project_set_writes_under_the_lock(self, tmp_path):
+        """``pm project set`` did an unlocked load + save, so it could save a
+        registry loaded before a merge over the merged one."""
+        from pm_core.cli import project as project_mod
+        pm = _seed_project(_init_repo(tmp_path))
+        with mock.patch.object(project_mod, "state_root", return_value=pm):
+            with store._lock(pm), \
+                 pytest.raises(store.StoreLockTimeout):
+                project_mod._set_project_bool("skip-qa", True)
+            project_mod._set_project_bool("skip-qa", True)
+        assert store.load(pm)["project"]["skip_qa"] is True
+
     def test_busy_lock_leaves_checkout_untouched(self, tmp_path, capsys):
         repo = _init_repo(tmp_path)
         pm = _seed_project(repo)
@@ -952,11 +974,17 @@ class TestStashRestoreAndReap:
         assert _pr(d, "pr-001")["updated_at"] == "local"
         assert [n["id"] for n in _pr(d, "pr-001")["notes"]] == ["note-in"]
 
-    def test_refused_pop_keeps_stash_intact(self, tmp_path, capsys):
+    @pytest.mark.parametrize("show_untracked", [None, "no"])
+    def test_refused_pop_keeps_stash_intact(self, tmp_path, capsys,
+                                            show_untracked):
         """git refuses the pop outright (an untracked stashed file now exists
-        from the merge): nothing applied, nothing lost, stash kept."""
+        from the merge): nothing applied, nothing lost, stash kept.  A user's
+        ``status.showUntrackedFiles=no`` does not stop the stash either."""
         repo = _init_repo(tmp_path)
         pm = _seed_project(repo)
+        if show_untracked:
+            _git("config", "status.showUntrackedFiles", show_untracked,
+                 cwd=repo)
         _incoming(repo, pm, files={"new.txt": "from the branch\n"})
         (repo / "new.txt").write_text("mine\n")
 
@@ -1007,6 +1035,32 @@ class TestStashRestoreAndReap:
         out = capsys.readouterr()
         assert "Dropped 2 leaked pm auto-stash" in out.out
         assert "stash@{0}" in out.err
+
+    def test_leaked_rename_kept_until_the_old_path_is_gone(self, tmp_path):
+        """A stashed rename removes the old path too.  Rename detection
+        listed only the new one, so a tree holding the new file next to the
+        old one counted as applied."""
+        repo = _init_repo(tmp_path)
+        pm = _seed_project(repo)
+        (repo / "old.txt").write_text("a\nb\nc\n")
+        _git("add", "-A", cwd=repo)
+        _git("commit", "-q", "-m", "old", cwd=repo)
+        _git("mv", "old.txt", "new.txt", cwd=repo)
+        _git("stash", "push", "-m", "pm: auto-stash for merge", cwd=repo)
+        (repo / "new.txt").write_text("a\nb\nc\n")   # old.txt still there
+        _incoming(repo, pm, files={"c.txt": "c\n"})
+
+        assert pr_mod._ff_with_autostash(repo, "incoming").returncode == 0
+        assert "pm: auto-stash for merge" in _stash_list(repo)   # kept
+
+        (repo / "old.txt").unlink()                   # now fully applied
+        _git("checkout", "-q", "-b", "next", cwd=repo)
+        (repo / "d.txt").write_text("d\n")
+        _git("add", "d.txt", cwd=repo)
+        _git("commit", "-q", "-m", "d", cwd=repo)
+        _git("checkout", "-q", "master", cwd=repo)
+        assert pr_mod._ff_with_autostash(repo, "next").returncode == 0
+        assert _stash_list(repo) == ""                # reaped
 
 
 # ---------------------------------------------------------------------------

@@ -62,11 +62,13 @@ def _set_project_bool(setting: str, enabled: bool) -> None:
     """Write a boolean setting to project.yaml."""
     from pm_core import store
 
-    root = state_root()
-    data = store.load(root)
     key = _YAML_KEY[setting]
-    data.setdefault("project", {})[key] = enabled
-    store.save(data, root)
+    # Under the lock, re-reading fresh state: a plain load + save could
+    # write back a registry loaded before a concurrent pm write (e.g. a
+    # merge's reconciled registry) and drop that write.
+    store.locked_update(
+        state_root(),
+        lambda data: data.setdefault("project", {}).__setitem__(key, enabled))
 
 
 def _list_project_settings():

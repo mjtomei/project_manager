@@ -73,7 +73,7 @@ This spec was rescoped to match (PR note "Rescope after pr-ac10f03"):
     leaked-stash reaping.
   - `_resolve_project_yaml_pop(cwd, ref)` is master's resolver, kept as the
     fallback.
-  - `_dirty_file_paths` parses `status --porcelain -z`.
+  - `_dirty_file_paths` parses `status --porcelain -z -unormal`.
   - `_persist_with_backoff` covers the pr start orphan class (§7).
 - `pm_core/store.py`:
   - `find_conflict_markers` and the guard in `load()`. A missing file still
@@ -266,7 +266,10 @@ prints the `git update-index --cacheinfo` command that restores it
 (review c6a2 i5).
 
 `_stash_for_merge` (lock held) stashes only ordinary files:
-1. Take the dirty paths (`-z`) and apply `_stashable_paths`. That drops
+1. Take the dirty paths (`-z`; `-unormal` overrides a user's
+   `status.showUntrackedFiles=no`, which hid an untracked file that
+   blocks the fast-forward; review c6a2 i6) and apply `_stashable_paths`.
+   That drops
    `_NEVER_STASH_RELS` (the registry, `.lock`, `.tmp`) and expands a
    collapsed untracked `pm/`.
 2. `git stash push --include-untracked -m "pm: auto-stash for merge" --
@@ -288,7 +291,9 @@ position:
 `_reap_auto_stashes` drops an entry whose message is exactly `pm: auto-stash
 for merge` when its changes are already applied:
 - tracked and untracked paths: the worktree blob equals the stash blob
-  (`hash-object` vs `rev-parse`);
+  (`hash-object` vs `rev-parse`), and a path the stash deleted is absent.
+  The tracked paths come from `diff --no-renames`: with rename detection
+  a renamed file's old path was never checked (review c6a2 i6);
 - `pm/project.yaml`: `merge_3way(stash^1, stash, current) == current`, i.e.
   every change the stash made is present or superseded in the live registry.
   This is checked last, and the live registry is loaded only if some
@@ -356,7 +361,8 @@ lock is a different one.
 
 - Guard: `find_conflict_markers` forms and benign values; the `load()`
   message; a missing file is still a `FileNotFoundError`.
-- `_dirty_file_paths`: worktree-only change; raw paths and renames.
+- `_dirty_file_paths`: worktree-only change; raw paths and renames;
+  untracked files despite `status.showUntrackedFiles=no`.
 - `_persist_with_backoff`: retry-then-succeed; exhaustion.
 - `_ff_with_autostash` on real git:
   - overlapping edits reconcile (live wins, merged-in note and field kept,
@@ -393,13 +399,17 @@ lock is a different one.
     all in a repo without pm's registry;
   - a busy lock leaves the checkout untouched, and the post-publish pull
     then exits 1 without a recovery window (`test_pr_enhancements.py`);
-  - a concurrent writer thread loses no notes (3 runs).
+  - a concurrent writer thread loses no notes (3 runs);
+  - `pm project set` writes under the lock (it did an unlocked load +
+    save, which could drop a merge's reconciled registry).
 - Restore and reap:
   - a conflicted pop keeps the stash, leaves the registry valid and opens no
     window (the warning names a path with a space unsplit);
-  - a refused pop keeps the stash intact;
+  - a refused pop keeps the stash intact, also under a user's
+    `status.showUntrackedFiles=no`;
   - reaping drops applied entries (files plus a structural registry case)
-    and keeps a non-applied entry and WIP.
+    and keeps a non-applied entry and WIP;
+  - a leaked stashed rename is kept while its old path still exists.
 - `_resolve_project_yaml_pop`: a registry conflict from a text stash is
   resolved; a non-registry `project.yaml` is left alone.
 - Master's `tests/test_merge_publish.py` covers the full `pm pr merge` local
