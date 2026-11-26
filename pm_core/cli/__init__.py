@@ -22,6 +22,7 @@ import click
 from pm_core import store, git_ops, prompt_gen
 from pm_core.backend import detect_backend
 from pm_core.providers import PROVIDER_SETTING_HINT, ProviderNotFoundError
+from pm_core.paths import PATH_SETTINGS
 from pm_core.workspace_trust import DEFAULT_PROMPT_GRACE_SECONDS
 
 # Import helpers used directly in this module.  Submodules import from
@@ -267,8 +268,7 @@ _ENUM_SETTINGS = {"spec-mode": {"auto", "review", "prompt"},
                   "container-runtime": {"docker", "podman"},
                   "container-image-cache": {"auto", "on", "off"}}
 # Absolute directory paths; 'default' clears them (see pm_core.paths).
-_PATH_SETTINGS = {"workdirs-dir", "captures-dir", "scratch-dir",
-                  "image-cache-dir"}
+_PATH_SETTINGS = set(PATH_SETTINGS)
 _SETTING_DEFAULTS = {
     "hide-assist": "off",
     "hide-merged": "off",

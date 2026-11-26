@@ -334,9 +334,9 @@ def require_local_path(path: Path | str, purpose: str,
     *purpose* names what would live there ("QA scratch", "the image cache",
     "container storage"); *setting* is the ``pm set`` name that relocates it.
     """
-    fstype = filesystem_type(path)
-    if not fstype or fstype.lower() not in NETWORK_FILESYSTEM_TYPES:
+    if not is_network_filesystem(path):
         return
+    fstype = filesystem_type(path)
     remedy = (f"set '{setting}' to a directory on local disk "
               f"(pm set {setting} <local-path>)" if setting
               else "use a directory on local disk")

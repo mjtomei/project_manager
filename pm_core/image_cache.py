@@ -701,8 +701,8 @@ def _graphroot(home: str) -> Path:
     return Path(home) / ".local" / "share" / "containers" / "storage"
 
 
-def engine_config_text(home: str, *, isolated: bool = False,
-                       store: str | None = None) -> dict[str, str]:
+def engine_config_text(home: str, *, isolated: bool = False
+                       ) -> dict[str, str]:
     """``{filename: text}`` of the containers config for an engine at *home*.
 
     The default engine keeps podman's default runroot/tmp dir.  An
@@ -710,7 +710,6 @@ def engine_config_text(home: str, *, isolated: bool = False,
     short runroot and tmp dir so two engines never share runtime state.
     """
     home = home.rstrip("/") or "/"
-    store = store or CONSUMER_STORE
     graphroot = _graphroot(home)
     lines = [
         ENGINE_CONFIG_MARK,
@@ -735,7 +734,7 @@ def engine_config_text(home: str, *, isolated: bool = False,
     lines += [
         "",
         "[storage.options]",
-        f'additionalimagestores = ["{store}"]',
+        f'additionalimagestores = ["{CONSUMER_STORE}"]',
         "",
         "[storage.options.overlay]",
         f'mount_program = "{MOUNT_PROGRAM}"',
