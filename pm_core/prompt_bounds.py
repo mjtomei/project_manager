@@ -7,7 +7,7 @@ terminating NUL); exceeding it makes ``execve`` fail with ``E2BIG``
 well under that cap so prompt builders can degrade gracefully before the
 launcher has to fall back to file-backed delivery.
 
-**What is bounded, and what is not.**  Only two kinds of content are ever
+**What is bounded, and what is not.**  Only three kinds of content are ever
 shortened:
 
 * **PR notes** — an append-only handoff log whose newest entries supersede the
@@ -16,6 +16,12 @@ shortened:
   filesystem paths, worktree paths, QA scenario *verdicts*.  These are
   pointers by nature: an omission marker names a command or path that returns
   the full list.
+* **On-disk reference documents** — ``pm/architecture.md`` (the project's
+  Axiomatic Design FRs/DPs/matrix).  It describes the codebase rather than
+  telling the session what to do, and the session can read the file in full,
+  so a head+tail excerpt whose marker names the file loses nothing.  The
+  guidance wrapped around the excerpt is instruction text and is inlined
+  whole (see ``pm_core.notes.architecture_section``).
 
 Everything instruction-shaped is inlined **whole and never truncated**:
 implementation and QA specs, PR descriptions, session notes, QA instruction
@@ -76,6 +82,11 @@ ARTIFACT_PATHS_BUDGET = 8_000
 WATCHER_MANAGED_MAX = 40
 MERGE_ERROR_MAX_LINES = 60
 DEPS_MAX = 40
+# Excerpt budget for pm/architecture.md in plan/impl/review prompts.  Fits a
+# provenance header, a Level-1 matrix for ~15 FRs/DPs and the coupling-debt
+# list; past it the head (provenance, FRs/DPs, matrix) and tail (newest
+# change-log entries) are kept and the marker names the file.
+ARCHITECTURE_BUDGET = 16_000
 
 
 class PromptTooLargeError(RuntimeError):
