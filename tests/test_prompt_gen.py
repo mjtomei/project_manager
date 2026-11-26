@@ -12,7 +12,7 @@ from unittest.mock import patch
 import pytest
 from click.testing import CliRunner
 
-from pm_core import architecture_prompts, notes, prompt_gen, store
+from pm_core import notes, prompt_gen, store
 from pm_core.architecture_prompts import PROMPT_TYPES, architecture_section
 from pm_core.cli import cli, helpers
 from pm_core.prompt_bounds import ARCHITECTURE_BUDGET, prompt_bytes
@@ -234,13 +234,11 @@ class TestArchitectureSection:
         assert "pm pr note add <pr-id> 'architecture:" in block
 
     def test_every_role_has_guidance_and_debt_addendum(self, tmp_path):
-        # PROMPT_TYPES is derived from the guidance mapping; a new role must
-        # also state how the debt rule applies to it (even if only "") and
-        # whether its session runs in a clone (how the document is named).
+        # PROMPT_TYPES is derived from the per-role records, so a new role
+        # (e.g. sign-off) supplies its guidance, debt-rule addendum (even if
+        # only "") and clone flag in one _Role entry.  This pins the role set
+        # and checks each role's block carries the guidance and the rule.
         assert set(PROMPT_TYPES) == {"plan", "impl", "review"}
-        assert (set(architecture_prompts._STRUCTURAL_DEBT_ROLE_ADDENDUM)
-                == set(PROMPT_TYPES))
-        assert set(architecture_prompts._RUNS_IN_CLONE) == set(PROMPT_TYPES)
         _write_arch(tmp_path)
         for role in PROMPT_TYPES:
             _assert_aware(architecture_section(tmp_path, role))

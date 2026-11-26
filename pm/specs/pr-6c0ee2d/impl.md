@@ -32,15 +32,16 @@ refactor PR depend on it).
   module (review-loop 322e i1). The plan's DP7 row lists
   `architecture_prompts` so the baseline seeding (pr-75abaff) maps it
   (review-loop 322e i2):
-  - `PROMPT_TYPES = tuple(_ROLE_GUIDANCE)` → `("plan", "impl", "review")`.
-    Role text lives in two mappings keyed by role: `_ROLE_GUIDANCE` and
-    `_STRUCTURAL_DEBT_ROLE_ADDENDUM` (text appended after the debt rule).
-    Deriving `PROMPT_TYPES` from the guidance mapping means a new role (the
-    sign-off PR pr-4bff69e is the likely first) can't silently fall through
-    to another role's text; a test asserts both mappings cover the same roles
-    (review-loop 322e i3). A third role-keyed mapping, `_RUNS_IN_CLONE`
-    (`plan: False`, `impl`/`review: True`), picks the pointer form (see
-    Ambiguity 4) and is covered by the same test (review-loop 322e i4).
+  - `PROMPT_TYPES = tuple(_ROLES)` → `("plan", "impl", "review")`.
+    Everything that varies by role is one frozen `_Role` record in
+    `_ROLES`: `guidance` (role text), `debt_addendum` (text appended after
+    the debt rule, `""` when it stands alone) and `runs_in_clone` (`plan:
+    False`, `impl`/`review: True`; picks the pointer form, see Ambiguity 4).
+    A new role (the sign-off PR pr-4bff69e is the likely first) supplies all
+    three in one entry, so it can't silently fall through to another role's
+    text or miss a field. Role-keyed text came in review-loop 322e i3, the
+    clone flag in i4; i7 folded the three parallel mappings into the record.
+    A test pins the role set.
   - `architecture_section(root, prompt_type, *, pr_id=None,
     max_bytes=ARCHITECTURE_BUDGET) -> str`: the prompt block (see R2).
     Returns `""` when there's no document. `pr_id` fills the impl guidance's

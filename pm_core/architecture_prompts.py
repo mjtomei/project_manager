@@ -12,17 +12,36 @@ are; this module holds only the prompt text around it.  It lives next to
 rewording a role's guidance doesn't touch the state module.
 """
 
+from dataclasses import dataclass
 from pathlib import Path
 
 from pm_core import notes
 from pm_core.prompt_bounds import ARCHITECTURE_BUDGET, bounded_text
 
 
-#: Role-specific guidance, keyed by prompt type.  Formatted with
-#: ``pointer`` (how the session names the document) and ``this_pr`` (the PR
-#: id, or a ``<pr-id>`` placeholder).
-_ROLE_GUIDANCE: dict[str, str] = {
-    "plan": """\
+@dataclass(frozen=True)
+class _Role:
+    """Everything :func:`architecture_section` varies by prompt type."""
+
+    #: Role-specific guidance, formatted with ``pointer`` (how the session
+    #: names the document) and ``this_pr`` (the PR id, or a ``<pr-id>``
+    #: placeholder).
+    guidance: str
+    #: Text appended after the structural-debt rule (``""`` when the rule
+    #: stands alone).
+    debt_addendum: str
+    #: Whether the session runs at the root of a clone of the target repo,
+    #: which decides how the block names the document
+    #: (:func:`pm_core.notes.architecture_pointer`).  Impl and review sessions
+    #: run in their PR's workdir clone; plan sessions run in the base checkout
+    #: from wherever pm was started, so they get the absolute path, as the
+    #: plan prompts already do for the plan file.
+    runs_in_clone: bool
+
+
+_ROLES: dict[str, _Role] = {
+    "plan": _Role(
+        guidance="""\
 While planning:
 - Map each proposed PR to the DP(s) it changes, and name them in the PR's
   description when the files don't make it obvious.
@@ -31,7 +50,15 @@ While planning:
 - If the plan legitimately introduces a new FR/DP, or moves a module from one
   DP to another, say so explicitly in the plan file — what it is, where it
   sits in the matrix order, and why — so `{pointer}` can be updated.""",
-    "impl": """\
+        debt_addendum="""
+This applies to plans too: when a plan accepts a workaround, or leaves
+coupling debt in place as out of scope, file or append the improvements PR as
+above and cite its id in the plan instead of leaving the debt as prose.
+""",
+        runs_in_clone=False,
+    ),
+    "impl": _Role(
+        guidance="""\
 While implementing:
 - Before designing, find the DP(s) this PR's task touches and keep the
   change inside them.
@@ -40,7 +67,11 @@ While implementing:
   `pm pr note add {this_pr} 'architecture: <new FR/DP or remap, where it sits in the matrix order, why>'`
   Edit `{pointer}` itself only when this PR's task asks you to —
   otherwise the note is how the change reaches it.""",
-    "review": """\
+        debt_addendum="",
+        runs_in_clone=True,
+    ),
+    "review": _Role(
+        guidance="""\
 While reviewing, treat the document as the baseline and check the diff for:
 - New upward `*` coupling — a module in a lower-order DP importing or calling
   into a higher-order one, including a lazy import added inside a function to
@@ -53,44 +84,21 @@ While reviewing, treat the document as the baseline and check the diff for:
 
 New upward coupling is **NEEDS_WORK**. A contested FR/DP boundary change
 that needs human judgment is **INPUT_REQUIRED**.""",
-}
-
-
-#: Role-specific text appended after the structural-debt rule.  Every role in
-#: ``_ROLE_GUIDANCE`` needs an entry here (``""`` when the rule stands alone)
-#: and in ``_RUNS_IN_CLONE``.
-_STRUCTURAL_DEBT_ROLE_ADDENDUM: dict[str, str] = {
-    "plan": """
-This applies to plans too: when a plan accepts a workaround, or leaves
-coupling debt in place as out of scope, file or append the improvements PR as
-above and cite its id in the plan instead of leaving the debt as prose.
-""",
-    "impl": "",
-    "review": """
+        debt_addendum="""
 Check the diff for workarounds that skipped this: one whose comment cites no
 improvements PR id is **NEEDS_WORK**. In review-loop mode, follow the rule
 yourself for any workaround you add while fixing.
 """,
+        runs_in_clone=True,
+    ),
 }
 
 
-#: Roles :func:`architecture_section` has guidance for — one source of truth,
-#: so a new role (e.g. sign-off) can't silently fall through to another
-#: role's text.  Bug-fix PRs use the impl/review blocks.
-PROMPT_TYPES = tuple(_ROLE_GUIDANCE)
-
-
-#: Whether each role's session runs at the root of a clone of the target
-#: repo, which decides how the block names the document
-#: (:func:`pm_core.notes.architecture_pointer`).  Impl and review sessions
-#: run in their PR's workdir clone; plan sessions run in the base checkout
-#: from wherever pm was started, so they get the absolute path, as the plan
-#: prompts already do for the plan file.
-_RUNS_IN_CLONE: dict[str, bool] = {
-    "plan": False,
-    "impl": True,
-    "review": True,
-}
+#: Roles :func:`architecture_section` has guidance for.  Each role is one
+#: :class:`_Role` record, so a new role (e.g. sign-off) supplies all of its
+#: text and its clone flag in one entry and can't fall through to another
+#: role's.  Bug-fix PRs use the impl/review blocks.
+PROMPT_TYPES = tuple(_ROLES)
 
 
 _STRUCTURAL_DEBT_RULE = """
@@ -147,14 +155,14 @@ def architecture_section(root: Path, prompt_type: str, *,
     if not content:
         return ""
 
-    pointer = notes.architecture_pointer(
-        root, in_clone=_RUNS_IN_CLONE[prompt_type])
+    role = _ROLES[prompt_type]
+    pointer = notes.architecture_pointer(root, in_clone=role.runs_in_clone)
     excerpt = bounded_text(content, max_bytes=max_bytes,
                            pointer=f"`{pointer}`",
                            label="architecture document")
-    guidance = _ROLE_GUIDANCE[prompt_type].format(
+    guidance = role.guidance.format(
         pointer=pointer, this_pr=pr_id or "<pr-id>")
-    rule = _STRUCTURAL_DEBT_RULE + _STRUCTURAL_DEBT_ROLE_ADDENDUM[prompt_type]
+    rule = _STRUCTURAL_DEBT_RULE + role.debt_addendum
     return f"""
 ## Project Architecture (`{pointer}`)
 

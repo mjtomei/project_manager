@@ -56530,24 +56530,25 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-11-26T15:03:37.863094+00:00'
-  updated_at: '2026-11-26T16:51:39.388274+00:00'
+  updated_at: '2026-11-26T17:35:05.135560+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
   notes:
-  - id: note-c60334e
-    text: 'From pr-6c0ee2d (updated at review-loop 322e i5; the names below replace
-      _role_guidance/_STRUCTURAL_DEBT_LEAD): to give sign-off its own architecture
-      guidance, add a "signoff" entry to each role-keyed mapping in pm_core/architecture_prompts.py:
-      _ROLE_GUIDANCE (its text; PROMPT_TYPES is derived from it), _STRUCTURAL_DEBT_ROLE_ADDENDUM
+  - id: note-aa7877e
+    text: 'From pr-6c0ee2d (updated at review-loop 322e i7: the three role-keyed mappings
+      _ROLE_GUIDANCE/_STRUCTURAL_DEBT_ROLE_ADDENDUM/_RUNS_IN_CLONE became one _ROLES
+      dict of frozen _Role records): to give sign-off its own architecture guidance,
+      add a "signoff": _Role(...) entry to _ROLES in pm_core/architecture_prompts.py
+      with guidance= (its text; PROMPT_TYPES is derived from _ROLES), debt_addendum=
       ("" if the debt rule stands alone; sign-off is a router that never edits code,
-      so likely "check the diff for uncited workarounds") and _RUNS_IN_CLONE (True:
-      sign-off runs in the PR workdir clone, so an in-repo doc is named pm/architecture.md).
+      so likely "check the diff for uncited workarounds") and runs_in_clone=True (sign-off
+      runs in the PR workdir clone, so an in-repo doc is named pm/architecture.md).
       Then call architecture_section(root, "signoff", pr_id=pr_id) from generate_signoff_prompt,
       and extend tests/test_prompt_gen.py::TestArchitectureSection::test_every_role_has_guidance_and_debt_addendum,
       which pins the role set. An unknown role raises ValueError by design.'
     created_at: '2026-11-26T15:44:23Z'
-    last_edited: '2026-11-26T16:51:39Z'
+    last_edited: '2026-11-26T17:35:05Z'
 - id: pr-75abaff
   plan: plan-axiomatic-design
   title: Seed pm/architecture.md baseline for project-manager
