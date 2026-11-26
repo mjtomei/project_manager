@@ -12,10 +12,32 @@ Committed sections (tracked in git, in notes.txt):
 
 Local section (gitignored, in notes-local.txt):
   - Local: included in all prompts, not committed
+
+Architecture document (committed, in architecture.md):
+  The project's MIT Axiomatic Design analysis — a living reference that
+  plan, implementation and review prompts point sessions at so they reuse the
+  existing functional requirements (FRs) and design parameters (DPs) instead
+  of re-deriving them.  Free-form markdown; nothing here parses it (pm ships
+  zero analyzer code — sessions produce and update it).  Recommended layout,
+  top to bottom, so a head+tail prompt excerpt keeps what matters:
+
+    1. Provenance — date, git commit and model the analysis was made with
+    2. FRs, and the disjoint DPs that satisfy them (mapped to modules/dirs)
+    3. Design Matrix [A] (Level 1, plus key Level-2 matrices), ordered so
+       dependencies flow down; a ``*`` above the diagonal is upward coupling
+    4. Known coupling debt (cycles, shared state, workarounds + their PRs)
+    5. FR/DP change log, newest entry last
+
+  ``ensure_notes_file`` never creates it: whether the file exists is what
+  turns the prompt guidance on.  This module only reads it
+  (``load_architecture`` / ``architecture_pointer``); the prompt block built
+  around it is ``pm_core.architecture_prompts.architecture_section``.
 """
 
 from pathlib import Path
 import re
+
+from pm_core import store
 
 
 NOTES_FILENAME = "notes.txt"
@@ -362,3 +384,43 @@ def notes_for_prompt(root: Path, prompt_type: str) -> tuple[str, str]:
     # whole and never truncated; an over-limit prompt is delivered by the
     # launcher's file-backed bootstrap instead.
     return general_block, specific_block
+
+
+# ---------------------------------------------------------------------------
+# Architecture document (pm/architecture.md)
+# ---------------------------------------------------------------------------
+
+ARCHITECTURE_FILENAME = "architecture.md"
+
+
+def load_architecture(root: Path) -> str:
+    """Return the architecture document's text, stripped.
+
+    Returns ``""`` when the file is missing, empty or cannot be read (e.g. a
+    directory sits at the path): the document is optional reference context,
+    so a prompt builder treats all of those as "this project has none" rather
+    than failing the launch.  Undecodable bytes are replaced, not fatal.
+    """
+    try:
+        text = (root / ARCHITECTURE_FILENAME).read_text(
+            encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+    return text.strip()
+
+
+def architecture_pointer(root: Path, *, in_clone: bool = True) -> str:
+    """How a session should name the architecture document.
+
+    *in_clone* says the session runs at the root of a clone of the target
+    repo (impl and review workdirs).  An in-repo pm dir is committed with the
+    target repo, so every such clone has it at ``pm/architecture.md`` (the
+    same convention impl sessions use for ``pm/specs/``).  Otherwise the
+    absolute path is the only name that resolves: a standalone pm dir is not
+    part of those clones, and a session outside a clone (plan sessions run in
+    the base checkout from wherever pm was started, which may be a subdir or
+    anywhere with ``-C``) can't rely on its working directory.
+    """
+    if in_clone and store.is_internal_pm_dir(root):
+        return f"pm/{ARCHITECTURE_FILENAME}"
+    return str(root / ARCHITECTURE_FILENAME)

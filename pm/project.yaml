@@ -154,6 +154,11 @@ plans:
   file: plans/plan-doc-eval.md
   status: draft
   parent: plan-self-improve
+- id: plan-axiomatic-design
+  name: Axiomatic Design Refactoring & Sign-Off Matrix Gate
+  file: plans/plan-axiomatic-design.md
+  status: draft
+  parent: null
 prs:
 - id: pr-001
   plan: plan-001
@@ -39124,7 +39129,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-14T15:34:14.432857+00:00'
-  updated_at: '2026-11-02T00:45:28.966024+00:00'
+  updated_at: '2026-11-26T19:08:37.187701+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -39148,6 +39153,20 @@ prs:
       in pm/.gitignore.'
     created_at: '2026-11-02T00:45:28Z'
     last_edited: '2026-11-02T00:45:28Z'
+  - id: note-45ecf2c
+    text: 'Same fix site, notes.txt is the inverse case: pm init still appends notes.txt
+      to the ensured pm/.gitignore entries (pm_core/cli/__init__.py ~L151, comment
+      "notes.txt is gitignored (local)"), but notes._update_gitignore (pm_core/notes.py
+      ~L135) says notes.txt is committed now and strips it on the next notes ensure.
+      So in a fresh pm init --backend local project a pm/notes.txt written right after
+      init is silently left out of git add -A (status --short empty, so it looks committed),
+      and the first pm plan/pr command then rewrites pm/.gitignore, leaving " M pm/.gitignore"
+      and "?? pm/notes.txt". Seen in pr-6c0ee2d QA S3 (/pm-captures/scenarios/3, fixture
+      commit had only architecture.md + project.yaml + .gitignore). Fix: have pm init
+      call notes._update_gitignore (notes-local.txt, .no-notes-splash) instead of
+      ignoring notes.txt.'
+    created_at: '2026-11-26T19:08:36Z'
+    last_edited: '2026-11-26T19:08:36Z'
 - id: pr-4bde874
   plan: bugs
   title: 'Bug: test_installer_writes_standalone_receiver fails whenever PM_HOST_HOME
@@ -56359,6 +56378,758 @@ prs:
   gh_pr_number: null
   created_at: '2026-11-02T08:57:36.104793+00:00'
   updated_at: '2026-11-02T08:57:36.104793+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-6c0ee2d
+  plan: plan-axiomatic-design
+  title: Add pm/architecture.md state and prompt awareness across pm workflows
+  branch: pm/pr-6c0ee2d-add-pm-architecture-md-state-and-prompt-awareness-
+  status: pending
+  depends_on: []
+  description: 'Introduce `pm/architecture.md` as a first-class project state document
+    (modeled directly on `pm/notes.txt` — zero analyzer code) that stores a project''s
+    MIT Axiomatic Design FRs, disjoint DPs, Design Matrix `[A]`, known coupling debt,
+    provenance metadata (date/commit/model), and FR/DP evolution log. Add a tiny bounded
+    prompt-section helper (mirroring `notes.notes_section`, bounded by `prompt_bounds`
+    so large architecture docs gracefully abbreviate with a pointer to `pm/architecture.md`)
+    and wire awareness into plan (`cli/plan.py`), implementation, bug-fix (`bug_fix_prompts.py`),
+    and review prompts (`prompt_gen.py`): (1) agents read the existing FRs/DPs/matrix
+    instead of re-deriving them, keep changes within disjoint DPs without introducing
+    upward `*` coupling or hidden shared-state cycles, and note when a plan or PR
+    legitimately introduces a new FR/DP; (2) add a **"File Structural Debt, Don''t
+    Just Comment It"** rule reusing the existing `pm pr list --plan improvements`
+    / `pm pr add --plan improvements` / `pm pr note add` pattern from `regression_prompts.py`:
+    whenever an agent must add an out-of-scope workaround, defensive guard, lazy import
+    to sidestep a cycle, or duplicated invariant check, it checks for an existing
+    `improvements` PR, files one (or appends a note to the existing PR so recurring
+    pain self-prioritizes), and references that PR ID in the code comment instead
+    of leaving an orphan historical tag.
+
+
+    Tests: Unit tests verifying `architecture_section` behavior when `pm/architecture.md`
+    is absent, small, or exceeds prompt budget; prompt-generation tests verifying
+    plan, impl, bug-fix, and review prompts include architecture awareness and the
+    structural-debt filing rule when `pm/architecture.md` exists and stay clean when
+    absent.
+
+
+    Files: pm_core/notes.py, pm_core/prompt_gen.py, pm_core/bug_fix_prompts.py, pm_core/prompt_bounds.py,
+    pm_core/cli/plan.py, tests/test_prompt_gen.py'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-26T15:03:37.862958+00:00'
+  updated_at: '2026-11-26T19:33:59.026080+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-a7c886a
+    text: 'review-loop 322e i1: moved the prompt text (architecture_section, role
+      guidance, File Structural Debt rule) out of pm_core/notes.py into new pm_core/architecture_prompts.py
+      (DP7, next to bug_fix_prompts/regression_prompts); notes.py keeps only the state
+      plumbing (ARCHITECTURE_FILENAME, load_architecture, architecture_pointer), matching
+      the plan target table (notes = DP2 primitives). Callers: prompt_gen + cli/plan
+      import architecture_section from it; spec updated.'
+    created_at: '2026-11-26T15:44:09Z'
+    last_edited: '2026-11-26T15:44:09Z'
+  - id: note-fbff1c2
+    text: 'Merge-order handoff relayed from pr-30888b1 (#104, in_review; its note-e78ccd7
+      could not reach this PR): 30888b1 deletes `plan breakdown`. Whichever of the
+      two merges second: drop the arch_block lines in plan_breakdown (modify/delete
+      conflict in pm_core/cli/plan.py) AND drop "breakdown" from _PLAN_COMMANDS in
+      tests/test_prompt_gen.py — that file merges cleanly but 2 TestPlanPrompts::*[breakdown]
+      cases then fail "No such command". plan add already carries the architecture
+      block. Greenfield seeding in plan add is pr-27ba89e scope.'
+    created_at: '2026-11-26T15:59:52Z'
+    last_edited: '2026-11-26T15:59:52Z'
+  - id: note-b45a729
+    text: 'QA planning 2026-11-26 (spec pm/specs/pr-6c0ee2d/qa.md @dc6eed1f): verified
+      by hand that pm prompt / pm plan add|breakdown|review|import carry the block
+      with the right pointer form, and that oversized, non-UTF-8, directory and whitespace-only
+      docs degrade gracefully. Pre-existing gap filed as pr-c5f98ba: impl/review prompts
+      resolve the root from cwd, not -C/PM_PROJECT, so `pm -C <pm-dir> prompt` from
+      outside the pm dir drops both session notes and the architecture block (plan
+      prompts are fine). fake-claude never receives the prompt; QA scenarios record
+      launched prompts with a stand-in claude on PATH.'
+    created_at: '2026-11-26T18:32:37Z'
+    last_edited: '2026-11-26T18:32:37Z'
+  - id: note-0ba3967
+    text: 'QA S4 run 2026-11-26 PASS 4/4 (captures /pm-captures/scenarios/4). Fixture
+      step for next run: `git add project.yaml architecture.md notes.txt && git commit`
+      exits 1 at git add (notes.txt is in the pm dir .gitignore, pr-19e8114) so &&
+      skips the commit; use `git add project.yaml architecture.md; git commit -m fixture`
+      before TUI `s`.'
+    created_at: '2026-11-26T19:33:58Z'
+    last_edited: '2026-11-26T19:33:58Z'
+  model: provider:claude-main-xhigh-pm
+  effort: xhigh
+- id: pr-27ba89e
+  plan: plan-axiomatic-design
+  title: Bootstrap pm/architecture.md at pm init and add fresh regeneration flow
+  branch: pm/pr-27ba89e-bootstrap-pm-architecture-md-at-pm-init-and-add-fr
+  status: pending
+  depends_on:
+  - pr-6c0ee2d
+  - pr-30888b1
+  description: 'External dependency: `pr-30888b1` (wire via `pm pr edit` after load;
+    `pr-30888b1` folds `plan breakdown` into `plan add`). Give every new or existing
+    project an automatic path to create `pm/architecture.md` during onboarding, plus
+    an easy way to regenerate it from scratch as models improve — using zero analyzer
+    code (pure prompt-driven sessions). (1) In `pm_core/guide.py` and `pm plan import`
+    / `pm plan add` (`pm_core/cli/plan.py`), integrate Axiomatic Design bootstrap
+    after `pm init`: for an existing repo, prompt the session to perform an MIT Axiomatic
+    Design analysis (extracting FRs, disjoint DPs, static + behavioral coupling via
+    whatever ad-hoc commands fit that repo''s language, and raw SCCs) and write `pm/architecture.md`;
+    for a greenfield repo, seed `pm/architecture.md` directly inside `pm plan add`
+    (aligning with `pr-30888b1`) so FRs and DPs start lower-triangular from day one.
+    Also ensure a default `improvements` plan (or graceful fallback when absent) is
+    available so structural-debt filing works out of the box on new projects. (2)
+    Add a thin prompt-launcher entry point (e.g. `pm arch refresh` or `pm guide --architecture`)
+    that launches a fresh Claude session explicitly instructed to analyze the repo
+    *from scratch without reading the existing `pm/architecture.md` first* (preventing
+    anchoring bias from older/weaker models), then compare its fresh FRs/DPs/matrix
+    against the old `pm/architecture.md`, report improvements or drift, and write
+    the updated `pm/architecture.md` with updated date/commit/model provenance.
+
+
+    Tests: Unit tests for `guide.py` prompt composition covering existing-repo bootstrap,
+    greenfield seeding in `plan add`, and skip-when-present behavior; unit tests for
+    the fresh-regeneration prompt verifying it instructs unanchored analysis before
+    diffing against the prior `pm/architecture.md`; CLI smoke test for invoking the
+    refresh launcher with fake Claude.
+
+
+    Files: pm_core/guide.py, pm_core/cli/plan.py, pm_core/cli/__init__.py, pm_core/prompt_gen.py,
+    README.md, tests/test_guide.py'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-26T15:03:37.863066+00:00'
+  updated_at: '2026-11-26T15:03:57.855422+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-4bff69e
+  plan: plan-axiomatic-design
+  title: Require Axiomatic Design matrix review and updates in sign-off flow
+  branch: pm/pr-4bff69e-require-axiomatic-design-matrix-review-and-updates
+  status: pending
+  depends_on:
+  - pr-6c0ee2d
+  - pr-5f4f595
+  - pr-5cee3d5
+  description: 'External dependencies: `pr-5f4f595`, `pr-5cee3d5` (wire via `pm pr
+    edit` after load). Build directly on `pr-5f4f595`''s sign-off report architecture-recommendations,
+    proposal-filing/dedup audit, and mandatory human prompt-review gate (and after
+    `pr-5cee3d5`''s sign-off integration edits) to make Axiomatic Design analysis
+    and `pm/architecture.md` maintenance a required part of the PR sign-off flow with
+    zero analyzer code. Update `generate_signoff_prompt` (`pm_core/prompt_gen.py`)
+    so every sign-off session (when `pm/architecture.md` exists): (1) reviews the
+    PR diff against `pm/architecture.md` — checking whether new/moved files map to
+    a disjoint DP, whether the PR introduces new upper-triangular `*` coupling, lazy-import
+    cycles, raw module SCC growth, or shared-state coupling, and whether any FR/DP
+    edits are genuine rather than "gaming" the matrix by merging coupled DPs; (2)
+    audits any temporary workarounds or structural debt surfaced in the diff through
+    `pr-5f4f595`''s consolidated proposal-audit flow — verifying every accepted out-of-scope
+    workaround references a filed `improvements` PR (or filing/appending one via `pm
+    pr add --plan improvements` / `pm pr note add` instead of leaving passive prose)
+    and linking that PR ID in `$CAP/report.html`; (3) adds an **Architecture / Design
+    Matrix** section to `$CAP/report.html` summarizing the coupling delta and any
+    required `pm/architecture.md` update, plus `<meta name="pm-signoff-arch-status"
+    content="pass|improved|update_needed|regressed">` parsed by `pm_core/behavior_report.py`
+    / `pm_core/signoff.py`; (4) routes avoidable new coupling/cycles to `SIGNOFF_IMPL`,
+    contested FR/DP boundary changes needing human judgment to `SIGNOFF_BLOCKED`,
+    and clean/improved PRs to `SIGNOFF_MERGE` with an explicit update block for `pm/architecture.md`
+    (applied via `pm` state update on sign-off/merge so both in-repo `pm/` and standalone
+    `--dir` `pm/` stay current without the router editing target repo code). Preserve
+    `pr-5f4f595`''s full human prompt-review requirement before acceptance.
+
+
+    Tests: Prompt generation tests verifying the sign-off Architecture section, anti-gaming
+    rules, structural-debt `improvements` PR verification, and `<meta name="pm-signoff-arch-status">`
+    contract; `behavior_report.py` and `signoff.py` unit tests parsing the arch meta
+    tag and handling missing/regressed statuses; end-to-end fake-claude sign-off test
+    covering a clean PR, an accepted workaround tracked in `improvements`, and a coupling-regression
+    PR.
+
+
+    Files: pm_core/prompt_gen.py, pm_core/signoff.py, pm_core/behavior_report.py,
+    pm_core/cli/pr.py, tests/test_signoff.py, tests/test_behavior_report.py'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-26T15:03:37.863094+00:00'
+  updated_at: '2026-11-26T17:35:05.135560+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-aa7877e
+    text: 'From pr-6c0ee2d (updated at review-loop 322e i7: the three role-keyed mappings
+      _ROLE_GUIDANCE/_STRUCTURAL_DEBT_ROLE_ADDENDUM/_RUNS_IN_CLONE became one _ROLES
+      dict of frozen _Role records): to give sign-off its own architecture guidance,
+      add a "signoff": _Role(...) entry to _ROLES in pm_core/architecture_prompts.py
+      with guidance= (its text; PROMPT_TYPES is derived from _ROLES), debt_addendum=
+      ("" if the debt rule stands alone; sign-off is a router that never edits code,
+      so likely "check the diff for uncited workarounds") and runs_in_clone=True (sign-off
+      runs in the PR workdir clone, so an in-repo doc is named pm/architecture.md).
+      Then call architecture_section(root, "signoff", pr_id=pr_id) from generate_signoff_prompt,
+      and extend tests/test_prompt_gen.py::TestArchitectureSection::test_every_role_has_guidance_and_debt_addendum,
+      which pins the role set. An unknown role raises ValueError by design.'
+    created_at: '2026-11-26T15:44:23Z'
+    last_edited: '2026-11-26T17:35:05Z'
+- id: pr-75abaff
+  plan: plan-axiomatic-design
+  title: Seed pm/architecture.md baseline for project-manager
+  branch: pm/pr-75abaff-seed-pm-architecture-md-baseline-for-project-manag
+  status: pending
+  depends_on:
+  - pr-6c0ee2d
+  description: 'Dogfood the new `pm/architecture.md` workflow on `project-manager`
+    itself by committing the baseline MIT Axiomatic Design analysis of `pm_core` (135
+    modules, 76,595 LOC; 15 FRs/DPs; Level-1 matrix and Level-2 TUI orchestration
+    matrix; the 29-module Core Engine SCC and 34-module TUI+CLI SCC; 345 lazy-only
+    import edges; 58 `app._*` shared attributes; 20 direct `project.yaml` mutators;
+    121 `S##`/`RQ##` regression marker hotspots; clean diagonal/decoupled islands;
+    target lower-triangular architecture). Every subsequent refactoring PR in this
+    plan will be reviewed against this document by the sign-off flow and incrementally
+    update it as cycles are cut.
+
+
+    Tests: Verify `pm/architecture.md` loads cleanly through the prompt helper added
+    in PR 1 without exceeding prompt budgets.
+
+
+    Files: pm/architecture.md'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-26T15:03:37.863123+00:00'
+  updated_at: '2026-11-26T15:44:18.315659+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-ea77acd
+    text: 'From pr-6c0ee2d review: the architecture prompt block lives in pm_core/architecture_prompts.py
+      (not notes.py). Map it to DP7 PlansPrompts in the baseline pm/architecture.md;
+      pm_core/notes.py keeps only load_architecture/architecture_pointer (DP2).'
+    created_at: '2026-11-26T15:44:18Z'
+    last_edited: '2026-11-26T15:44:18Z'
+- id: pr-53f00a9
+  plan: plan-axiomatic-design
+  title: Extract core session and IPC helpers out of pm_core/cli/helpers.py
+  branch: pm/pr-53f00a9-extract-core-session-and-ipc-helpers-out-of-pm-cor
+  status: pending
+  depends_on:
+  - pr-4bff69e
+  - pr-75abaff
+  description: 'Break the 9 upper-triangular arrows pointing from lower layers into
+    `FR16_CLI` and eliminate the duplicated tmux grouped-session identity logic behind
+    regression markers `S118`, `S121`, `S124`, `S14`, and `S16`. Move non-Click shared
+    infrastructure out of `pm_core/cli/helpers.py` (1,570 LOC, fan-in = 32) into proper
+    lower-layer modules: `pm_core/session_context.py` (single canonical source of
+    truth for grouped-session resolution `_get_pm_session` / `current_session_name`,
+    `state_root`, `_resolve_repo_dir`, workdir path helpers — replacing duplicated
+    copies in `tui/app.py`, `cli/helpers.py`, `paths.py`, and `pane_registry.py`),
+    `pm_core/tui_ipc.py` (`trigger_tui_refresh`, `trigger_tui_reload`, `trigger_tui_merge_lock`/`unlock`,
+    `kill_pr_windows`), and `pm_core/pr_format.py` (`_pr_display_id`, `format_pr_line`,
+    cell-aware record wrapping). Update all non-CLI callers (`paths`, `runtime_state`,
+    `integration`, `pr_cleanup`, `home_window`, `behavior_report`, `loop_shared`,
+    `qa_loop`, `signoff`, `tui/*`) to import from the new lower-layer modules, keeping
+    thin re-exports in `cli/helpers.py` for CLI callers and existing test compatibility.
+    Update `pm/architecture.md`.
+
+
+    Tests: Existing CLI, TUI, grouped-session (`S118`/`S121`/`S124`), and core test
+    suites pass unchanged; new unit tests for `session_context`, `tui_ipc`, and `pr_format`;
+    sign-off verifies zero imports of `pm_core.cli.helpers` from outside `pm_core.cli.*`.
+
+
+    Files: pm_core/session_context.py, pm_core/tui_ipc.py, pm_core/pr_format.py, pm_core/cli/helpers.py,
+    pm_core/paths.py, pm_core/runtime_state.py, pm_core/integration.py, pm_core/pr_cleanup.py,
+    pm_core/home_window/__init__.py, pm_core/behavior_report.py, pm_core/loop_shared.py,
+    pm_core/qa_loop.py, pm_core/signoff.py, pm_core/pane_registry.py, pm_core/tui/,
+    pm/architecture.md'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-26T15:03:37.863144+00:00'
+  updated_at: '2026-11-26T15:03:37.863144+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-142fa46
+  plan: plan-axiomatic-design
+  title: Purge upward imports from pm_core/paths.py to make PathsEnv a true leaf layer
+  branch: pm/pr-142fa46-purge-upward-imports-from-pm-core-paths-py-to-make
+  status: pending
+  depends_on:
+  - pr-53f00a9
+  description: '`pm_core/paths.py` has the highest fan-in in the codebase (76 modules)
+    yet lazily imports upward into `git_ops`, `tmux`, `qa_loop`, and `fake_claude`,
+    pulling nearly every core module into one cycle. Relocate those domain-specific
+    helpers to their owning layers: move `latest_qa_status_path` (and its `S90`/`S120`
+    multi-clone and instruction-run guards) to `pm_core/qa_status.py`, move `get_session_tag`
+    / `_resolve_session_tag` / `captures_dir` / `captures_root` to `pm_core/session_context.py`,
+    move `fake_claude_config_for_type` / `set_fake_claude_config` to `pm_core/fake_claude.py`,
+    classify `pm_core/prompt_bounds.py` in `DP2_PathsEnv` (eliminating `claude_launcher
+    -> prompt_bounds` upward edge), and classify `pm_core/editor.py` in `DP6_AgentExec`.
+    Leave `paths.py` strictly responsible for pure path/setting/logger helpers depending
+    only on stdlib and `DP1_DataGraph`. Update callers and `pm/architecture.md`.
+
+
+    Tests: Existing path, captures, QA status (`S90`/`S120`), and fake-claude tests
+    pass; sign-off verifies `pm_core.paths` has zero outgoing imports to any higher
+    DP (top-level or lazy).
+
+
+    Files: pm_core/paths.py, pm_core/session_context.py, pm_core/qa_status.py, pm_core/fake_claude.py,
+    pm_core/qa_loop.py, pm_core/prompt_gen.py, pm_core/claude_launcher.py, pm_core/cli/,
+    pm/architecture.md'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-26T15:03:37.863170+00:00'
+  updated_at: '2026-11-26T15:03:37.863170+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-e4e3ee0
+  plan: plan-axiomatic-design
+  title: Decouple ModelRouting (FR5) from AgentExec (FR6) and unify model precedence
+  branch: pm/pr-e4e3ee0-decouple-modelrouting-fr5-from-agentexec-fr6-and-u
+  status: pending
+  depends_on:
+  - pr-142fa46
+  - pr-6820cbc
+  description: 'External dependency: `pr-6820cbc` (wire via `pm pr edit` after load;
+    shares `route_bridge.py` / `router_route.py` / `push_proxy.py`). Break both the
+    `FR5 <-> FR6` cross-layer cycle AND the 3-module internal `FR6` cycle (`container
+    -> router_route -> claude_launcher -> container`) while eliminating the 6-layer
+    model/effort configuration precedence sprawl (Report §3A.2 and §4.3). (1) Extract
+    `pm_core/model_schema.py` (`DP1`) with shared provider/effort types and `ResolvedModelSpec`
+    (model, provider, effort, env overrides, conflict warnings, capability metadata)
+    to break `providers <-> model_config`. (2) Consolidate the 6-layer precedence
+    + `CLAUDE_CODE_EFFORT_LEVEL` conflict resolution into a single pure resolver in
+    `model_config.py` producing `ResolvedModelSpec`, consumed verbatim by CLI (`pm
+    model show`, `pm pr model show`), TUI (`model_screen`), `container.py`, and `claude_launcher.py`.
+    (3) Split `router_route.py` into pure `route_spec.py` (`DP5`: URL/mount specs,
+    zero container/launcher imports) and `route_probe.py` (`DP6`, sitting *above*
+    `container.py` and `claude_launcher.py`: `live_probe`, `ensure_in_container`),
+    and invert `claude_launcher -> container` (pass container transcript/exec strategy
+    in rather than importing `container.py`) so `model_schema -> providers/model_config
+    -> route_spec -> container -> claude_launcher -> route_probe` is strictly acyclic.
+    (4) Inject container-mode status into `model_settings.py`. Update `pm/architecture.md`.
+
+
+    Tests: Existing provider, model_config, effort-precedence, router_route, container,
+    and claude_launcher tests pass; unit tests verifying `ResolvedModelSpec` is identical
+    across CLI, TUI, container, and launcher with zero cycles among `providers`, `model_config`,
+    `route_spec`, `container`, `claude_launcher`, and `route_probe`.
+
+
+    Files: pm_core/model_schema.py, pm_core/providers.py, pm_core/model_config.py,
+    pm_core/model_settings.py, pm_core/route_spec.py, pm_core/route_probe.py, pm_core/router_route.py,
+    pm_core/container.py, pm_core/claude_launcher.py, pm/architecture.md'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-26T15:03:37.863190+00:00'
+  updated_at: '2026-11-26T15:04:07.120549+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-f724f95
+  plan: plan-axiomatic-design
+  title: Break remaining Core Engine cycles across git tmux signoff and runtime state
+  branch: pm/pr-f724f95-break-remaining-core-engine-cycles-across-git-tmux
+  status: pending
+  depends_on:
+  - pr-142fa46
+  description: 'Eliminate every remaining upward edge and same-layer cycle inside
+    the 29-module Core Engine SCC: (1) extract sign-off verdict constants, icons,
+    styles, and record-reading helpers into pure leaf `pm_core/signoff_schema.py`
+    (`DP1`) so `prompt_gen.py`, `behavior_report.py`, `review_loop.py`, `merge_integrity.py`,
+    and `tui/tech_tree.py` never import `signoff.py`; (2) move `select_pane_smart`
+    from `tmux.py` into `pane_layout.py` (or accept a layout callback) to break `tmux
+    <-> pane_layout`; (3) break the two same-layer `DP3` cycles: decouple `git_ops.py
+    <-> backend.py` (move `select_remote` / `push_pm_branch` into `backend.py`/`pr_sync.py`)
+    and `fake_github.py <-> gh_ops.py` (invert hook registration so `gh_ops` checks
+    a registered transport rather than importing `fake_github`); (4) split `runtime_state.py`
+    cleanly into a low-level `pm_core/runtime_store.py` (`DP4`, pure lease/action
+    file storage used downward by `review_loop` and `qa_loop`, with zero upward imports)
+    and high-level `pm_core/runtime_state.py` (`DP11`, status aggregation over `qa_status`/`hook_events`/`home_window`);
+    (5) align `pane_idle.py` (`DP6`), `dashboard_server.py` (`DP7`), and `pr_cleanup.py`
+    (`DP11`) with their real dependencies. Update `pm/architecture.md` — this completely
+    dissolves the 29-module Core Engine SCC into a strictly lower-triangular DAG.
+
+
+    Tests: Full unit tests for `signoff`, `review_loop`, `tmux`, `pane_layout`, `runtime_store`,
+    `runtime_state`, `git_ops`, `gh_ops`, `fake_github`, `pr_cleanup`, and `merge_integrity`.
+
+
+    Files: pm_core/signoff_schema.py, pm_core/signoff.py, pm_core/prompt_gen.py, pm_core/behavior_report.py,
+    pm_core/review_loop.py, pm_core/merge_integrity.py, pm_core/tmux.py, pm_core/pane_layout.py,
+    pm_core/runtime_store.py, pm_core/runtime_state.py, pm_core/git_ops.py, pm_core/gh_ops.py,
+    pm_core/fake_github.py, pm_core/backend.py, pm_core/pr_sync.py, pm_core/pr_cleanup.py,
+    pm/architecture.md'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-26T15:03:37.863207+00:00'
+  updated_at: '2026-11-26T15:03:37.863207+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-814ffd7
+  plan: plan-axiomatic-design
+  title: Decompose monolithic prompt_gen.py into role-specific prompt modules
+  branch: pm/pr-814ffd7-decompose-monolithic-prompt-gen-py-into-role-speci
+  status: pending
+  depends_on:
+  - pr-f724f95
+  description: 'Address Axiom 2 (Information Content) by breaking up `pm_core/prompt_gen.py`
+    (3,028 LOC, mixing implementation, review, QA planner/interactive/standalone,
+    sign-off, watcher, and shared context builders in one file) into a cohesive `pm_core/prompts/`
+    package (`prompts/shared.py`, `prompts/impl.py`, `prompts/review.py`, `prompts/qa.py`,
+    `prompts/signoff.py`, `prompts/watcher.py`). Each module owns one role''s prompt
+    assembly and depends only on `prompts/shared.py` and lower DPs (`DP1`–`DP6`, `signoff_schema`,
+    `qa_instructions`, `spec_gen`, `bug_fix_prompts`) with zero lazy circular imports.
+    Keep `pm_core/prompt_gen.py` as a thin compatibility facade re-exporting public
+    functions so existing callers and tests keep working seamlessly. Update `pm/architecture.md`.
+
+
+    Tests: Entire existing prompt-generation test suite (`tests/test_prompt_gen.py`
+    and signoff/qa/watcher prompt tests) passes unchanged; unit tests verifying thin
+    facade re-exports and clean acyclicity inside `pm_core/prompts/`.
+
+
+    Files: pm_core/prompts/__init__.py, pm_core/prompts/shared.py, pm_core/prompts/impl.py,
+    pm_core/prompts/review.py, pm_core/prompts/qa.py, pm_core/prompts/signoff.py,
+    pm_core/prompts/watcher.py, pm_core/prompt_gen.py, pm/architecture.md'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-26T15:03:37.863232+00:00'
+  updated_at: '2026-11-26T15:03:37.863232+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-77addfb
+  plan: plan-axiomatic-design
+  title: Decompose monolithic qa_loop.py and unify QA run-record invariants
+  branch: pm/pr-77addfb-decompose-monolithic-qa-loop-py-and-unify-qa-run-r
+  status: pending
+  depends_on:
+  - pr-e4e3ee0
+  - pr-f724f95
+  - pr-2680fbf
+  description: 'External dependency: `pr-2680fbf` (wire via `pm pr edit` after load;
+    `pr-2680fbf` is actively rewriting `qa_loop.py` for standard regression scenarios;
+    coordinate with `pr-1d8b2b7` for shared verdict definitions). Address Axiom 2
+    (Information Content), eliminate `qa_loop.py`''s 15 deferred imports, and replace
+    the scattered QA run-identity workarounds behind **58 regression markers** (`S90`,
+    `S106`, `S111`, `S117`, `S120`, `S123`, `S125`, `S130`, `S131`, `S132` across
+    `qa_loop.py`, `tui/qa_loop_ui.py`, `cli/pr.py`, and `paths.py`). Split `pm_core/qa_loop.py`
+    (6,746 LOC, fan-out = 25) into a strictly lower-triangular `pm_core/qa/` subpackage:
+    `qa/records.py` (single canonical source of truth for QA run records, session/clone
+    scoping, instruction-run filtering, owed re-QA detection, and snapshot recovery
+    — no other module scans `qa_status.json`/`qa_run.json` directly), `qa/workdir.py`
+    (scenario workdir/clone/ref setup), `qa/containers.py` (scenario container creation
+    & exec command builders), `qa/runner.py` (planner, concretizer, scenario execution
+    & verdict polling), `qa/verifier.py` (verification retries & finalizer pane),
+    and `qa/orchestrator.py` (top-level run lifecycle). Keep `pm_core/qa_loop.py`
+    as a thin compatibility facade with top-level acyclic imports. Update `pm/architecture.md`.
+
+
+    Tests: Entire existing QA and regression test suite (`S90`–`S132`) passes with
+    zero regressions; unit tests for `qa/records.py` covering multi-clone scoping,
+    instruction-run isolation, and snapshot recovery.
+
+
+    Files: pm_core/qa/__init__.py, pm_core/qa/records.py, pm_core/qa/workdir.py, pm_core/qa/containers.py,
+    pm_core/qa/runner.py, pm_core/qa/verifier.py, pm_core/qa/orchestrator.py, pm_core/qa_loop.py,
+    pm_core/qa_status.py, pm/architecture.md'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-26T15:03:37.863250+00:00'
+  updated_at: '2026-11-26T15:04:21.645190+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-158b4b1
+  plan: plan-axiomatic-design
+  title: Extract PR and session lifecycle domain services out of pm_core/cli/*
+  branch: pm/pr-158b4b1-extract-pr-and-session-lifecycle-domain-services-o
+  status: pending
+  depends_on:
+  - pr-53f00a9
+  - pr-f724f95
+  description: 'Break the bidirectional `tui.* <-> cli.*` cycle (which currently fuses
+    20 CLI modules and 14 TUI modules into a 34-module SCC) and break up the `cli/pr.py`
+    (4,824 LOC) and `cli/session.py` (2,774 LOC) monoliths into thin Click adapters.
+    Create `pm_core/services/` (`pr_service.py`, `session_service.py`, `meta_service.py`,
+    `qa_service.py`, `plan_service.py`) owning PR start/review/signoff/merge/cleanup
+    orchestration, session startup sync, meta-session launch, and QA/plan commands.
+    Update `tui/app.py`, `tui/pr_view.py`, `tui/pane_ops.py`, `tui/watcher_ui.py`,
+    and `tui/sync.py` to call `pm_core/services/*` downward instead of importing `cli.pr`,
+    `cli.session`, `cli.meta`, `cli.qa`, or `cli.plan` (and replace `tui/auto_start.py`
+    / `guide.py` shelling out to `pm` subprocesses where direct service calls suffice).
+    Update `cli/*` commands to delegate to the same services and update `pm/architecture.md`
+    (`FR15_TUI` and `FR16_CLI` become independent parallel siblings).
+
+
+    Tests: Full CLI and TUI test suites pass; unit tests for `pm_core/services/*`
+    without Click/Textual contexts; sign-off verifies zero `pm_core.tui.* -> pm_core.cli.*`
+    imports.
+
+
+    Files: pm_core/services/__init__.py, pm_core/services/pr_service.py, pm_core/services/session_service.py,
+    pm_core/services/meta_service.py, pm_core/services/qa_service.py, pm_core/services/plan_service.py,
+    pm_core/cli/pr.py, pm_core/cli/session.py, pm_core/cli/meta.py, pm_core/cli/qa.py,
+    pm_core/cli/plan.py, pm_core/tui/app.py, pm_core/tui/pr_view.py, pm_core/tui/pane_ops.py,
+    pm_core/tui/watcher_ui.py, pm_core/tui/sync.py, pm/architecture.md'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-26T15:03:37.863291+00:00'
+  updated_at: '2026-11-26T15:03:37.863291+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-aca9f8f
+  plan: plan-axiomatic-design
+  title: Consolidate project.yaml write ownership and lock-retry handling across all
+    callers
+  branch: pm/pr-aca9f8f-consolidate-project-yaml-write-ownership-and-lock-
+  status: pending
+  depends_on:
+  - pr-158b4b1
+  description: 'Together with the domain-services PR, supersedes unstarted `pr-a84a939`
+    (`Extract data-service layer between storage and UIs` — close `pr-a84a939` once
+    both PRs land). Eliminate the shared-blackboard persistence coupling where **20
+    distinct modules** call `store.save()` / `store.locked_update()` directly (Report
+    §3B.5) and unify the scattered lock-contention / unloadable-file retry workarounds
+    behind regression markers `RQ37`, `RQ38`, `S44`, `S45`, and `S94`. Introduce a
+    single persistence-mutation boundary (`pm_core/services/store_ops.py` backed by
+    `store.WriteQueue` / `locked_update`) with explicit domain mutation methods (PR
+    status/verdict/metadata updates, plan/model/project setting updates, sync merges)
+    and uniform `NO_WAIT` / lock-busy / retry semantics. Route all remaining direct
+    `store.save`/`locked_update` callers across CLI (`cli/model.py`, `cli/cluster.py`,
+    `cli/project.py`, `cli/helpers.py`), TUI (`tui/pr_view.py`, `tui/qa_loop_ui.py`,
+    `tui/watcher_ui.py`, `tui/model_screen.py`, `tui/sync.py`, `tui/review_loop_ui.py`,
+    `tui/signoff_ui.py`), and core (`signoff.py`, `spec_gen.py`, `pr_sync.py`, `integration.py`,
+    `merge_integrity.py`, `model_settings.py`, `regression_prompts.py`) through `store_ops.py`
+    (or return pure patch payloads from lower layers for `store_ops.py` to commit).
+    Update `pm/architecture.md`.
+
+
+    Tests: Unit tests for `store_ops.py` covering lock-busy (`RQ38`), unloadable-file
+    retry (`RQ37`), and 3-way merge safety (`S44`/`S45`/`S94`); full CLI, TUI, and
+    core test suites pass; sign-off verifies direct `store.save`/`locked_update` calls
+    are confined to `store.py` and `services/store_ops.py`.
+
+
+    Files: pm_core/services/store_ops.py, pm_core/store.py, pm_core/cli/model.py,
+    pm_core/cli/cluster.py, pm_core/cli/project.py, pm_core/signoff.py, pm_core/spec_gen.py,
+    pm_core/pr_sync.py, pm_core/integration.py, pm_core/merge_integrity.py, pm_core/model_settings.py,
+    pm_core/regression_prompts.py, pm_core/tui/pr_view.py, pm_core/tui/qa_loop_ui.py,
+    pm_core/tui/watcher_ui.py, pm_core/tui/model_screen.py, pm_core/tui/sync.py, pm_core/tui/review_loop_ui.py,
+    pm_core/tui/signoff_ui.py, pm/architecture.md'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-26T15:03:37.863317+00:00'
+  updated_at: '2026-11-26T15:03:37.863317+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-e1392f9
+  plan: plan-axiomatic-design
+  title: Extract TUI master tick loop and break all internal TUI cycles
+  branch: pm/pr-e1392f9-extract-tui-master-tick-loop-and-break-all-interna
+  status: pending
+  depends_on:
+  - pr-aca9f8f
+  description: 'Break the entire 14-module internal TUI SCC (Report §3B.1–§3B.2, 17
+    upper-triangular violations), shrink `tui/auto_start.py` (2,088 LOC), `tui/qa_loop_ui.py`
+    (1,788 LOC), and `tui/review_loop_ui.py` (1,599 LOC), and eliminate the cross-stage
+    handoff/timer races behind regression markers `S48`, `S50`, `S53`, `S79`, and
+    `S83`. (1) Move `_poll_loop_state_inner`, lifecycle stage transitions (impl-idle
+    -> review -> QA -> sign-off -> merge), and auto-start target execution into a
+    dedicated `pm_core/tui/coordinator.py` sitting cleanly *above* independent stage
+    controllers (`review_loop_ui`, `qa_loop_ui`, `signoff_ui`, `watcher_ui`), splitting
+    pure auto-start scheduling policy from TUI side effects. (2) Stage controllers
+    expose narrow `step()` / `start()` / `stop()` APIs returning structured transition
+    events instead of importing each other or `auto_start`. (3) Break every remaining
+    non-loop TUI cycle: extract shared view/selection/pane-launch helpers (`tui/view_helpers.py`)
+    so `screens <-> pane_ops`, `pr_view <-> review_loop_ui`/`screens`, `tech_tree
+    -> auto_start`, `model_screen -> qa_loop_ui`, `sync -> auto_start`/`frame_capture`,
+    `frame_capture -> tech_tree`, and `fuzzy_select_cmd -> pr_view`/`model_screen`
+    become a strictly lower-triangular DAG inside `pm_core/tui/`. Update `pm/architecture.md`.
+
+
+    Tests: Existing TUI loop, auto-start, review-loop, QA-loop, sign-off UI, regression
+    (`S48`/`S50`/`S53`/`S79`/`S83`), and `test_tui_imports.py` suites pass; new unit
+    tests for `tui/coordinator.py` verifying stage hand-offs via returned events with
+    zero cross-stage imports.
+
+
+    Files: pm_core/tui/coordinator.py, pm_core/tui/view_helpers.py, pm_core/tui/auto_start.py,
+    pm_core/tui/review_loop_ui.py, pm_core/tui/qa_loop_ui.py, pm_core/tui/signoff_ui.py,
+    pm_core/tui/watcher_ui.py, pm_core/tui/pr_view.py, pm_core/tui/pane_ops.py, pm_core/tui/screens.py,
+    pm_core/tui/tech_tree.py, pm_core/tui/model_screen.py, pm_core/tui/sync.py, pm_core/tui/frame_capture.py,
+    pm_core/tui/fuzzy_select_cmd.py, pm_core/tui/app.py, pm/architecture.md'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-26T15:03:37.863340+00:00'
+  updated_at: '2026-11-26T15:03:37.863340+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-a9a51fb
+  plan: plan-axiomatic-design
+  title: Replace shared ProjectManagerApp._* blackboard with typed TUI state and event
+    interface
+  branch: pm/pr-a9a51fb-replace-shared-projectmanagerapp-blackboard-with-t
+  status: pending
+  depends_on:
+  - pr-e1392f9
+  description: 'Eliminate the hidden state coupling on `ProjectManagerApp` (58 `self.*`
+    attributes; `app._data` written directly by 7 TUI modules and read by 9; `app._review_loops`/`app._qa_loops`
+    mutated across 4–5 modules) and shrink `tui/app.py` (2,045 LOC) into a thin Textual
+    app shell. Introduce a typed `TuiState` dataclass/controller (`pm_core/tui/state.py`)
+    owning project data snapshots, active loop registries, timer handles, and log-line
+    hold/flush state (`S50`) with explicit mutation methods and change notifications.
+    Refactor TUI panels and `coordinator.py` to interact with `TuiState` (or narrow
+    protocol views) rather than reaching into private `app._*` attributes. Update
+    `pm/architecture.md`. Manual testing note: verify live TUI rendering, keybindings
+    (`o`, `a`, `g`, `z d`, `zz d`, `Ctrl-r`, `?`), and status/log-line hold behavior
+    inside a real tmux session.
+
+
+    Tests: Unit tests for `TuiState` mutation, notification, and log-hold (`S50`)
+    invariants; existing TUI behavioral tests updated/passing; sign-off verifies zero
+    cross-module direct mutations of `app._*` private attributes.
+
+
+    Files: pm_core/tui/state.py, pm_core/tui/app.py, pm_core/tui/coordinator.py, pm_core/tui/auto_start.py,
+    pm_core/tui/pr_view.py, pm_core/tui/review_loop_ui.py, pm_core/tui/qa_loop_ui.py,
+    pm_core/tui/signoff_ui.py, pm_core/tui/watcher_ui.py, pm_core/tui/sync.py, pm_core/tui/frame_capture.py,
+    pm_core/tui/fuzzy_select_cmd.py, pm/architecture.md'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-26T15:03:37.863357+00:00'
+  updated_at: '2026-11-26T15:03:37.863357+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-8c81cbe
+  plan: plan-axiomatic-design
+  title: Run blind fresh regeneration audit of pm/architecture.md and finalize docs
+  branch: pm/pr-8c81cbe-run-blind-fresh-regeneration-audit-of-pm-architect
+  status: pending
+  depends_on:
+  - pr-27ba89e
+  - pr-814ffd7
+  - pr-77addfb
+  - pr-a9a51fb
+  description: 'After all refactoring PRs land, remove temporary compatibility re-export
+    shims that are no longer needed (and make Click subcommand registration in `cli/__init__.py`
+    explicitly one-way to eliminate the sole top-level CLI registration cycle), then
+    run the from-scratch regeneration flow (PR 2) on `pm_core` *without* priming on
+    the old `pm/architecture.md` to independently verify that the refactored Design
+    Matrix `[A]` is genuinely lower-triangular with zero residual SCCs, zero hidden
+    `app._*` blackboards, centralized `project.yaml` writes, and decomposed god files.
+    Commit the freshly regenerated `pm/architecture.md` and document the general-purpose
+    Axiomatic Design workflow (onboarding, sign-off review, and fresh regeneration
+    for any target repo) in `pm_core/docs/axiomatic_design.md` and `README.md`.
+
+
+    Tests: Full `pytest` suite passes; blind regeneration audit confirms strictly
+    lower-triangular `[A]` and zero raw module SCCs across `pm_core`.
+
+
+    Files: pm/architecture.md, pm_core/cli/__init__.py, pm_core/docs/axiomatic_design.md,
+    README.md'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-26T15:03:37.863389+00:00'
+  updated_at: '2026-11-26T15:03:37.863389+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-5dfc63b
+  plan: bugs
+  title: 'Tests: CliRunner ''-C'' leaves cli.helpers._project_override set for later
+    tests'
+  branch: pm/pr-5dfc63b-tests-clirunner-c-leaves-cli-helpers-project-overr
+  status: pending
+  depends_on: []
+  description: 'tests/test_pr_notes.py and tests/test_prompt_bounds.py invoke cli
+    with [''-C'', str(tmp_root), ...]; the cli group callback calls set_project_override(),
+    a module global in pm_core/cli/helpers.py, and nothing restores it, so every later
+    test in the session that calls state_root() without -C resolves to that (deleted)
+    tmp root. Repro: run tests/test_pr_notes.py then a test asserting helpers._project_override
+    is None -> fails. Suite passes today only because later tests patch state_root
+    or pass -C themselves (order-dependent). Fix: monkeypatch.setattr(helpers, ''_project_override'',
+    None) in those tests'' fixtures (as tests/test_prompt_gen.py''s pm_root does since
+    pr-6c0ee2d review-loop 322e i3), or an autouse conftest fixture.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-26T16:12:14.921325+00:00'
+  updated_at: '2026-11-26T16:12:14.921325+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-c5f98ba
+  plan: bugs
+  title: 'Bug: impl/review prompts ignore -C / PM_PROJECT and silently drop session
+    notes and pm/architecture.md'
+  branch: pm/pr-c5f98ba-bug-impl-review-prompts-ignore-c-pm-project-and-si
+  status: pending
+  depends_on: []
+  description: 'prompt_gen.generate_prompt and generate_review_prompt resolve the
+    pm root with store.find_project_root() (cwd walk-up) instead of the CLI override
+    (helpers.state_root(), which honors -C / PM_PROJECT). When cwd is outside the
+    pm dir (e.g. a standalone pm dir driven with `pm -C <pm-dir>` or PM_PROJECT from
+    the code repo, or the popup picker which sets PM_PROJECT because its cwd may be
+    outside the repo), FileNotFoundError is swallowed and the impl/review prompt silently
+    omits session notes (notes.txt) and, after pr-6c0ee2d, the Project Architecture
+    block. Plan prompts (cli/plan.py) use state_root() and do include them, so behavior
+    is inconsistent. Repro: mkdir code && cd code && git init && git commit --allow-empty
+    -m i && pm init --backend local --no-import --dir ../code-pm && pm -C ../code-pm
+    pr add Thing && printf "## General\nNOTE-X\n" > ../code-pm/notes.txt && pm -C
+    ../code-pm prompt | grep -c NOTE-X  -> 0 (cd ../code-pm && pm prompt | grep -c
+    NOTE-X -> 1). Fix: have callers pass the resolved root into prompt_gen (cli/pr.py
+    already has root = state_root()) rather than prompt_gen re-resolving it from cwd.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-26T18:32:05.025122+00:00'
+  updated_at: '2026-11-26T18:32:05.025122+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null

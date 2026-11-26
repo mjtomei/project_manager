@@ -1,6 +1,7 @@
 """Claude prompt generation for PR work sessions."""
 
 from pm_core import store, notes
+from pm_core.architecture_prompts import architecture_section
 from pm_core.backend import get_backend
 from pm_core.paths import get_global_setting
 from pm_core.prompt_bounds import (
@@ -361,10 +362,14 @@ def generate_prompt(data: dict, pr_id: str, session_name: str | None = None) -> 
     # Include session notes if available
     general_notes_block = ""
     impl_specific_block = ""
+    arch_block = ""
     root = None
     try:
         root = store.find_project_root()
         general_notes_block, impl_specific_block = notes.notes_for_prompt(root, "impl")
+        # pm/architecture.md awareness + structural-debt filing rule; empty
+        # (prompt unchanged) when the project has no architecture document.
+        arch_block = architecture_section(root, "impl", pr_id=pr_id)
     except FileNotFoundError:
         pass
 
@@ -384,14 +389,16 @@ def generate_prompt(data: dict, pr_id: str, session_name: str | None = None) -> 
     impl_spec_block = format_spec_for_prompt(pr, "impl")
     impl_spec_preamble = spec_generation_preamble(pr, "impl", root=root)
 
-    bug_fix_block = _bug_fix_flow_block(pr) if _is_bug_pr(pr) else ""
+    bug_fix_block = (_bug_fix_flow_block(pr, has_architecture=bool(arch_block))
+                     if _is_bug_pr(pr) else "")
 
     pr_notes_handoff_block = _pr_notes_handoff_block(pr_id)
 
     def _assemble(parts: dict[str, str]) -> str:
         # Only the enumerations and the PR notes are size-bounded, so only
         # those come from *parts*; the description, spec, sign-off return and
-        # session notes are instructions and are inlined whole.
+        # session notes are instructions and are inlined whole.  The
+        # architecture block bounds its own document excerpt.
         deps_section = parts["deps"]
         pr_notes_block = parts["notes"]
         prompt = f"""You're working on PR {pr_id}: "{title}"
@@ -404,7 +411,7 @@ This session is managed by `pm`. Run `pm help` to see available commands.
 
 ## Task
 {description}
-{pr_notes_block}{signoff_return_block}{impl_spec_block}{impl_spec_preamble}{bug_fix_block}{pr_notes_handoff_block}
+{pr_notes_block}{signoff_return_block}{impl_spec_block}{impl_spec_preamble}{arch_block}{bug_fix_block}{pr_notes_handoff_block}
 ## Tips
 - This session may be resuming after a restart. Check `git status` and `git log` to see if previous work exists on this branch — if so, continue from there. The directory may contain uncommitted implementation work from a previous session.
 - Before referencing existing code (imports, function calls, class usage), read the source to verify the interface.
@@ -493,11 +500,18 @@ This PR is part of plan "{plan['name']}" ({plan['id']}). Other PRs in this plan:
     # Include session notes if available
     general_notes_block = ""
     review_specific_block = ""
+    arch_block = ""
     try:
         root = store.find_project_root()
         general_notes_block, review_specific_block = notes.notes_for_prompt(root, "review")
+        arch_block = architecture_section(root, "review", pr_id=pr_id)
     except FileNotFoundError:
         pass
+    arch_review_step = (
+        "\n   - Check the diff against the FR/DP map and Design Matrix in "
+        "**Project Architecture** above (its review checklist and the "
+        "structural-debt rule)."
+        if arch_block else "")
 
     # Include PR notes (addendums) and the sign-off return block.  Only the
     # notes block is bounded; the return is instruction text and is inlined
@@ -543,7 +557,7 @@ with spec generation enabled.
     # compute it once: fit_prompt may re-render several times.
     tail = ""
     if _is_bug_pr(pr):
-        tail += _bug_fix_review_block(pr)
+        tail += _bug_fix_review_block(pr, has_architecture=bool(arch_block))
     tail += "\n" + _OUT_OF_SCOPE_BUGS_BLOCK
     tail += "\n" + _pr_notes_handoff_block(pr_id)
     tail += review_specific_block
@@ -565,7 +579,7 @@ Review the code changes in this PR for quality, correctness, and architectural f
 
 ## Description
 {description}
-{pr_notes_block}{signoff_return_block}{impl_spec_block}{plan_context}{tui_block}{general_notes_block}
+{pr_notes_block}{signoff_return_block}{impl_spec_block}{plan_context}{arch_block}{tui_block}{general_notes_block}
 ## Steps
 {pull_step}{n}. Run `{diff_cmd}` to see all changes
 {n+1}. **Generic checks** — things any codebase should get right:
@@ -577,7 +591,7 @@ Review the code changes in this PR for quality, correctness, and architectural f
    - Were the PR's goals achieved in a reasonable way, or is there a simpler/better design?
    - If plan context is listed above, check whether choices in this PR make any of those sibling PRs harder to implement. Are there data models, interfaces, or patterns introduced here that will need awkward workarounds later?
    - Run `pm pr list` to see all PRs and plans for the repo. If any other plans or standalone PRs touch related areas, consider whether this PR's approach conflicts with or complicates them.
-   - Consider likely future changes beyond the current PR list — does this PR paint the codebase into a corner or leave good extension points?
+   - Consider likely future changes beyond the current PR list — does this PR paint the codebase into a corner or leave good extension points?{arch_review_step}
 {n+4}. Output per-file notes: **filename** — GOOD / FIX / RETHINK
 {n+5}. End with an overall verdict on its own line — one of:
    - **PASS** — No changes needed. The code is ready to merge as-is.

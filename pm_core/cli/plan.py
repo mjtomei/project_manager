@@ -9,6 +9,7 @@ from pathlib import Path
 import click
 
 from pm_core import store, notes
+from pm_core.architecture_prompts import architecture_section
 from pm_core.plans.parser import parse_plan_prs
 from pm_core.plans import review as review_mod
 from pm_core.claude_launcher import find_claude, launch_claude, clear_session
@@ -104,6 +105,7 @@ def plan_add(name: str, description: str, fresh: bool):
     trigger_tui_refresh()
 
     notes_block = notes.notes_section(root)
+    arch_block = architecture_section(root, "plan")  # "" without pm/architecture.md
     prompt = f"""\
 Your goal: Help me develop a plan called "{name}" and write it to {plan_path}.
 
@@ -147,7 +149,7 @@ After writing the PRs section, tell the user to run `pm plan load {plan_id}`
 optionally run `pm plan review {plan_id}` (key: c) afterward to check
 consistency and coverage.
 Let them know it is safe to close this pane — load and review will run in new sessions.
-{tui_section(_pm_sess) if (_pm_sess := _get_pm_session()) else ""}{notes_block}"""
+{arch_block}{tui_section(_pm_sess) if (_pm_sess := _get_pm_session()) else ""}{notes_block}"""
 
     claude = find_claude()
     if claude:
@@ -220,6 +222,7 @@ def plan_breakdown(plan_id: str | None, initial_prs: str | None, fresh: bool):
         initial_context = f"\nInitial PR ideas from the user:\n{initial_prs}\n"
 
     notes_block = notes.notes_section(root)
+    arch_block = architecture_section(root, "plan")  # "" without pm/architecture.md
 
     prompt = f"""\
 Your goal: Break the plan into a list of PRs that the user is happy with, then
@@ -256,7 +259,7 @@ After writing, tell the user to run `pm plan load {plan_id}` (key: l in the
 plans pane) to load the PRs into project.yaml. They can optionally run
 `pm plan review {plan_id}` (key: c) afterward to check consistency and coverage.
 Let them know it is safe to close this pane — load and review will run in new sessions.
-{tui_section(_pm_sess) if (_pm_sess := _get_pm_session()) else ""}{notes_block}"""
+{arch_block}{tui_section(_pm_sess) if (_pm_sess := _get_pm_session()) else ""}{notes_block}"""
 
     claude = find_claude()
     if claude:
@@ -334,6 +337,7 @@ def plan_review(plan_id: str | None, fresh: bool):
             + "\n")
 
     notes_block = notes.notes_section(root)
+    arch_block = architecture_section(root, "plan")  # "" without pm/architecture.md
 
     if plan_prs:
         # Post-load: PRs exist in project.yaml — review with progress awareness
@@ -395,7 +399,7 @@ new pending PR — add a note on the merged PR pointing back, so future
 sessions reading either side find the connection.
 
 After fixing, summarize what was changed.
-{tui_section(_pm_sess) if (_pm_sess := _get_pm_session()) else ""}{notes_block}"""
+{arch_block}{tui_section(_pm_sess) if (_pm_sess := _get_pm_session()) else ""}{notes_block}"""
 
         # Every PR's description, tests and files are inlined whole: they are
         # the material this review works from, so they are never truncated
@@ -463,7 +467,7 @@ by editing the plan file directly at {plan_path}.
 After fixing, summarize what was changed. Then tell the user to run
 `pm plan load {plan_id}` (key: l in the plans pane) to create the PRs.
 Let them know it is safe to close this pane — loading runs instantly without a session.
-{tui_section(_pm_sess) if (_pm_sess := _get_pm_session()) else ""}{notes_block}"""
+{arch_block}{tui_section(_pm_sess) if (_pm_sess := _get_pm_session()) else ""}{notes_block}"""
 
     claude = find_claude()
     if claude:
@@ -854,6 +858,7 @@ def _run_plan_import(name: str):
     trigger_tui_refresh()
 
     notes_block = notes.notes_section(root)
+    arch_block = architecture_section(root, "plan")  # "" without pm/architecture.md
 
     prompt = f"""\
 Your goal: Analyze this repository, discuss what you find with the user, and
@@ -905,7 +910,7 @@ path is wrong, find the correct path and update the plan file. Report any
 corrections you made.
 
 Once verified, the next step is `pm plan load {plan_id}` to create the PRs.
-{tui_section(_pm_sess) if (_pm_sess := _get_pm_session()) else ""}{notes_block}"""
+{arch_block}{tui_section(_pm_sess) if (_pm_sess := _get_pm_session()) else ""}{notes_block}"""
 
     claude = find_claude()
     if claude:

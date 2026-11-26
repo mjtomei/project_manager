@@ -20,10 +20,24 @@ def _is_bug_pr(pr: dict) -> bool:
     return pr.get("plan") == "bugs" or pr.get("type") == "bug"
 
 
-def _bug_fix_flow_block(pr: dict) -> str:
+def _bug_fix_flow_block(pr: dict, has_architecture: bool = False) -> str:
     """Bug-fix flow prompt block, with the captures dir interpolated to
-    the PR's local id."""
+    the PR's local id.
+
+    *has_architecture* is True when the impl prompt carries the project's
+    ``pm/architecture.md`` block
+    (``architecture_prompts.architecture_section``); the Fix step then
+    points at its DP map and its structural-debt filing rule.
+    """
     seg = pr["id"]
+    fix_arch = ""
+    if has_architecture:
+        fix_arch = """
+   Keep the fix inside the DP that owns the root cause (see **Project
+   Architecture**). A guard, lazy import or duplicated check that only
+   masks coupling across DPs is structural debt: file or append the
+   `improvements` PR and cite its id in the code comment (see **File
+   Structural Debt, Don't Just Comment It**)."""
     return f"""
 ## Bug Fix Flow
 
@@ -56,7 +70,7 @@ prior artifact stale.
 
 3. **Fix** — Change that addresses the root cause. If a working fix
    already exists and this session has no reason to change it (e.g.
-   no new PR notes asking for changes), skip.
+   no new PR notes asking for changes), skip.{fix_arch}
 
 4. **Verify with the test** — Confirm it passes; run related suites
    for regressions.
@@ -69,10 +83,21 @@ prior artifact stale.
 """
 
 
-def _bug_fix_review_block(pr: dict) -> str:
+def _bug_fix_review_block(pr: dict, has_architecture: bool = False) -> str:
     """Bug-fix review checklist, with the captures dir resolved via
-    `pm qa captures-path <pr-id>`."""
+    `pm qa captures-path <pr-id>`.
+
+    *has_architecture* adds a check against the review prompt's
+    ``pm/architecture.md`` block
+    (``architecture_prompts.architecture_section``).
+    """
     seg = pr["id"]
+    arch_check = ""
+    if has_architecture:
+        arch_check = """
+- The fix addresses the root cause inside the owning DP (see **Project
+  Architecture**) rather than masking coupling, and any workaround it
+  keeps cites a filed `improvements` PR id."""
     return f"""
 
 ## Bug Fix Review Checklist
@@ -86,5 +111,5 @@ def _bug_fix_review_block(pr: dict) -> str:
   a PR note.
 - The test fails for the right reason — would have caught the original
   bug, not any change in the area.
-- Scope is the bug; flag drive-by refactors.
+- Scope is the bug; flag drive-by refactors.{arch_check}
 """
