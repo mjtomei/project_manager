@@ -31063,7 +31063,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/222
   gh_pr_number: 222
   created_at: '2026-05-21T04:06:05.061620+00:00'
-  updated_at: '2026-10-21T23:45:02.916394+00:00'
+  updated_at: '2026-11-26T16:40:49.548713+00:00'
   started_at: '2026-05-25T02:58:20.169677+00:00'
   reviewed_at: '2026-05-25T03:13:02.415469+00:00'
   merged_at: null
@@ -31344,6 +31344,25 @@ prs:
       this PR''s lock/_NEVER_STASH approach when rebasing.'
     created_at: '2026-10-21T23:45:02Z'
     last_edited: '2026-10-21T23:45:02Z'
+  - id: note-41971d4
+    text: 'Review loop c6a2 i1 (60bc272f): NEEDS_WORK, fixed + pushed. (1) BLOCKING,
+      fixed 5645a2cc: a user git config merge.autoStash=true made `git merge --ff-only`
+      in _ff_with_autostash itself text-stash the swapped-in registry, reset it and
+      pop it over the incoming blob, giving conflict markers in pm/project.yaml +
+      a leaked `autostash` entry with rc 0 (the original bug). The ff now passes --no-autostash;
+      regression test test_user_merge_autostash_config_never_text_stashes_registry
+      fails without the flag. (2) Busy registry lock: _ff_with_autostash returns _RegistryLockBusy
+      and _pull_after_merge exits 1 with a --propagation-only hint instead of opening
+      a recovery window (its "stash and pull" steps would text-stash the registry).
+      In TUI auto-merge that PR then stays sign_off until propagation-only is re-run.
+      (3) 60bc272f: the recovery prompt forbids stashing/checking out/resetting pm/project.yaml
+      (stash other files by path; INPUT_REQUIRED if the registry blocks). (4) store.save_text
+      is now the one atomic write shared by store.save and the registry swap (dropped
+      the duplicate _write_registry_text). Evidence /pm-captures/review-c6a2-i1: S74
+      harness at 5645a2cc PASS 4/4 + dirty 3/3; full suite at 60bc272f 5712 passed
+      / 1 skipped.'
+    created_at: '2026-11-26T16:40:49Z'
+    last_edited: '2026-11-26T16:40:49Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-ca6981c-bug-pm-merge-s-git-stash-pop-corrupt-ac115969
 - id: pr-c41f029
   plan: bugs
