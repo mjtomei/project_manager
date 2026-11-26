@@ -147,6 +147,19 @@ def qa_workdirs_root() -> Path:
     return workdirs_base() / "qa"
 
 
+def qa_workdirs_roots() -> list[Path]:
+    """Every root that may hold QA run workdirs (``<root>/qa`` for each of
+    :func:`workdirs_roots`).
+
+    New runs are created under :func:`qa_workdirs_root`; code that looks
+    for *existing* runs (resume, orphan ending, the latest status, scenario
+    numbering, reclaim) scans all of these, so a run started before
+    ``workdirs-dir`` moved — which stays where it is — is still found.
+    Not created here.
+    """
+    return [root / "qa" for root in workdirs_roots()]
+
+
 def scratch_base() -> Path:
     """Return the local scratch root (``~/.pm/scratch/`` by default).
 
@@ -424,7 +437,8 @@ def latest_qa_status_path(pr_id: str) -> Path | None:
 
     Single source of truth for locating a PR's latest QA status file under
     ``~/.pm/workdirs/qa/<pr_id>-*/qa_status.json`` (a fresh QA run gets a new
-    ``<pr_id>-<hex>`` workdir, so several may exist; the newest mtime wins).
+    ``<pr_id>-<hex>`` workdir, so several may exist; the newest mtime wins),
+    in every QA root (:func:`qa_workdirs_roots`).
     Shared by the auto-sequence QA gate and the sign-off prompt/evidence
     surfaces so they never drift.
 
@@ -440,10 +454,8 @@ def latest_qa_status_path(pr_id: str) -> Path | None:
     """
     from pm_core.qa_loop import (is_instruction_run, launched_elsewhere,
                                  own_session_tag, read_run_record)
-    qa_dir = qa_workdirs_root()
-    if not qa_dir.is_dir():
-        return None
-    candidates = [p for p in qa_dir.glob(f"{pr_id}-*/qa_status.json")
+    candidates = [p for qa_dir in qa_workdirs_roots()
+                  for p in qa_dir.glob(f"{pr_id}-*/qa_status.json")
                   if not is_instruction_run(pr_id, p.parent)]
     if own_session_tag():
         candidates = [p for p in candidates if not launched_elsewhere(

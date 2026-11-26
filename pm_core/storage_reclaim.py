@@ -329,15 +329,15 @@ def scenario_scratch_dirs(pr_id: str | None = None,
 
     Covers the legacy ``<run>/s-N/scratch`` and the local
     ``<scratch>/qa/<run>/s-N`` layouts, including scratch whose run dir is
-    already gone.  Run dirs are looked up under every workdirs root
-    (:func:`pm_core.paths.workdirs_roots`): runs started before
+    already gone.  Run dirs are looked up under every QA root
+    (:func:`pm_core.paths.qa_workdirs_roots`): runs started before
     ``workdirs-dir`` moved stay in the old root, and a run dir that is not
     found reads as gone, which would skip its liveness check.
     *exclude_run* is a run dir name (``<pr>-<loop>``).
     """
-    from pm_core.paths import qa_scratch_root, workdirs_roots
+    from pm_core.paths import qa_scratch_root, qa_workdirs_roots
     pattern = f"{pr_id}-*" if pr_id else "*"
-    qa_roots = [root / "qa" for root in workdirs_roots()]
+    qa_roots = qa_workdirs_roots()
     scratch_qa = qa_scratch_root()
     out: list[tuple[Path | None, Path]] = []
     seen: set[str] = set()

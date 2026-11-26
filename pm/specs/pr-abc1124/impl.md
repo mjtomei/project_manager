@@ -251,8 +251,9 @@ the task and on the measurements above.
   working directory in it or in its run dir (`/proc/<pid>/cwd`): a
   host-mode session has no container mount to hold its scratch, and
   regression/debug runs write no run record (review 62b4 i3).
-  Run dirs are looked up under every `paths.workdirs_roots()` root, so a
-  run started before `workdirs-dir` moved keeps its liveness check.
+  Run dirs are looked up under every QA root
+  (`paths.qa_workdirs_roots()`), so a run started before `workdirs-dir`
+  moved keeps its liveness check.
 * Deletion uses `podman unshare rm -rf` for stores (their files are owned by
   sub-UIDs) and `unlink` for archives; a `.pm-reclaim.json` record (paths,
   bytes, time, reason) is left in the scratch dir.
@@ -295,7 +296,13 @@ the task and on the measurements above.
   workdirs keep working after `workdirs-dir` moves:
   `paths.workdirs_roots()` (the configured root plus the default
   `~/.pm/workdirs` when it differs) is what workspace trust and PR-clone
-  detection (`integration.py`) treat as pm-created.
+  detection (`integration.py`) treat as pm-created, and
+  `paths.qa_workdirs_roots()` (`<root>/qa` of each) is what code looking
+  for *existing* QA runs scans: the latest `qa_status.json` (sign-off /
+  auto-sequence gate), the TUI resume scan, restart orphan ending, run
+  records, the instruction-run liveness check, scenario numbering and
+  reclaim (review 62b4 i4).  New runs are created under
+  `qa_workdirs_root()` only.
 * Cross-process lock files that lived in the workdirs root (sign-off
   launch/step, publish, merge; the per-PR workdir provisioning lock as
   `<locks>/<project-dir>/.workdir-<pr>.lock`, review 62b4 i3) go through

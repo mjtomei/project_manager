@@ -376,13 +376,14 @@ def _next_scenario_offset(pr_id: str, current_loop_id: str) -> int:
     """Find the highest scenario index used in previous runs for this PR.
 
     Scans ``~/.pm/workdirs/qa/{pr_id}-*/s-*`` dirs (excluding the
-    current run) to find the max index, so new scenarios continue numbering
-    from where previous runs left off.
+    current run; every QA root, see
+    :func:`pm_core.paths.qa_workdirs_roots`) to find the max index, so new
+    scenarios continue numbering from where previous runs left off.
     """
-    from pm_core.paths import qa_workdirs_root
-    qa_root = qa_workdirs_root()
+    from pm_core.paths import qa_workdirs_roots
     max_idx = 0
-    for d in qa_root.glob(f"{pr_id}-*/s-*"):
+    for d in (d for qa_root in qa_workdirs_roots()
+              for d in qa_root.glob(f"{pr_id}-*/s-*")):
         # Skip the current run
         if current_loop_id and d.parent.name == f"{pr_id}-{current_loop_id}":
             continue
@@ -1551,9 +1552,9 @@ def end_runs_orphaned_by_restart(
         return []
     skip = {str(w) for w in exclude_workdirs}
     ended = []
-    from pm_core.paths import qa_workdirs_root
-    qa_root = qa_workdirs_root()
-    for rec_path in qa_root.glob(f"*/{_RUN_RECORD}"):
+    from pm_core.paths import qa_workdirs_roots
+    for rec_path in (r for qa_root in qa_workdirs_roots()
+                     for r in qa_root.glob(f"*/{_RUN_RECORD}")):
         qa_wd = rec_path.parent
         if str(qa_wd) in skip or _resume_file_path(qa_wd).exists():
             continue
@@ -1717,17 +1718,20 @@ def instruction_run_live(pr_id: str) -> bool:
     verdict is not the PR's QA result), so the picker would show the last
     full run's badge over it (S125).
 
-    Reads only that run's fixed workdir, owner first: the picker calls
+    Reads only that run's fixed workdir (in each QA root, see
+    :func:`pm_core.paths.qa_workdirs_roots`), owner first: the picker calls
     this on every render, and finished runs' records are kept, each
     costing tmux lookups in :func:`launched_elsewhere`."""
-    from pm_core.paths import qa_workdirs_root
-    qa_wd = (qa_workdirs_root()
-             / f"{pr_id}-{instruction_run_loop_id(pr_id)}")
-    rec = read_run_record(qa_wd)
-    return bool(rec and rec.get("pr_id") == pr_id
+    from pm_core.paths import qa_workdirs_roots
+    name = f"{pr_id}-{instruction_run_loop_id(pr_id)}"
+    for qa_root in qa_workdirs_roots():
+        rec = read_run_record(qa_root / name)
+        if (rec and rec.get("pr_id") == pr_id
                 and not rec.get("ended_at")
                 and resume_owned_elsewhere(rec)
-                and not launched_elsewhere(rec.get("session_tag")))
+                and not launched_elsewhere(rec.get("session_tag"))):
+            return True  # the first live one; later roots are not read
+    return False
 
 
 def run_driven_elsewhere(pr_id: str) -> bool:
@@ -1749,9 +1753,9 @@ def run_driven_elsewhere(pr_id: str) -> bool:
 def _own_run_records(pr_id: str):
     """Yield (QA workdir, start record) for each run of *pr_id* this pm
     session launched."""
-    from pm_core.paths import qa_workdirs_root
-    qa_root = qa_workdirs_root()
-    for rec_path in qa_root.glob(f"{pr_id}-*/{_RUN_RECORD}"):
+    from pm_core.paths import qa_workdirs_roots
+    for rec_path in (r for qa_root in qa_workdirs_roots()
+                     for r in qa_root.glob(f"{pr_id}-*/{_RUN_RECORD}")):
         rec = read_run_record(rec_path.parent)
         if (rec and rec.get("pr_id") == pr_id
                 and not launched_elsewhere(rec.get("session_tag"))):

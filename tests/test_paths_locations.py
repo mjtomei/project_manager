@@ -109,6 +109,41 @@ class TestConfigured:
         assert workspace_trust.approved_path(old_clone)
         assert workspace_trust.approved_path(nas / "wd" / "proj-1234")
 
+    def test_qa_runs_in_the_old_root_are_still_found(self, home, nas,
+                                                     monkeypatch):
+        """A QA run started before workdirs-dir moved stays in the old root
+        (nothing is migrated).  Its status, run record, resume snapshot and
+        scenario numbers are still found; new runs go to the new root."""
+        import json
+        from pm_core import qa_loop
+        monkeypatch.setattr(qa_loop, "own_session_tag", lambda: None)
+        monkeypatch.setattr(qa_loop, "get_pm_session", lambda: None)
+        old_qa = home / ".pm" / "workdirs" / "qa"
+        old_run = old_qa / "pr-1-aaa"
+        (old_run / "s-3").mkdir(parents=True)
+        (old_run / "qa_status.json").write_text('{"overall": "PASS"}')
+        (old_run / qa_loop._RUN_RECORD).write_text(json.dumps(
+            {"pr_id": "pr-1", "loop_id": "aaa", "owner_pid": 1}))
+        paths.set_global_setting_value("workdirs-dir", str(nas / "wd"))
+
+        assert paths.qa_workdirs_root() == nas / "wd" / "qa"
+        assert paths.qa_workdirs_roots() == [nas / "wd" / "qa", old_qa]
+        assert qa_loop.create_qa_workdir("pr-1", "bbb") == (
+            nas / "wd" / "qa" / "pr-1-bbb")
+        assert paths.latest_qa_status_path("pr-1") == (
+            old_run / "qa_status.json")
+        assert qa_loop._next_scenario_offset("pr-1", "bbb") == 3
+        assert [wd for wd, _ in qa_loop._own_run_records("pr-1")] == [old_run]
+
+        # An instruction run (`pm qa run`) driven from the old root is live.
+        cli_run = old_qa / f"pr-1-{qa_loop.instruction_run_loop_id('pr-1')}"
+        cli_run.mkdir()
+        (cli_run / qa_loop._RUN_RECORD).write_text(json.dumps(
+            {"pr_id": "pr-1", "owner_pid": 4242}))
+        monkeypatch.setattr(qa_loop, "resume_owned_elsewhere",
+                            lambda rec: rec.get("owner_pid") == 4242)
+        assert qa_loop.instruction_run_live("pr-1")
+
     def test_captures_glob_follows_captures_dir(self, home, tmp_path):
         assert paths.captures_roots_glob() == "~/.pm/sessions/*/captures"
         ev = tmp_path / "my evidence"

@@ -1122,9 +1122,11 @@ def _resume_incomplete_qa(app) -> None:
     from pathlib import Path
     from pm_core import qa_loop
 
-    from pm_core.paths import qa_workdirs_root
-    qa_root = qa_workdirs_root()
-    if not qa_root.is_dir():
+    # Every QA root: a run started before 'workdirs-dir' moved stays in
+    # the old one (nothing is migrated) and must still be resumable.
+    from pm_core.paths import qa_workdirs_roots
+    qa_roots = [r for r in qa_workdirs_roots() if r.is_dir()]
+    if not qa_roots:
         return
 
     if not hasattr(app, "_resumed_qa_pr_ids"):
@@ -1174,7 +1176,8 @@ def _resume_incomplete_qa(app) -> None:
         return start if isinstance(start, int) else 0
 
     by_pr: dict[str, list] = {}
-    for resume_file in qa_root.glob("*/qa_resume.json"):
+    for resume_file in (f for qa_root in qa_roots
+                        for f in qa_root.glob("*/qa_resume.json")):
         try:
             rdata = json.loads(resume_file.read_text())
         except (json.JSONDecodeError, OSError):
