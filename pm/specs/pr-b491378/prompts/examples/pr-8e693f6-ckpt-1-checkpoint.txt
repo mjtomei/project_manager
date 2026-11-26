@@ -1,0 +1,405 @@
+You are running an architecture and specification checkpoint for PR pr-8e693f6: "Sign-off UI: per-PR BDD report + all-PR behavior dashboard (HTML)"
+
+This session is managed by `pm`. Run `pm help` to see available commands.
+
+## Task
+
+Step back over the whole PR before its next review iteration. Repeated review
+and QA rounds can fix real problems one at a time while hiding a shared
+cause, a design that is getting harder to keep correct, or a specification
+that asks for the wrong thing. Look at the PR as a whole — its goal, its
+complete diff, its spec and everything the review and QA rounds found — and
+write a short, evidence-linked assessment that helps the next round. You do
+not change code in this session.
+
+A justified "keep the current approach" is a complete and valid outcome.
+There is no quota of changes, refactors or proposals to produce, and many
+checkpoints should recommend no redesign.
+
+This checkpoint does not judge whether the PR is ready, and it does not
+replace review, QA or sign-off. The problems QA found still have to be fixed,
+those fixes still need a review iteration that ends NEEDS_WORK and another
+review after it, and QA still has to pass afterwards.
+
+## Why this checkpoint is running
+
+This PR has 2 completed QA runs that ended NEEDS_WORK since the PR started (the project setting `checkpoint-after-qa-failures` is 2, the default). Only whole QA runs that finished with an overall NEEDS_WORK verdict count; individual scenario results, review iterations, infrastructure retries, stopped or incomplete runs and INPUT_REQUIRED waits do not. A round whose fixes were useful still counts — the point is to check whether the rounds share a cause, not to judge them.
+
+## Original goal
+
+The human-facing surface for sign-off — the per-PR behavior report and the all-PR dashboard that indexes them, combined since they share a generator and storage layout.
+
+PER-PR REPORT (BDD): a self-contained HTML report written ALONGSIDE the captures it references (~/.pm/sessions/<tag>/captures/<pr_id>/report.html), pointing directly at the real webm/png/html evidence — no copy. (No capture GC today: cleanup_pr_resources never touches the captures dir, so co-locating is safe for v1; a future GC phase would snapshot.) BDD-shaped: per behavior, the flow (STEPS / Given-When-Then), the verdict + reason, the evidence inline/linked, plus a top-of-page status summary and the checkoff's recommendation/next hop. Terminal panes can't show webm, so the browser page is the sign-off surface; the tmux checkoff window holds discussion + approve/reject. Generated at sign-off time.
+
+DASHBOARD: a single top-level HTML index where all PRs are reviewed BY BEHAVIOR + short status summaries. Lists every PR with a one-line behavior/status summary linking to its per-PR report.html; client-side FILTERING by merged/unmerged and by status. DETECT-MISSING: when a per-PR report is absent (never generated, or removed by a future GC) the index shows that state instead of a dead link, with a REGENERATE flow to rebuild on demand from retained verdicts/evidence.
+
+REACHABLE CONTEXT: the interface surfaces the written record alongside the behavior so a reviewer can sign off without leaving it — each PR's DESCRIPTION and PR NOTES, and per plan the PLAN NOTES (the plan auto-start watcher's continuity, recast from the old work logs in pr-ff9b728). PR descriptions/notes are available today; plan notes land with pr-ff9b728.
+
+Static export (open a file, no server) is the v1 lean; co-located with the captures. Depends on pr-2d5f712 (the sign-off window/step) and the pr-06a96fa evidence model (forward-compatible).
+
+Part of plan "Automated regression and bug fix loop" (plan-regression); plan file: `pm/plans/plan-regression.md`.
+
+## PR Notes
+- Behavior report/dashboard shipped standalone since deps (pr-2d5f712 sign-off step, pr-ff9b728 plan notes) are NOT merged. Module: pm_core/behavior_report.py. CLI: `pm pr report PR_ID [--all] [--open]` + `pm pr dashboard`. API for sign-off step: generate_pr_report(root, pr_id) / generate_dashboard(root). SEAM for pr-2d5f712 verdict router: drop captures/<pr_id>/signoff.json {verdict,recommendation,next_hop,summary} and the report renders it; absent it, we derive a heuristic recommendation. Durable regen source: qa_loop._persist_scenario_verdicts now also writes scenarios/<n>/scenario.json (index,title,focus,steps,verdict,reason) so reports rebuild from captures after the workdir is gone (verdict.md fallback for old captures). Dashboard index.html at captures root; per-PR report.html co-located with evidence (relative links, file://). Detect-missing rows surface `pm pr report <id>` (static = no server, so regenerate = copy the command). (2026-05-25T16:40:45Z)
+- Report requirement (was not in the description): for bug PRs the per-PR HTML report must surface the PRE-FIX capture (bug reproduced) and the POST-FIX capture (bug gone) so the before/after is visible. More generally, present each PR step's evidence against THAT step's acceptance criteria (impl/review/qa), not only the final-QA scenarios. Coordinate with pr-2d5f712 (#225, sign-off step), which checks each step's acceptance individually and requires the pre/post-fix captures for bugs. (2026-05-25T16:59:08Z)
+- Incorporated note-e1ff391 (orchestrator add-on): report is now step-oriented, evidence paired with acceptance criteria. (1) Implementation step renders bug before/after — impl/pre-fix (acceptance: bug reproduces) + impl/post-fix (acceptance: symptom gone), missing phase flagged not dropped; bug detection via bug_fix_prompts._is_bug_pr (plan==bugs or type==bug); phase via pre-fix/post-fix DIR component. (2) QA behaviors show explicit Acceptance criteria parsed from THEN/AND/sub-bullets. Coordinated w/ #225 (pr-2d5f712): its sign-off window keeps a plain evidence shell pane and links to THIS report as the rich surface; router reads same impl/+scenarios/<n>/ captures. NOTE: pr-2d5f712 does NOT write signoff.json (it records via pm pr notes + emits SIGNOFF_* verdict polled by auto-sequence), so my signoff.json seam stays optional/forward-only; recommendation stays derived for now. (2026-05-25T17:03:16Z)
+- From sign-off (pr-2d5f712, note-0357619 requirement): the HTML report/dashboard (#226) must SURFACE the bug-PR pre-fix AND post-fix captures. Sign-off provides the discovery seam: signoff.bug_fix_capture_status(pr_id) -> (has_pre, has_post), reading $(pm qa captures-path <id>)/impl/pre-fix/ and /impl/post-fix/ (each present = dir holds >=1 file). Sign-off hard-fails/bounces a bug PR to impl when either is missing, so by the time a bug PR is signed off both should exist. The report should render both captures (and flag any missing) alongside the per-scenario captures under scenarios/<n>/. (2026-05-25T17:13:39Z)
+- ADOPT #225's sign-off seams (now that #225 has passed review and its branch is current). Steps:
+1) git fetch origin && git merge origin/master (picks up this note) && git merge origin/pm/pr-2d5f712-sign-off-acceptance-gate-qa-verdict-router-auto-ru (picks up #225's code). Resolve any conflicts (likely qa_status.py / tech_tree.py) as normal.
+2) Adopt the seams from #225 (pm_core/signoff.py):
+   - pr['signoff'] = {verdict, sha, ts, origin} — read this RECORD for the report's recommendation/next-hop block and the dashboard's per-PR latest verdict, instead of deriving.
+   - SIGNOFF_VERDICT_ICONS / SIGNOFF_VERDICT_STYLES (single source of truth in signoff.py) and the sign_off status icon — reuse them in the HTML report + dashboard so icons/colors match the TUI and pm pr list. Do not define your own.
+   - ready_to_merge framing — the recommendation is a ready_to_merge RECOMMENDATION (sign-off never merges; the plan watcher decides). Word it that way.
+3) Adopt anything ELSE relevant you see in #225's final shape (e.g. decide_signoff_hop vocabulary, the SIGNOFF verdict set, the verdict->display mapping) so the report stays a single source of truth with #225.
+4) Re-run your behavior-report tests; update the spec + leave a handoff note. Commit + push. (2026-05-25T19:20:16Z)
+- Adopted #225 (pr-2d5f712) sign-off seams (merged). behavior_report.py now reads pr[signoff]={verdict,sha,ts,origin} as authoritative recommendation source via signoff.latest_signoff_verdict + decide_signoff_hop; derived heuristic is fallback only (no verdict recorded). SIGNOFF_MERGE=ready_to_merge RECOMMENDATION (text states sign-off never merges; plan watcher pr-ff9b728 decides). Verdict/status icons reuse signoff.SIGNOFF_VERDICT_ICONS/STYLES + helpers.PR_STATUS_ICONS (sign_off ✔️) so HTML matches TUI + pm pr list; Rich styles mapped to CSS via _RICH_COLOR_CSS. Staleness: compare pr[signoff].sha to head_sha(workdir), annotate if stale. REMOVED my speculative captures/<pr>/signoff.json seam (router records on the PR, not JSON). Addresses note-f9f9525 + note-22f1fb3. Bug before/after (impl/pre-fix,post-fix) already adopted earlier; sign-off hard-bounces a bug PR to impl if either capture missing (note-22f1fb3) so both should exist by sign-off. (2026-05-25T19:26:54Z)
+- Clarifying the description (which currently reads as if #226 builds a deterministic HTML renderer):
+
+1) PER-PR report.html IS AGENT-WRITTEN; #226 IS A SCOPE EXTENSION TO #225's SIGN-OFF PROMPT. Captures are heterogeneous (different artifact types per scenario/step), so coherent per-behavior framing requires the same semantic pass that produces the verdict — the sign-off agent itself. #226's main work is therefore extending pr-2d5f712's sign-off prompt to add `report.html` (+ a small `report.json` sidecar) as required deliverables of every sign-off pass, plus the BDD section schema (flow / STEPS / Given-When-Then / verdict + reason / evidence inline-or-linked / next hop) and the relative-link discipline to the real capture files in the same dir. No HTML rendering in code for the per-PR page.
+
+2) DASHBOARD IS THE DETERMINISTIC PART. The top-level `index.html` is the only thing this PR renders in code: glob the per-PR `report.json` sidecars across `~/.pm/sessions/<tag>/captures/*/`, render the index + client-side filtering by merged/unmerged and by status. The dashboard never interprets captures; the sidecar contract is the only thing it depends on.
+
+3) REGENERATE IS A PLAIN `pm pr signoff <id>` — NOT A "WRITE-ONLY" MODE. When the dashboard's DETECT-MISSING surfaces a PR whose report.html / report.json is absent (never generated, removed, etc.), regenerate just invokes `pm pr signoff <id>` (the single-PR entry from pr-ff9b728). No special mode needed: outside auto-sequence, sign-off is recommendation-only and takes no state-changing action — that's the manual-never-acts invariant established here in note-1a982f3 / note-942fa37 ("verdict -> action ONLY under auto-sequence"). So re-running sign-off on an unmerged PR re-emits the report (and may adopt an existing fresh verdict per the adoption rule in note-511d725) without triggering another action. Drop the earlier "write-only mode" framing from any working notes.
+
+Net: purpose/outputs are unchanged (per-PR BDD report + dashboard, co-located with captures, static export, depends on pr-2d5f712, forward-compatible with pr-06a96fa). What this note pins down is the MECHANISM: prompt extension to #225 for the per-PR report; deterministic generator only for the dashboard; regenerate = plain `pm pr signoff`. (2026-05-26T02:09:25Z)
+- Scope addition to the per-PR sign-off HTML report (folds into the #226 prompt-extension surface defined in note-537e1a0): the report must include a short, bulleted top-of-page section summarizing what changed during the loop, written so a reader UNFAMILIAR with the PR's description / notes / commits can understand it and decide whether to look closer.
+
+TWO BULLETED GROUPS (short, no prose; one line per item; each item links to the relevant commit / scenario / note where applicable):
+
+1) BUGS FIXED BY REVIEW AND QA
+   - Real defects the review-loop or QA scenarios found and fixed in this PR's branch DURING the loop (not part of the original implementation). Each item: one-sentence plain-English description of the user-visible problem + how it was fixed.
+   - Examples that should have been captured for pr-2d5f712: "sign-off router pane was opening in the main repo cwd instead of the PR workdir → pinned to workdir"; "evidence pane crashed on captures-path/git failure → degrades gracefully"; "detached QA could be clobbered by an out-of-band merge during sign_off→qa bounce → guarded"; "sign-off windows were orphaned on PR merge → added to cleanup prefix list"; "_signoff_qa_scenarios_block crashed on non-list scenarios → defensive coerce"; "signoff session type was not registered → added to model_config + fake_claude + launch site".
+
+2) SPEC AMBIGUITIES RESOLVED
+   - Places where the original PR scope / spec was ambiguous or under-specified and got pinned down by user decisions or loop discoveries. Each item: the ambiguity + the resolution adopted, in plain language.
+   - Examples that should have been captured for pr-2d5f712: "should sign-off be able to auto-merge in autonomous mode? → no: always recommend ready_to_merge; autonomy moved to the plan watcher"; "should there be a deterministic capture gate? → no: removed; the LLM router judges captures in context"; "what is the manual vs auto-sequence boundary? → manual never mutates state; auto-sequence is the only actor; manual verdicts may be adopted by a later auto-sequence run if fresh".
+
+AUDIENCE & STYLE
+- Aimed at someone who has NOT read the PR description, notes, or commit log. They should be able to scan these two lists and form a quick mental model of "what got found and decided during this PR" without needing to open anything else.
+- Plain English. Each bullet is one line, scannable. No internal jargon (no naked function/file names without a one-clause "what it is").
+
+WHY IT GOES HERE (the report, not just the PR notes)
+- The sign-off HTML report is the reader-facing surface (terminal panes can't show captures; the browser page is). PR notes/description are dense and chronological — most reviewers won't scroll them. The bulleted summary makes the "what was discovered and decided" obvious and PROMPTS a closer look (open the relevant scenario evidence, the relevant commit, or the relevant note) where warranted.
+
+SIDECAR / DASHBOARD HOOK
+- The report.json sidecar (the dashboard's only structured contract per note-537e1a0) should expose simple counts: bugs_fixed_in_loop (int), spec_clarifications (int). The dashboard surfaces these as small badges on the per-PR row so an outside reviewer can spot PRs whose loop did substantive work without opening each report.
+
+SOURCING DURING SIGN-OFF
+- The sign-off agent already reviews scenario verdicts/reasons + the per-PR captures + the diff vs master + the PR notes/description. Synthesizing the two lists is a derivation pass over that same evidence — it doesn't need new inputs. Source bug fixes from: review-loop and QA commits since the impl phase, and any notes that record a finding. Source spec ambiguities from: notes that begin with DECISION / CORRECTION / supersedes / Scope addition, and any pr description rewrites within the PR's history.
+
+This stays inside the #226 prompt extension to pr-2d5f712; no new code path. (2026-05-26T03:02:49Z)
+- QA NEEDS_WORK: Dashboard renders from scratch with no sidecars: PASS; Dashboard surfaces an agent-written sidecar with verdict, tally, and loop badges: PASS; Filtering by status and merged/unmerged narrows the visible rows: PASS; Regenerate cycle — empty row, run pm pr signoff, re-render shows populated row: PASS; Sign-off prompt names the two deliverables and the sidecar schema: PASS; pm status and the TUI tech tree recognize sign_off: PASS; Robustness — garbage sidecar, partial sidecar, and HTML-injection-safe titles: NEEDS_WORK; Concurrent dashboard generations and a parallel sign-off write do not corrupt the index or the sidecar: PASS; No session tag — dashboard fails clearly: NEEDS_WORK; qa_loop writes scenario.json alongside verdict.md for the sign-off agent: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-8e693f6-47b30e4a8869f42d) (2026-05-26T04:06:44Z)
+- QA-authoring guidance for scenarios that test the per-PR HTML surface (report.html / report.json):
+
+THE REPORT FILES ARE AGENT-WRITTEN, NOT DETERMINISTIC. Per the architecture pinned down in note-537e1a0, `report.html` and the `report.json` sidecar are produced by the real Claude SIGN-OFF AGENT via its prompt instructions (the prompt-extension to pr-2d5f712, see prompt_gen.py:527-602), NOT by `pm pr signoff` directly and NOT by fake-claude (which only emits stdout verdicts and never writes files into the captures dir).
+
+Consequence: a scenario that drives `pm pr signoff` against fake-claude will never produce `report.html` / `report.json`, no matter how the fake is scripted. The scenario will either appear vacuous (no shared-resource write to race, no file to inspect) or be REFINER_REJECTed at concretize time (see s19 in QA round 2 of this PR, workdir pr-8e693f6-18068b7b… — REFINER_REJECT + note-a591940).
+
+RULE: Any scenario whose THENs assert the existence, content, or contention semantics of `report.html` / `report.json` MUST run the sign-off step against the REAL Claude session (not fake-claude). Opt in to real Claude for that step inside the scenario. The deterministic / fake-claude path stays appropriate for scenarios that only exercise the verdict ROUTER's hops (decide_signoff_hop, act_on_signoff_verdict) — those don't depend on the agent's file-writing.
+
+WHAT THE DASHBOARD GENERATOR CAN STILL TEST WITH FAKE: the dashboard's HTML rendering (behavior_report.py:462 generate_dashboard) is deterministic Python — globbing per-PR `report.json` sidecars and emitting `index.html`. Scenarios that test the dashboard alone can SYNTHESIZE the sidecars on disk directly and then call the dashboard generator; no Claude session needed at all. Use that path for dashboard-only assertions (filtering, missing-report empty-state, sidecar schema robustness). Reserve the real-Claude path for scenarios that exercise the end-to-end agent-writes-files path.
+
+QA-PLANNER PROMPT NOTE: this distinction (agent-written vs deterministic-write) should be reflected when planning scenarios for sign-off-touching PRs in general — the planner should pick the cheaper synthesize-sidecars path whenever the assertions don't actually require the agent to produce the file. (2026-05-26T12:56:38Z)
+- QA NEEDS_WORK: Dashboard tolerates garbage/partial sidecars and HTML-escapes user content: PASS; Dashboard fails clearly when no session tag is resolvable: PASS; Filtering collapses plan sections whose rows are all hidden: PASS; Dashboard sign-off marker is sourced from pr['signoff'] when no sidecar is present: NEEDS_WORK (workdir: /home/matt/.pm/workdirs/qa/pr-8e693f6-bb8854012f0ad8f2) (2026-05-26T13:25:00Z)
+
+## Implementation Spec (`pm/specs/pr-8e693f6/impl.md`)
+
+Read the spec as evidence of what was intended, not as proof that every
+design choice in it is still right. Do not edit it in this session; record
+any problem with it in the assessment (see Steps). A clarification that changes no requirement, acceptance criterion, scope or user decision may be applied by the next review iteration; anything else needs the owner's approval.
+
+# Spec: Sign-off UI — per-PR BDD report + all-PR behavior dashboard
+
+PR: pr-8e693f6 (#226) · Plan: plan-regression
+Depends on: pr-2d5f712 (sign-off step / window / `signoff` session type — **MERGED**)
+Forward-compatible with: pr-06a96fa (evidence model), pr-ff9b728 (plan notes).
+
+## Architecture (post-clarification — note-537e1a0, note-a8bc547)
+
+The original description read like a deterministic Python renderer for both
+surfaces. Two scope-clarification notes mid-loop pinned the actual mechanism:
+
+* **Per-PR `report.html` is AGENT-WRITTEN.** Captures are heterogeneous enough
+  that coherent per-behavior framing requires the same semantic pass that
+  produces the routing verdict — the sign-off agent itself. So #226's main
+  work is **extending pr-2d5f712's sign-off prompt** to require the agent to
+  write `$CAP/report.html` + `$CAP/report.json` on every sign-off pass, with
+  the BDD section schema + relative-link discipline + top-of-page bullets.
+  **No per-PR HTML rendering in code.**
+* **The dashboard is the deterministic part.** A single top-level `index.html`
+  globs the per-PR `report.json` sidecars and renders the index + filtering +
+  badges. It **never interprets captures**; the sidecar is the only contract.
+* **Regenerate = plain `pm pr signoff <id>`.** No "write-only" mode. Outside
+  auto-sequence, manual sign-off is recommendation-only (the
+  manual-never-acts invariant pr-2d5f712 established in note-1a982f3 /
+  note-942fa37), so re-running is safe — the agent re-emits the report and
+  may adopt an existing fresh verdict per the adoption rule (note-511d725)
+  without triggering another action.
+
+## Requirements (grounded)
+
+### R1 — Sign-off prompt extension (the producer)
+Extend `pm_core.prompt_gen.generate_signoff_prompt` with a new "Write the
+sign-off report (deliverable)" step before the record/route steps. The
+extension specifies:
+
+* **Two deliverable files** the agent must write into `$CAP = $(pm qa
+  captures-path <id>)`: `report.html` (human-facing BDD report) and
+  `report.json` (structured sidecar). Both reference evidence by relative
+  path so the page opens over `file://`. Atomic write (temp + rename) so
+  readers never see a half-written sidecar.
+* **`report.html` structure** (top-down):
+  1. **Header** — title, badges (status + `sign_off` icon, merged flag,
+     recorded verdict marker via `SIGNOFF_VERDICT_ICONS`, scenario tally),
+     one-line Recommendation with the `ready_to_merge` framing
+     (sign-off recommends, never merges; the plan watcher decides), link back
+     to `../index.html`.
+  2. **"What this loop found and decided" — REQUIRED top-of-page summary**
+     (note-a8bc547). Two bulleted lists, **one line per item, plain English,
+     no internal jargon**, written so a reader **UNFAMILIAR** with the PR's
+     description / notes / commits can scan and decide whether to look closer.
+     Each bullet links to its commit / scenario / note where applicable.
+     * **Bugs fixed by review and QA** — defects the review-loop or QA
+       scenarios found and fixed **in this PR's branch during the loop**.
+     * **Spec ambiguities resolved** — places where the original scope was
+       ambiguous and got pinned down (DECISION / CORRECTION / supersedes /
+       "Scope addition" notes; PR-description rewrites mid-loop).
+  3. **Per-step sections** (Implementation / Review / QA) — each with explicit
+     **acceptance criteria** and the evidence paired with them. Bug PRs render
+     Implementation as Before (pre-fix: bug reproduces) / After (post-fix:
+     symptom gone), flagging a missing phase. Inline `<video>` / `<img>` /
+     `<details><pre>` where possible; link `.html` / large files.
+  4. **Context for sign-off** — PR description, PR notes, plan name + notes.
+* **`report.json` — strict, frozen schema** (the dashboard's only contract):
+  ```
+  pr_id, display_id, title, status, merged,
+  verdict (SIGNOFF_* | null), next_hop (ready_to_merge|qa|review|impl|blocked),
+  tally {PASS, NEEDS_WORK, INPUT_REQUIRED, pending},
+  bugs_fixed_in_loop, spec_clarifications,
+  generated_at (UTC ISO 8601), report_html ("report.html").
+  ```
+* **Single sources of truth** — match the TUI tech tree + `pm pr list` by
+  using `signoff.SIGNOFF_VERDICT_ICONS` / `SIGNOFF_VERDICT_STYLES` and
+  `helpers.PR_STATUS_ICONS` (the `sign_off` icon).
+* **Sourcing guidance** — `bugs_fixed_in_loop` from review-loop + QA commits
+  since impl and finding notes; `spec_clarifications` from DECISION /
+  CORRECTION / supersedes / Scope-addition notes + PR-description rewrites.
+
+### R2 — All-PR dashboard (the only deterministic generator)
+`pm_core/behavior_report.py` produces a single top-level
+`~/.pm/sessions/<tag>/captures/index.html`:
+* One row per PR in `project.yaml`, grouped by plan (plan notes pass-through),
+  with client-side filtering by **status** and **merged/unmerged**.
+* Each row's columns: PR display id, title, status (status icon + recorded
+  sign-off verdict marker for sign_off PRs), QA-verdict tally, **loop badges**
+  (🐞 N fixed, ❓ N clarified — from `bugs_fixed_in_loop` /
+  `spec_clarifications`), and a Report cell: live link to the agent's
+  `report.html` (with the next-hop line) when the sidecar exists, otherwise an
+  explicit "no report yet" state + the **regenerate command**:
+  `pm pr signoff <pr_id>` (with a copy button).
+* The dashboard **never interprets captures** — only `report.json`. A
+  garbage / partial sidecar degrades to the empty-state row rather than
+  crashing the page.
+* Markers reuse `signoff.SIGNOFF_VERDICT_ICONS` /
+  `SIGNOFF_VERDICT_STYLES` and `helpers.PR_STATUS_ICONS` so the dashboard
+  matches the TUI and `pm pr list` exactly.
+
+### R3 — CLI surface
+* **Remove** the retired `pm pr report` command (the per-PR page is
+  agent-written; regenerate = `pm pr signoff <id>`).
+* **Keep** `pm pr dashboard [--open]` — (re)generates `index.html`.
+
+### R4 — Forward-compat captures
+Keep the additive `scenarios/<n>/scenario.json` write in
+`qa_loop._persist_scenario_verdicts` so the sign-off agent can synthesize the
+per-behavior BDD section without re-parsing `verdict.md`. Old captures still
+work (the agent reads whatever's there).
+
+### R5 — Safety / robustness
+* Dashboard HTML escapes all dynamic text (`html.escape`); the sign-off agent
+  is instructed to do likewise in its own `report.html`.
+* Missing/garbage sidecar → dashboard row renders the empty state with a
+  regenerate command; never crashes the index.
+* Sidecar parsing tolerates extra keys + missing optional keys (`tally` /
+  counts default to 0 / empty).
+
+## Implicit requirements
+* The dashboard opens with no web server and no network.
+* Generation is idempotent (re-running overwrites `index.html`).
+* Captures-root resolution mirrors `captures_dir` so the dashboard finds the
+  same per-PR dirs the sign-off agent writes to (`paths.captures_root`).
+
+## Ambiguities (resolved)
+* **Who writes `report.html`?** → the sign-off agent, via the prompt
+  extension; not a Python renderer (note-537e1a0).
+* **Sidecar location / shape?** → `<pr_id>/report.json` next to the
+  agent's `report.html`; strict schema documented in the prompt + dashboard
+  module docstring.
+* **Regenerate mechanism?** → plain `pm pr signoff <id>`; safe because manual
+  sign-off is recommendation-only (no "write-only" mode).
+* **Top-of-page bullets source?** → derived during the same sign-off pass
+  from review-loop / QA commits and notes (no new inputs needed —
+  note-a8bc547).
+
+## Edge cases
+* **PR in `project.yaml` with no sidecar yet** → renders the empty-state row
+  with the `pm pr signoff <id>` regenerate command. Stays in the dashboard so
+  reviewers see the gap rather than the PR vanishing.
+* **Sidecar present, captures absent** → the dashboard still links to the
+  agent's `report.html`; the agent owns the inline-evidence story.
+* **Bug PR missing pre-fix or post-fix capture** → the sign-off agent flags
+  the gap in its `report.html` (and #225 hard-bounces a bug PR to impl when
+  either is missing — note-22f1fb3).
+* **Partial sidecar** (only the required-key subset) → counts default to 0,
+  the row still renders.
+
+## Out of scope (owned by dependencies)
+* The sign-off step / window / verdict router / lifecycle status / icons
+  (pr-2d5f712, merged) — we *consume* its seams, never redefine them.
+* Capture GC / snapshotting (future).
+* Plan notes data model (pr-ff9b728); we read forward-compatibly.
+
+
+## QA runs covered by this checkpoint
+
+Each line is one completed QA run that ended NEEDS_WORK. Its per-scenario
+results are in the matching `QA NEEDS_WORK:` PR note above, and each
+scenario's verdict is in its captures directory. The QA spec, when present,
+is `pm/specs/pr-8e693f6/qa.md` — its requirements are part of the acceptance evidence.
+
+- run 47b30e4a8869f42d — completed 2026-05-26T04:06Z on HEAD «NOT_RECORDED_BEFORE_THIS_FEATURE»; NEEDS_WORK from scenario verdicts; note note-596f78b; QA workdir `/home/matt/.pm/workdirs/qa/pr-8e693f6-47b30e4a8869f42d`; verdicts `~/.pm/sessions/«SESSION_TAG»/captures/pr-8e693f6/scenarios/<n>/verdict.md`
+- run bb8854012f0ad8f2 — completed 2026-05-26T13:25Z on HEAD «NOT_RECORDED_BEFORE_THIS_FEATURE»; NEEDS_WORK from scenario verdicts; note note-083c051; QA workdir `/home/matt/.pm/workdirs/qa/pr-8e693f6-bb8854012f0ad8f2`; verdicts `~/.pm/sessions/«SESSION_TAG»/captures/pr-8e693f6/scenarios/<n>/verdict.md`
+
+## Plan Context
+This PR is part of plan "Automated regression and bug fix loop" (plan-regression). Other PRs in this plan:
+- pr-abcf70f: FakeClaudeSession: scriptable Claude replacement for integration testing [merged]
+- pr-3b2847c: QA planner: consolidate related assertions into fewer scenarios [merged]
+- pr-539110b: Review and QA agents file bugs for out-of-scope issues via pm pr add [merged]
+- pr-30588a7: Bug fix flow: reproduce with test, fix, verify [merged]
+- pr-47940bc: Regression test sessions file bugs and improvements into correct plans [merged]
+- pr-e58459b: Auto-sequence button: chain start → review → QA on a single PR [merged]
+- pr-271cb3a: Discovery supervisor watcher (unified for bugs and improvements) [merged]
+- pr-d39a7fb: Improvement-fix implementation watcher [merged]
+- pr-e3a711c: Bug-fix implementation watcher [merged]
+- pr-e84b43c: Watcher review session: Claude pane with work-log access [merged]
+- pr-97ddabf: Watcher-target window for regression test launches [merged]
+- pr-d60d185: End-to-end QA review and auto-start command for the regression loop [merged]
+- pr-fbda1a8: Bridge old and new QA flows: tests for merged watchers under Phase 10 model [pending]
+- pr-b77702b: Dep-merge preamble in PR start/impl prompt for unmerged deps [pending]
+- pr-2c060b2: Claude-based regression test: CLI output rendering at varied terminal widths [pending]
+- pr-c2397e2: QA: refinement prompt asks for additional steps that would improve coverage [pending]
+- pr-b42059d: QA: code coverage of exercised lines factors into PASS verdict [pending]
+- pr-8422dea: QA: extended coverage measures (path coverage, user-story coverage) [pending]
+- pr-6be8ee6: Bug-fix flow: surface TUI QA repro instructions in session prompt [merged]
+- pr-8ed578d: QA: fix-line coverage gate ties coverage to the diff so PASS requires the fix code to be exercised [pending]
+- pr-ca6859f: Watcher self-recovery audit [pending]
+- pr-6f9301e: Headless / benchmark mode for autonomous loops [pending]
+- pr-ed10ac4: No-progress safety stop on review/QA loops [pending]
+- pr-e2b7fdf: Realistic single-prompt task — internet + directive + post-run integrity audit [pending]
+- pr-b3b8df0: QA instruction auto-synthesis at project setup [pending]
+... (+20 more; run `pm pr list --plan plan-regression`)
+
+## Interacting with the TUI
+
+The base pm tmux session is `pm-project_manager-c5a1006b`. Use `-s pm-project_manager-c5a1006b` with pm tui commands so they target the correct session even from workdir clones:
+- `pm tui view -s pm-project_manager-c5a1006b` — capture and view the current TUI screen
+- `pm tui send <keys> -s pm-project_manager-c5a1006b` — send keystrokes to the TUI (e.g. `pm tui send j` to move down)
+
+**Do not** run commands that spawn new Claude sessions yourself (e.g. `pm pr start`, `pm pr done`, `pm plan add`, `pm plan breakdown`, `pm plan review`). These must be triggered through the TUI so panes are managed correctly. Use `pm tui send` to press the appropriate key in the TUI instead.
+
+## Steps
+1. Pull the latest changes for `pm/pr-8e693f6-per-pr-bdd-behavior-report-html-co-located-with-ca` from the remote. Do not discard or reset local changes you find; leave them as they are.
+2. Read the complete change, not only the last patch:
+   - `git diff origin/master...HEAD` — the whole PR
+   - `git log --format='%h %ad %s' --date=short origin/master..HEAD` — how it got here; review-loop fixes are prefixed `review-loop <id> i<N>:`
+   - the PR notes above (review and QA fix notes, incidental fixes, user decisions) and the QA runs listed above, including the `verdict.md` of each NEEDS_WORK scenario
+3. Map the interfaces the PR touches: callers of changed functions, durable records and file formats it reads or writes, CLI and TUI surfaces, prompts, and other PRs working nearby (`pm pr list`; the plan context above).
+4. Look for problems that span rounds:
+   - repeated symptoms with a common cause — group the rounds' findings by cause, not by scenario
+   - special cases, flags, retries or guards accumulating one fix at a time
+   - two mechanisms doing the same job, or a new mechanism duplicating an existing one
+   - complexity the actual need does not require, and a simpler design that would still meet it
+   Then check the other direction: if the rounds found unrelated local defects that were fixed and stayed fixed, say so — that is evidence the approach is sound.
+5. Question the specification. For each requirement the rounds kept running into, decide whether it is:
+   - ambiguous (reasonable readers disagree about what it requires),
+   - outdated (the code, the PR notes or a user decision has moved past it),
+   - over-constrained (it prescribes a mechanism where the need is an outcome), or
+   - internally conflicting (two requirements cannot both hold).
+   Keep these apart from genuine implementation bugs (a sound requirement the code does not meet yet) and from necessary safety and acceptance constraints, which stay even when they are costly to satisfy.
+6. Decide. Choose every outcome the evidence supports:
+   - **keep** — the current approach is sound; say why the rounds do not point to a design problem.
+   - **corrections** — concrete changes within this PR for the next review iteration to make: what, where, why, and how it will be verified. You do not make them.
+   - **spec_clarification** — wording that resolves an ambiguity without changing any requirement, acceptance criterion, scope or user decision.
+   - **spec_change_proposal** — a change to a requirement, acceptance criterion or scope. Only the owner can approve it.
+   - **follow_up** — separately scoped work that should not be done in this PR (see Rules for filing).
+   - **breakup_referral** — only when independently useful parts of this PR could land materially earlier and that gain outweighs extraction, duplicate review/QA and coordination costs. Staying together is the default; size and the number of rounds never justify a split on their own.
+7. Write the assessment (format below) to `pm/specs/pr-8e693f6/checkpoints/ckpt-1.md`, then commit only that file and push:
+   `git add pm/specs/pr-8e693f6/checkpoints/ckpt-1.md && git commit -m "checkpoint ckpt-1: architecture/spec assessment" -- pm/specs/pr-8e693f6/checkpoints/ckpt-1.md && git push origin pm/pr-8e693f6-per-pr-bdd-behavior-report-html-co-located-with-ca`
+   If the push fails, say so in your final summary; never force-push.
+
+## Rules
+
+- Do not change source code, tests, fixtures, the implementation or QA spec, the PR description, plan files or project settings. The only file you create or commit is the assessment.
+- Do not revert, reset, stash, clean or delete anything. Dirty files, drafts, fixtures, captures, transcripts and earlier assessments stay exactly as they are.
+- Useful incidental fixes stay in this PR by default; do not recommend moving them out to make the PR smaller.
+- Do not weaken or waive anything: no lowering of QA assertions or acceptance criteria, no "pass with follow-ups", no skipped review round. Every fix you recommend still goes through a review iteration that ends NEEDS_WORK, another review, and QA.
+- Decisions the user has made — in the description, in PR notes or in the approved spec — stand. You may question one only by asking the owner; never recommend acting against it.
+- You cannot change merge policy, clear holds, approve specs or start other PRs.
+- Follow-up work: search before filing (`pm pr list --plan plan-regression`, `pm pr list --plan bugs`, `pm pr list`). If a matching PR exists, add a note to it (`pm pr note add <pr-id> '<text>'`) instead of filing. Otherwise file it as pending work: `pm pr add '<title>' --plan <plan-id> --description '<problem, evidence, link to pm/specs/pr-8e693f6/checkpoints/ckpt-1.md>'`. Filing does not start it — never run `pm pr start`. List every PR you filed or reused in the assessment.
+- A breakup referral is a recommendation for the owner. Do not run `pm pr split`.
+
+## Assessment format
+
+Keep it short: a reader should get the decision from the summary in under a minute, and the whole file should rarely need more than about 80 lines. Link evidence (note ids, scenario verdict paths, commits, `file:line`) instead of pasting it.
+
+```markdown
+---
+checkpoint: ckpt-1
+pr: pr-8e693f6
+reviewed_head: <full SHA of the HEAD you reviewed>
+base: master@<full SHA of the base you diffed against>
+covers_qa_runs: [47b30e4a8869f42d, bb8854012f0ad8f2]
+covers_requests: []
+outcomes: [<one or more of: keep, corrections, spec_clarification, spec_change_proposal, follow_up, breakup_referral>]
+human_question: <none | non_blocking | answered>
+followups: [<PR ids filed or reused; empty if none>]
+---
+# Checkpoint ckpt-1 — pr-8e693f6
+
+## Summary
+<2-5 lines: the decision and the main reason>
+
+## What was considered
+- <hypothesis or concern> — evidence: <links> — conclusion: <held or ruled out, and why>
+
+## Current-PR corrections
+- <change> — where: <file/function> — why: <evidence> — verify by: <test, scenario or check>
+(or "None.")
+
+## Specification
+- <requirement, quoted> — <ambiguous | outdated | over-constrained | conflicting> — proposed: <text> — <clarification | requirement change, needs owner approval>
+(or "No problems found with the spec.")
+
+## Follow-up work
+- <PR id, filed or reused> — <scope, and why it is not in this PR>
+(or "None.")
+
+## Breakup
+<"Not recommended" and why; or the smallest useful partition, what stays here, affected dependents, remaining checks and the expected timeline benefit>
+
+## Expected benefit and tradeoffs
+<what the next rounds gain in quality or verification, and what it costs>
+
+## Questions for the owner
+- <question> — <blocking | non-blocking>
+(or "None.")
+```
+
+## Finishing
+
+End your response with exactly one of these keywords on its own line:
+
+- **CHECKPOINT_COMPLETE** — the assessment is written and committed and pushed. Give its path and commit just before this line. pm validates the file, records the checkpoint as complete, and starts the next review iteration with your assessment in its prompt.
+- **INPUT_REQUIRED** — the owner has to answer before the next round can usefully proceed (for example, the next round depends on a requirement change only the owner can approve). Ask specific questions and give the options you see. The owner answers in this pane; then record the question and the owner's answer in the assessment, set `human_question: answered`, commit it, and end with **CHECKPOINT_COMPLETE**. Questions that do not block the next round go in the assessment as non-blocking instead.
+
+Do not output **PASS** or **NEEDS_WORK** — this checkpoint does not judge whether the PR is ready.

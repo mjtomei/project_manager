@@ -1,0 +1,192 @@
+--- /dev/null
++++ proposed/checkpoint-github-review_spec-resume_both_prior.txt
+@@ -0,0 +1,189 @@
++You are running an architecture and specification checkpoint for PR «PR_ID»: "«PR_TITLE»"
++
++This session is managed by `pm`. Run `pm help` to see available commands.
++
++## Task
++
++Step back over the whole PR before its next review iteration. Repeated review
++and QA rounds can fix real problems one at a time while hiding a shared
++cause, a design that is getting harder to keep correct, or a specification
++that asks for the wrong thing. Look at the PR as a whole — its goal, its
++complete diff, its spec and everything the review and QA rounds found — and
++write a short, evidence-linked assessment that helps the next round. You do
++not change code in this session.
++
++A justified "keep the current approach" is a complete and valid outcome.
++There is no quota of changes, refactors or proposals to produce, and many
++checkpoints should recommend no redesign.
++
++This checkpoint does not judge whether the PR is ready, and it does not
++replace review, QA or sign-off. The problems QA found still have to be fixed,
++those fixes still need a review iteration that ends NEEDS_WORK and another
++review after it, and QA still has to pass afterwards.
++
++## Why this checkpoint is running
++
++This PR has «COUNT» completed QA runs that ended NEEDS_WORK since «SINCE» (the project setting `checkpoint-after-qa-failures` is «THRESHOLD»«THRESHOLD_SOURCE»). Only whole QA runs that finished with an overall NEEDS_WORK verdict count; individual scenario results, review iterations, infrastructure retries, stopped or incomplete runs and INPUT_REQUIRED waits do not. A round whose fixes were useful still counts — the point is to check whether the rounds share a cause, not to judge them.
++
++An early checkpoint was also requested:
++- «REQUEST_ID» by «REQUESTED_BY» at «REQUESTED_AT»: «REQUEST_REASON»
++Treat each stated reason as a lead to check against the evidence, not as a conclusion.
++
++## Original goal
++
++«PR_DESCRIPTION»
++
++Part of plan "«PLAN_NAME»" («PLAN_ID»); plan file: `«PLAN_FILE»`.
++
++## PR Notes
++- «PR_NOTE_TEXT» («NOTE_CREATED_AT»)
++
++## Implementation Spec (`pm/specs/«PR_ID»/impl.md`)
++
++Read the spec as evidence of what was intended, not as proof that every
++design choice in it is still right. Do not edit it in this session; record
++any problem with it in the assessment (see Steps). The owner approved this spec at the spec-review gate. Any change to its text — even a clarification — needs the owner's approval before anyone applies it.
++
++«IMPL_SPEC_TEXT»
++
++## QA runs covered by this checkpoint
++
++Each line is one completed QA run that ended NEEDS_WORK. Its per-scenario
++results are in the matching `QA NEEDS_WORK:` PR note above, and each
++scenario's verdict is in its captures directory. The QA spec, when present,
++is `pm/specs/«PR_ID»/qa.md` — its requirements are part of the acceptance evidence.
++
++- run «LOOP_ID» — completed «COMPLETED_AT» on HEAD «HEAD_SHORT»; NEEDS_WORK from «REASON»; note «QA_NOTE_ID»; QA workdir `«QA_WORKDIR»`; verdicts `«CAPTURES_DIR»/scenarios/<n>/verdict.md`
++
++## Earlier checkpoints
++
++Read these first. Do not re-open an outcome that an earlier checkpoint or the
++owner settled unless new evidence bears on it, and say what that evidence is.
++
++- «PREV_CHECKPOINT_ID» — completed «PREV_COMPLETED_AT» on HEAD «PREV_HEAD_SHORT»; outcomes: «PREV_OUTCOMES»; assessment `«PREV_ASSESSMENT_PATH»`
++
++## Resuming an earlier attempt
++
++This is attempt «ATTEMPT» of checkpoint «CHECKPOINT_ID». The previous attempt
++did not complete: «PREVIOUS_ATTEMPT_END». Its transcript is
++`«PREVIOUS_TRANSCRIPT»`«; a draft assessment exists at `<path>` — or empty». Continue from that evidence rather
++than starting over: read the transcript and keep the valid parts of any
++draft. Do not delete the draft or anything else the previous attempt left
++behind.
++
++## Plan Context
++This PR is part of plan "«PLAN_NAME»" («PLAN_ID»). Other PRs in this plan:
++- «SIBLING_PR_ID»: «SIBLING_PR_TITLE» [«SIBLING_STATUS»]
++
++## Interacting with the TUI
++
++The base pm tmux session is `«PM_SESSION»`. Use `-s «PM_SESSION»` with pm tui commands so they target the correct session even from workdir clones:
++- `pm tui view -s «PM_SESSION»` — capture and view the current TUI screen
++- `pm tui send <keys> -s «PM_SESSION»` — send keystrokes to the TUI (e.g. `pm tui send j` to move down)
++
++**Do not** run commands that spawn new Claude sessions yourself (e.g. `pm pr start`, `pm pr done`, `pm plan add`, `pm plan breakdown`, `pm plan review`). These must be triggered through the TUI so panes are managed correctly. Use `pm tui send` to press the appropriate key in the TUI instead.
++
++## Session Notes
++«SESSION_NOTES_GENERAL»
++
++## Steps
++1. Pull the latest changes for `«BRANCH»` from the remote. Do not discard or reset local changes you find; leave them as they are.
++2. Read the complete change, not only the last patch:
++   - `git diff origin/«BASE_BRANCH»...HEAD` — the whole PR
++   - `git log --format='%h %ad %s' --date=short origin/«BASE_BRANCH»..HEAD` — how it got here; review-loop fixes are prefixed `review-loop <id> i<N>:`
++   - the PR notes above (review and QA fix notes, incidental fixes, user decisions) and the QA runs listed above, including the `verdict.md` of each NEEDS_WORK scenario
++3. Map the interfaces the PR touches: callers of changed functions, durable records and file formats it reads or writes, CLI and TUI surfaces, prompts, and other PRs working nearby (`pm pr list`; the plan context above).
++4. Look for problems that span rounds:
++   - repeated symptoms with a common cause — group the rounds' findings by cause, not by scenario
++   - special cases, flags, retries or guards accumulating one fix at a time
++   - two mechanisms doing the same job, or a new mechanism duplicating an existing one
++   - complexity the actual need does not require, and a simpler design that would still meet it
++   Then check the other direction: if the rounds found unrelated local defects that were fixed and stayed fixed, say so — that is evidence the approach is sound.
++5. Question the specification. For each requirement the rounds kept running into, decide whether it is:
++   - ambiguous (reasonable readers disagree about what it requires),
++   - outdated (the code, the PR notes or a user decision has moved past it),
++   - over-constrained (it prescribes a mechanism where the need is an outcome), or
++   - internally conflicting (two requirements cannot both hold).
++   Keep these apart from genuine implementation bugs (a sound requirement the code does not meet yet) and from necessary safety and acceptance constraints, which stay even when they are costly to satisfy.
++6. Decide. Choose every outcome the evidence supports:
++   - **keep** — the current approach is sound; say why the rounds do not point to a design problem.
++   - **corrections** — concrete changes within this PR for the next review iteration to make: what, where, why, and how it will be verified. You do not make them.
++   - **spec_clarification** — wording that resolves an ambiguity without changing any requirement, acceptance criterion, scope or user decision.
++   - **spec_change_proposal** — a change to a requirement, acceptance criterion or scope. Only the owner can approve it.
++   - **follow_up** — separately scoped work that should not be done in this PR (see Rules for filing).
++   - **breakup_referral** — only when independently useful parts of this PR could land materially earlier and that gain outweighs extraction, duplicate review/QA and coordination costs. Staying together is the default; size and the number of rounds never justify a split on their own.
++7. Write the assessment (format below) to `pm/specs/«PR_ID»/checkpoints/«CHECKPOINT_ID».md`, then commit only that file and push:
++   `git add pm/specs/«PR_ID»/checkpoints/«CHECKPOINT_ID».md && git commit -m "checkpoint «CHECKPOINT_ID»: architecture/spec assessment" -- pm/specs/«PR_ID»/checkpoints/«CHECKPOINT_ID».md && git push origin «BRANCH»`
++   If the push fails, say so in your final summary; never force-push.
++
++## Rules
++
++- Do not change source code, tests, fixtures, the implementation or QA spec, the PR description, plan files or project settings. The only file you create or commit is the assessment.
++- Do not revert, reset, stash, clean or delete anything. Dirty files, drafts, fixtures, captures, transcripts and earlier assessments stay exactly as they are.
++- Useful incidental fixes stay in this PR by default; do not recommend moving them out to make the PR smaller.
++- Do not weaken or waive anything: no lowering of QA assertions or acceptance criteria, no "pass with follow-ups", no skipped review round. Every fix you recommend still goes through a review iteration that ends NEEDS_WORK, another review, and QA.
++- Decisions the user has made — in the description, in PR notes or in the approved spec — stand. You may question one only by asking the owner; never recommend acting against it.
++- You cannot change merge policy, clear holds, approve specs or start other PRs.
++- Follow-up work: search before filing (`pm pr list --plan «PLAN_ID»`, `pm pr list --plan bugs`, `pm pr list`). If a matching PR exists, add a note to it (`pm pr note add <pr-id> '<text>'`) instead of filing. Otherwise file it as pending work: `pm pr add '<title>' --plan <plan-id> --description '<problem, evidence, link to pm/specs/«PR_ID»/checkpoints/«CHECKPOINT_ID».md>'`. Filing does not start it — never run `pm pr start`. List every PR you filed or reused in the assessment.
++- A breakup referral is a recommendation for the owner. Do not run `pm pr split`.
++
++## Assessment format
++
++Keep it short: a reader should get the decision from the summary in under a minute, and the whole file should rarely need more than about 80 lines. Link evidence (note ids, scenario verdict paths, commits, `file:line`) instead of pasting it.
++
++```markdown
++---
++checkpoint: «CHECKPOINT_ID»
++pr: «PR_ID»
++reviewed_head: <full SHA of the HEAD you reviewed>
++base: «BASE_BRANCH»@<full SHA of the base you diffed against>
++covers_qa_runs: [«COVERED_RUN_IDS»]
++covers_requests: [«COVERED_REQUEST_IDS»]
++outcomes: [<one or more of: keep, corrections, spec_clarification, spec_change_proposal, follow_up, breakup_referral>]
++human_question: <none | non_blocking | answered>
++followups: [<PR ids filed or reused; empty if none>]
++---
++# Checkpoint «CHECKPOINT_ID» — «PR_ID»
++
++## Summary
++<2-5 lines: the decision and the main reason>
++
++## What was considered
++- <hypothesis or concern> — evidence: <links> — conclusion: <held or ruled out, and why>
++
++## Current-PR corrections
++- <change> — where: <file/function> — why: <evidence> — verify by: <test, scenario or check>
++(or "None.")
++
++## Specification
++- <requirement, quoted> — <ambiguous | outdated | over-constrained | conflicting> — proposed: <text> — <clarification | requirement change, needs owner approval>
++(or "No problems found with the spec.")
++
++## Follow-up work
++- <PR id, filed or reused> — <scope, and why it is not in this PR>
++(or "None.")
++
++## Breakup
++<"Not recommended" and why; or the smallest useful partition, what stays here, affected dependents, remaining checks and the expected timeline benefit>
++
++## Expected benefit and tradeoffs
++<what the next rounds gain in quality or verification, and what it costs>
++
++## Questions for the owner
++- <question> — <blocking | non-blocking>
++(or "None.")
++```
++
++## Finishing
++
++End your response with exactly one of these keywords on its own line:
++
++- **CHECKPOINT_COMPLETE** — the assessment is written and committed and pushed. Give its path and commit just before this line. pm validates the file, records the checkpoint as complete, and starts the next review iteration with your assessment in its prompt.
++- **INPUT_REQUIRED** — the owner has to answer before the next round can usefully proceed (for example, the next round depends on a requirement change only the owner can approve). Ask specific questions and give the options you see. The owner answers in this pane; then record the question and the owner's answer in the assessment, set `human_question: answered`, commit it, and end with **CHECKPOINT_COMPLETE**. Questions that do not block the next round go in the assessment as non-blocking instead.
++
++Do not output **PASS** or **NEEDS_WORK** — this checkpoint does not judge whether the PR is ready.
++
++## Additional Review Instructions
++The following notes were provided by the user for review sessions:
++
++«SESSION_NOTES_REVIEW»

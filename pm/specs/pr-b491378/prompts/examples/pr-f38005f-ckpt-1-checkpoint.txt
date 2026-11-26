@@ -1,0 +1,168 @@
+You are running an architecture and specification checkpoint for PR pr-f38005f: "Add file locking to project.yaml read-modify-write operations"
+
+This session is managed by `pm`. Run `pm help` to see available commands.
+
+## Task
+
+Step back over the whole PR before its next review iteration. Repeated review
+and QA rounds can fix real problems one at a time while hiding a shared
+cause, a design that is getting harder to keep correct, or a specification
+that asks for the wrong thing. Look at the PR as a whole — its goal, its
+complete diff, its spec and everything the review and QA rounds found — and
+write a short, evidence-linked assessment that helps the next round. You do
+not change code in this session.
+
+A justified "keep the current approach" is a complete and valid outcome.
+There is no quota of changes, refactors or proposals to produce, and many
+checkpoints should recommend no redesign.
+
+This checkpoint does not judge whether the PR is ready, and it does not
+replace review, QA or sign-off. The problems QA found still have to be fixed,
+those fixes still need a review iteration that ends NEEDS_WORK and another
+review after it, and QA still has to pass afterwards.
+
+## Why this checkpoint is running
+
+This PR has 2 completed QA runs that ended NEEDS_WORK since the PR started (the project setting `checkpoint-after-qa-failures` is 2, the default). Only whole QA runs that finished with an overall NEEDS_WORK verdict count; individual scenario results, review iterations, infrastructure retries, stopped or incomplete runs and INPUT_REQUIRED waits do not. A round whose fixes were useful still counts — the point is to check whether the rounds share a cause, not to judge them.
+
+## Original goal
+
+Add advisory file locking to store.py so that concurrent processes (TUI background sync, CLI commands, multiple users) cannot corrupt project.yaml with lost-update races. Introduce a locked_update(root, fn) helper that acquires an fcntl.flock exclusive lock, loads fresh state, applies mutations, saves, and releases. All read-modify-write call sites must migrate to locked_update. Critical constraint: lock must never be held across network calls — operations interleaving GitHub API calls must be restructured to do the external call first, then acquire the lock, load fresh state, merge results, and save. Lock timeout of 2 seconds with clear error message.
+
+Part of plan "Multiuser Support" (plan-003); plan file: `pm/plans/plan-003.md`.
+
+## PR Notes
+- Review loop (review_loop_ui.py), QA loop (qa_loop_ui.py), and auto_start.py also do store.load()/store.save() and modify app._data — these should be converted to locked_update too, or they can still overwrite with stale data. (2026-03-07T15:29:28Z)
+- QA NEEDS_WORK: Unit tests — test_store_locking.py and test_store.py pass: PASS; Regression — all pre-existing test suites pass: PASS; Code audit — no bare store.save() in CLI or TUI modules: PASS; Code audit — no network calls inside locked_update callbacks: PASS; CLI integration — pm pr add creates correct on-disk state: PASS; CLI integration — pm pr edit updates fields atomically: PASS; CLI integration — pm pr select, pm plan add, pm model set: PASS; CLI integration — pm pr close removes PR and cleans up: PASS; CLI integration — pm pr note add/edit/delete: PASS; Concurrent pm pr add — no lost writes: NEEDS_WORK; StoreLockTimeout — CLI error message: PASS; pm edit command — editor under lock: PASS; Atomic write — file never truncated: PASS; Read-only permissions and YAML header after save: PASS; Exception in mutation function — lock released, data unsaved: PASS; ProjectYamlParseError — corrupt YAML handling: PASS; TUI sync graceful lock timeout handling: PASS; pr_sync — network calls before lock, results applied inside lock: PASS; spec_gen — locked_update for generate, approve, reject: PASS; plan_load and GitHub import — concurrent-safe duplicate checks: PASS; watcher_ui — intentional store.save for creation is preserved: PASS; _finalize_merge — no data parameter, loads fresh inside lock: PASS; lock file left on disk after unlock — standard fcntl pattern: PASS; make_plan_entry helper used consistently: PASS; helpers.py — _ensure_workdir and _resolve_repo_id use locked_update: PASS; background_sync handles corrupt YAML without clobbering app state: PASS (workdir: /home/mjtomei/.pm/workdirs/qa/pr-f38005f-d8d59509902b0358) (2026-04-07T22:51:44Z)
+- QA INPUT_REQUIRED:  (workdir: /home/mjtomei/.pm/workdirs/qa/pr-f38005f-592c914eaa2d86f9) (2026-04-09T11:42:22Z)
+- QA NEEDS_WORK: Unit tests — test_store_locking.py and test_store.py pass: PASS; Regression — all pre-existing test suites pass: PASS; Code audit — no bare store.save() in CLI or TUI modules: PASS; Code audit — no network calls inside locked_update callbacks: PASS; CLI integration — pm pr add creates correct on-disk state: PASS; CLI integration — pm pr edit updates fields atomically: PASS; CLI integration — pm pr select, pm plan add, pm model set: PASS; CLI integration — pm pr close removes PR and cleans up: PASS; CLI integration — pm pr note add/edit/delete: PASS; Concurrent pm pr add — no lost writes: INPUT_REQUIRED; Concurrent duplicate-title prevention in pr_add: PASS; StoreLockTimeout — CLI error message: PASS; pm edit command — editor under lock: PASS; Atomic write — file never truncated: PASS; Read-only permissions and YAML header after save: PASS; Exception in mutation function — lock released, data unsaved: NEEDS_WORK; ProjectYamlParseError — corrupt YAML handling: PASS; TUI sync graceful lock timeout handling: PASS; pr_sync — network calls before lock, results applied inside lock: PASS; spec_gen — locked_update for generate, approve, reject: PASS; plan_load and GitHub import — concurrent-safe duplicate checks: PASS; watcher_ui — intentional store.save for creation is preserved: PASS; _finalize_merge — no data parameter, loads fresh inside lock: PASS; lock file left on disk after unlock — standard fcntl pattern: PASS; make_plan_entry helper used consistently: PASS; helpers.py — _ensure_workdir and _resolve_repo_id use locked_update: PASS; background_sync handles corrupt YAML without clobbering app state: PASS (workdir: /home/mjtomei/.pm/workdirs/qa/pr-f38005f-bdca24011d0bf8cd) (2026-04-09T18:18:02Z)
+
+## Implementation Spec — MISSING
+
+This PR has no implementation spec (`pm/specs/pr-f38005f/impl.md` does not exist).
+Work from the description, the PR notes and the code. If the missing spec is
+itself part of the problem — for example, the rounds keep disagreeing about
+what is required — say so in the assessment.
+
+## QA runs covered by this checkpoint
+
+Each line is one completed QA run that ended NEEDS_WORK. Its per-scenario
+results are in the matching `QA NEEDS_WORK:` PR note above, and each
+scenario's verdict is in its captures directory. The QA spec, when present,
+is `pm/specs/pr-f38005f/qa.md` — its requirements are part of the acceptance evidence.
+
+- run d8d59509902b0358 — completed 2026-04-07T22:51Z on HEAD «NOT_RECORDED_BEFORE_THIS_FEATURE»; NEEDS_WORK from scenario verdicts; note note-60be829; QA workdir `/home/mjtomei/.pm/workdirs/qa/pr-f38005f-d8d59509902b0358`; verdicts `~/.pm/sessions/«SESSION_TAG»/captures/pr-f38005f/scenarios/<n>/verdict.md`
+- run bdca24011d0bf8cd — completed 2026-04-09T18:18Z on HEAD «NOT_RECORDED_BEFORE_THIS_FEATURE»; NEEDS_WORK from scenario verdicts; note note-ed85f13; QA workdir `/home/mjtomei/.pm/workdirs/qa/pr-f38005f-bdca24011d0bf8cd`; verdicts `~/.pm/sessions/«SESSION_TAG»/captures/pr-f38005f/scenarios/<n>/verdict.md`
+
+## Plan Context
+This PR is part of plan "Multiuser Support" (plan-003). Other PRs in this plan:
+- pr-022: Handle merging pm directory changes across clones [merged]
+- pr-024: Add multi-user support to sessions [merged]
+- pr-c11d04f: Add notes field to PRs for post-start addendums [merged]
+- pr-9177f5e: Add TUI external control request protocol [pending]
+- pr-0778fbe: Add PR ownership tracking with workdir history [pending]
+
+## Interacting with the TUI
+
+The base pm tmux session is `pm-project_manager-c5a1006b`. Use `-s pm-project_manager-c5a1006b` with pm tui commands so they target the correct session even from workdir clones:
+- `pm tui view -s pm-project_manager-c5a1006b` — capture and view the current TUI screen
+- `pm tui send <keys> -s pm-project_manager-c5a1006b` — send keystrokes to the TUI (e.g. `pm tui send j` to move down)
+
+**Do not** run commands that spawn new Claude sessions yourself (e.g. `pm pr start`, `pm pr done`, `pm plan add`, `pm plan breakdown`, `pm plan review`). These must be triggered through the TUI so panes are managed correctly. Use `pm tui send` to press the appropriate key in the TUI instead.
+
+## Steps
+1. Pull the latest changes for `pm/pr-f38005f-add-file-locking-to-project-yaml-read-modify-write` from the remote. Do not discard or reset local changes you find; leave them as they are.
+2. Read the complete change, not only the last patch:
+   - `git diff origin/master...HEAD` — the whole PR
+   - `git log --format='%h %ad %s' --date=short origin/master..HEAD` — how it got here; review-loop fixes are prefixed `review-loop <id> i<N>:`
+   - the PR notes above (review and QA fix notes, incidental fixes, user decisions) and the QA runs listed above, including the `verdict.md` of each NEEDS_WORK scenario
+3. Map the interfaces the PR touches: callers of changed functions, durable records and file formats it reads or writes, CLI and TUI surfaces, prompts, and other PRs working nearby (`pm pr list`; the plan context above).
+4. Look for problems that span rounds:
+   - repeated symptoms with a common cause — group the rounds' findings by cause, not by scenario
+   - special cases, flags, retries or guards accumulating one fix at a time
+   - two mechanisms doing the same job, or a new mechanism duplicating an existing one
+   - complexity the actual need does not require, and a simpler design that would still meet it
+   Then check the other direction: if the rounds found unrelated local defects that were fixed and stayed fixed, say so — that is evidence the approach is sound.
+5. Question the specification. For each requirement the rounds kept running into, decide whether it is:
+   - ambiguous (reasonable readers disagree about what it requires),
+   - outdated (the code, the PR notes or a user decision has moved past it),
+   - over-constrained (it prescribes a mechanism where the need is an outcome), or
+   - internally conflicting (two requirements cannot both hold).
+   Keep these apart from genuine implementation bugs (a sound requirement the code does not meet yet) and from necessary safety and acceptance constraints, which stay even when they are costly to satisfy.
+6. Decide. Choose every outcome the evidence supports:
+   - **keep** — the current approach is sound; say why the rounds do not point to a design problem.
+   - **corrections** — concrete changes within this PR for the next review iteration to make: what, where, why, and how it will be verified. You do not make them.
+   - **spec_clarification** — wording that resolves an ambiguity without changing any requirement, acceptance criterion, scope or user decision.
+   - **spec_change_proposal** — a change to a requirement, acceptance criterion or scope. Only the owner can approve it.
+   - **follow_up** — separately scoped work that should not be done in this PR (see Rules for filing).
+   - **breakup_referral** — only when independently useful parts of this PR could land materially earlier and that gain outweighs extraction, duplicate review/QA and coordination costs. Staying together is the default; size and the number of rounds never justify a split on their own.
+7. Write the assessment (format below) to `pm/specs/pr-f38005f/checkpoints/ckpt-1.md`, then commit only that file and push:
+   `git add pm/specs/pr-f38005f/checkpoints/ckpt-1.md && git commit -m "checkpoint ckpt-1: architecture/spec assessment" -- pm/specs/pr-f38005f/checkpoints/ckpt-1.md && git push origin pm/pr-f38005f-add-file-locking-to-project-yaml-read-modify-write`
+   If the push fails, say so in your final summary; never force-push.
+
+## Rules
+
+- Do not change source code, tests, fixtures, the implementation or QA spec, the PR description, plan files or project settings. The only file you create or commit is the assessment.
+- Do not revert, reset, stash, clean or delete anything. Dirty files, drafts, fixtures, captures, transcripts and earlier assessments stay exactly as they are.
+- Useful incidental fixes stay in this PR by default; do not recommend moving them out to make the PR smaller.
+- Do not weaken or waive anything: no lowering of QA assertions or acceptance criteria, no "pass with follow-ups", no skipped review round. Every fix you recommend still goes through a review iteration that ends NEEDS_WORK, another review, and QA.
+- Decisions the user has made — in the description, in PR notes or in the approved spec — stand. You may question one only by asking the owner; never recommend acting against it.
+- You cannot change merge policy, clear holds, approve specs or start other PRs.
+- Follow-up work: search before filing (`pm pr list --plan plan-003`, `pm pr list --plan bugs`, `pm pr list`). If a matching PR exists, add a note to it (`pm pr note add <pr-id> '<text>'`) instead of filing. Otherwise file it as pending work: `pm pr add '<title>' --plan <plan-id> --description '<problem, evidence, link to pm/specs/pr-f38005f/checkpoints/ckpt-1.md>'`. Filing does not start it — never run `pm pr start`. List every PR you filed or reused in the assessment.
+- A breakup referral is a recommendation for the owner. Do not run `pm pr split`.
+
+## Assessment format
+
+Keep it short: a reader should get the decision from the summary in under a minute, and the whole file should rarely need more than about 80 lines. Link evidence (note ids, scenario verdict paths, commits, `file:line`) instead of pasting it.
+
+```markdown
+---
+checkpoint: ckpt-1
+pr: pr-f38005f
+reviewed_head: <full SHA of the HEAD you reviewed>
+base: master@<full SHA of the base you diffed against>
+covers_qa_runs: [d8d59509902b0358, bdca24011d0bf8cd]
+covers_requests: []
+outcomes: [<one or more of: keep, corrections, spec_clarification, spec_change_proposal, follow_up, breakup_referral>]
+human_question: <none | non_blocking | answered>
+followups: [<PR ids filed or reused; empty if none>]
+---
+# Checkpoint ckpt-1 — pr-f38005f
+
+## Summary
+<2-5 lines: the decision and the main reason>
+
+## What was considered
+- <hypothesis or concern> — evidence: <links> — conclusion: <held or ruled out, and why>
+
+## Current-PR corrections
+- <change> — where: <file/function> — why: <evidence> — verify by: <test, scenario or check>
+(or "None.")
+
+## Specification
+- <requirement, quoted> — <ambiguous | outdated | over-constrained | conflicting> — proposed: <text> — <clarification | requirement change, needs owner approval>
+(or "No problems found with the spec.")
+
+## Follow-up work
+- <PR id, filed or reused> — <scope, and why it is not in this PR>
+(or "None.")
+
+## Breakup
+<"Not recommended" and why; or the smallest useful partition, what stays here, affected dependents, remaining checks and the expected timeline benefit>
+
+## Expected benefit and tradeoffs
+<what the next rounds gain in quality or verification, and what it costs>
+
+## Questions for the owner
+- <question> — <blocking | non-blocking>
+(or "None.")
+```
+
+## Finishing
+
+End your response with exactly one of these keywords on its own line:
+
+- **CHECKPOINT_COMPLETE** — the assessment is written and committed and pushed. Give its path and commit just before this line. pm validates the file, records the checkpoint as complete, and starts the next review iteration with your assessment in its prompt.
+- **INPUT_REQUIRED** — the owner has to answer before the next round can usefully proceed (for example, the next round depends on a requirement change only the owner can approve). Ask specific questions and give the options you see. The owner answers in this pane; then record the question and the owner's answer in the assessment, set `human_question: answered`, commit it, and end with **CHECKPOINT_COMPLETE**. Questions that do not block the next round go in the assessment as non-blocking instead.
+
+Do not output **PASS** or **NEEDS_WORK** — this checkpoint does not judge whether the PR is ready.

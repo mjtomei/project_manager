@@ -1,0 +1,21 @@
+--- current/impl-github-spec_prompt_mode-after_checkpoint.txt
++++ proposed/impl-github-spec_prompt_mode-after_checkpoint.txt
+@@ -19,6 +19,18 @@
+ Before proceeding, check the spec's Ambiguities section for any items marked **[UNRESOLVED]** (the session that generated it may have exited before resolving them). Resolve any you can confidently handle based on the codebase and document them in the spec. Re-save to `pm/specs/«PR_ID»/impl.md`. If any remain genuinely unresolvable, present them to the user and wait for their response before proceeding. Also check whether the spec is still consistent with the current code and PR notes — the code or notes may have changed since the spec was generated. If you find requirements that no longer match the implementation, or PR notes that contradict or extend the spec, update the spec in `pm/specs/«PR_ID»/impl.md`.
+ 
+ «IMPL_SPEC_TEXT»
++
++## Architecture/Spec Checkpoint «CHECKPOINT_ID»
++
++A whole-PR architecture and specification checkpoint completed «COMPLETED_AT» on HEAD «REVIEWED_HEAD_SHORT» (outcomes: «OUTCOMES»; owner question: «HUMAN_QUESTION»). Read the full assessment at `pm/specs/«PR_ID»/checkpoints/«CHECKPOINT_ID».md`. Its summary and requested changes:
++
++«ASSESSMENT_DIGEST»
++
++Use it as evidence for this session, not as orders:
++- It does not change what you were returned here to do, and everything you change still goes through review and QA.
++- Make its current-PR corrections that are not in the code yet (compare `git log «REVIEWED_HEAD_SHORT»..HEAD`) and that you agree with; record any you decline with `pm pr note add «PR_ID» '<why>'`.
++- You may apply its spec clarifications (no requirement change) to `pm/specs/«PR_ID»/impl.md`, citing «CHECKPOINT_ID». Proposed requirement changes wait for the owner: do not apply them or judge this PR against them.
++- Follow-ups it lists are filed, not started; they do not remove anything from this PR's scope.
+ 
+ ## PR Notes — Handoff Channel
+ 

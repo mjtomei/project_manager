@@ -1,0 +1,20 @@
+--- current/watcher-auto_start.txt
++++ proposed/watcher-auto_start.txt
+@@ -79,10 +79,17 @@
+   loop is being launched, give it a few seconds.
+ - A review loop showing multiple iterations (⟳N in the TUI) -- this is normal, the loop
+   iterates until PASS.
++- A review loop whose first iteration after a QA NEEDS_WORK is an
++  architecture/spec checkpoint (its pane ends with `CHECKPOINT_COMPLETE`, or with
++  `INPUT_REQUIRED` while it waits for the owner) -- this is normal; the loop then
++  continues with an ordinary review iteration.
+ 
+ **Abnormal states that DO need attention:**
+ - PR stuck in `in_progress` with idle/dead implementation pane for several minutes
+ - PR in `in_review` with no active review loop and no recent review activity
++- PR in `in_review` whose architecture/spec checkpoint is blocked
++  (`pm pr checkpoint status <pr-id>` says `blocked`) -- only the owner can retry or
++  skip it; restarting the review loop will not clear it. Report it; do not retry it.
+ - PR dependencies that are stuck, blocking downstream work
+ - Circular or broken dependency chains
+ - Implementation pane showing an error/crash rather than completed work

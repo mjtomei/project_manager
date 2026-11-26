@@ -1,0 +1,19 @@
+--- current/watcher-bug_fix_impl.txt
++++ proposed/watcher-bug_fix_impl.txt
+@@ -75,6 +75,16 @@
+   policy as the auto-start watcher.
+ - `paused: spec_pending` → spec needs approval. Note in the log; emit
+   INPUT_REQUIRED at end of tick.
++- `running: checkpoint (ckpt-<n>)` or `checkpoint: complete (ckpt-<n>),
++  continuing review (iteration N)` → an architecture/spec checkpoint is
++  running or just finished before the next review iteration. Progress; no
++  action needed this tick.
++- `paused: input_required (checkpoint)` → the checkpoint pane is waiting for
++  the owner. Note in the log; do **not** escalate via watcher INPUT_REQUIRED
++  (the pane already surfaced it).
++- `paused: checkpoint_blocked (ckpt-<n>)` → the checkpoint used up its
++  attempts and needs the owner (`pm pr checkpoint status <pr-id>` shows why).
++  Note in the log; emit INPUT_REQUIRED at end of tick.
+ - `ready_to_merge` or `ready_to_merge (skip_qa)` → **auto-merge now**:
+   ```
+   pm pr merge <pr-id>

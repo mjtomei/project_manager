@@ -1,0 +1,563 @@
+You are running an architecture and specification checkpoint for PR pr-2d5f712: "Sign-off step — dedicated window + lifecycle status + comprehensive verdict router"
+
+This session is managed by `pm`. Run `pm help` to see available commands.
+
+## Task
+
+Step back over the whole PR before its next review iteration. Repeated review
+and QA rounds can fix real problems one at a time while hiding a shared
+cause, a design that is getting harder to keep correct, or a specification
+that asks for the wrong thing. Look at the PR as a whole — its goal, its
+complete diff, its spec and everything the review and QA rounds found — and
+write a short, evidence-linked assessment that helps the next round. You do
+not change code in this session.
+
+A justified "keep the current approach" is a complete and valid outcome.
+There is no quota of changes, refactors or proposals to produce, and many
+checkpoints should recommend no redesign.
+
+This checkpoint does not judge whether the PR is ready, and it does not
+replace review, QA or sign-off. The problems QA found still have to be fixed,
+those fixes still need a review iteration that ends NEEDS_WORK and another
+review after it, and QA still has to pass afterwards.
+
+## Why this checkpoint is running
+
+This PR has 2 completed QA runs that ended NEEDS_WORK since the PR started (the project setting `checkpoint-after-qa-failures` is 2, the default). Only whole QA runs that finished with an overall NEEDS_WORK verdict count; individual scenario results, review iterations, infrastructure retries, stopped or incomplete runs and INPUT_REQUIRED waits do not. A round whose fixes were useful still counts — the point is to check whether the rounds share a cause, not to judge them.
+
+## Original goal
+
+Sign-off is its own first-class STEP in the PR flow — a distinct lifecycle stage between qa and merge with its own window, not logic embedded in the QA loop. It reviews ALL scenarios and ALL steps comprehensively and aggregates evidence across every stage, then routes the PR's next hop.
+
+NEW LIFECYCLE STATUS: add `sign_off` to the status model. Today the enum is {pending, in_progress, in_review, qa, merged, closed} (pm_core/cli/pr.py:169 valid_statuses, :314 --status Choice). Extend it across: store validation, the --status choices, qa_status color map, the tech tree rendering, and the transition points (qa-finalize -> sign_off; sign_off -> back to in_progress/in_review/qa on a bounce). On a verified PASS the PR STAYS in sign_off and the step reports a ready_to_merge recommendation — the actual transition to `merged` is performed by the merge path / plan watcher, NOT by the sign-off step.
+
+DEDICATED WINDOW: launch a sign-off window like the review/qa windows (pane registry, role-based dedup, window-switch via the now-fixed switch path). A Claude pane drives the comprehensive review; the human-facing behavior report / captures (pr-8e693f6) is the surface shown/linked from this window. Approve/reject + discussion happen here.
+
+COMPREHENSIVE REVIEW: walk EVERY scenario and EVERY step from the QA run — not a spot check. This is why it is a separate step with its own window rather than a quick gate.
+
+CROSS-STAGE EVIDENCE AGGREGATION: read the WHOLE per-PR captures dir, not just final-QA captures. Implementation also generates captures — bug-fix PRs follow reproduce->fix->verify and write repro/verify evidence to $(pm qa captures-path <pr-id>)/impl/ (the "primary evidence" per bug_fix_prompts.py), and QA scenarios write under scenarios/<n>/. Also factor in the harness-run regression result (Phase 10). Sign-off includes impl + qa (+ review) so a bug-fix's repro and post-fix verification are part of the record.
+
+VERDICT ROUTER (the decision logic): runs over every scenario's verdict + reason, the aggregated captures/evidence, the diff vs master, and the PR's scope. Two evaluations: (1) does the captured behavior support the diff's claims (BDD); (2) meta-QA / anti-shortcut — was the QA itself rigorous. Builds on the scenario quality supervisor (pr-98f670e) for per-scenario depth; sign-off is the PR-level pass. Then route:
+- PASS (verified) -> ready_to_merge RECOMMENDATION; sign-off never merges (the plan watcher decides merge vs hold).
+- PASS (unverified, e.g. verifier-cwd) -> harness problem -> re-qa; do NOT bounce to impl.
+- NEEDS_WORK (scenario fixed it itself) -> code changed -> back through review AND qa; validate the fix is real.
+- INPUT_REQUIRED -> classify: misframed scenario -> note -> re-qa; real gap -> note -> impl; assumed-missing feature -> file new PR + depends_on or expand scope; nice-to-have -> defer to new PR or include if trivial; impossible/out-of-scope -> note the limitation.
+
+ROUTER-ONLY: never edits code. CONSERVATIVE BIAS: on genuine ambiguity, raise INPUT_REQUIRED rather than recommend merge. AUDIT TRAIL: record every classification + chosen hop as a pm pr note.
+
+VERDICT->ACTION ONLY UNDER AUTO-SEQUENCE, WITH ADOPTION: verdict-driven actions (ALL hops, not just merge) run only via act_on_signoff_verdict, called solely from the auto-sequence sign_off branch — a hand-triggered pm pr signoff never acts on its own. Record the verdict on the PR as pr['signoff'] = {verdict, sha (branch HEAD it was computed against), ts, origin: 'manual'|'auto-sequence'}. Auto-sequence ADOPTS a recorded verdict when fresh (recorded sha == current branch HEAD) instead of relaunching; if stale (sha differs) or absent, it relaunches. So a manual signoff's recorded verdict can be adopted by a later auto-sequence run (no wasted re-run), while manual-alone still never acts. Keep the verdict DECISION separable from the SIDE-EFFECT (transition + relaunch) so the invariant holds structurally.
+
+VISIBILITY: (a) a running sign-off shows a TUI ANIMATION while the router is in progress (window open, no verdict yet), reusing the existing review/qa/auto-start spinner mechanism (pr_view.py); (b) each sign-off verdict gets its own ICON (ready_to_merge / SIGNOFF_REQA / SIGNOFF_REVIEW / SIGNOFF_IMPL / SIGNOFF_BLOCKED) plus an icon for the sign_off status, in the qa_status status/icon map and the tech tree; (c) pm pr list shows the sign_off status icon and the latest sign-off verdict icon, consistent with the TUI.
+
+NO AUTONOMY FLAG ON THIS STEP: sign-off always recommends (ready_to_merge) and auto-sequence always gates at merge; the autonomous-vs-gated merge decision lives in the plan watcher (pr-ff9b728) per its per-plan config. NO deterministic capture gate (removed — file presence != provenance); the router reviews a bug PR's repro/verify evidence as part of its general per-step judgment, and #226 still renders the captures.
+
+SUPERSEDES the existing taste-check / gated-merge handling — improvement watcher gated-at-QA-PASS, pr-b77702b's auto_merge gating, and any ad-hoc sign-off/approve code. That logic moves to the plan watcher + this step; old paths removed (cleanup in pr-ff9b728).
+
+Buildable now; soft-aligns with pr-b59f0c7 (reason strings) and pr-06a96fa (evidence model). Loop-guard + auto-run + the plan watcher are pr-ff9b728; report/dashboard are pr-8e693f6.
+
+Part of plan "Automated regression and bug fix loop" (plan-regression); plan file: `pm/plans/plan-regression.md`.
+
+## PR Notes
+- Sign-off impl landed (1b9c11ef). Design decisions for QA/review: (1) sign_off is the universal post-QA router but only entered after a QA PASS+finalize (qa-finalize->sign_off); QA NEEDS_WORK/INPUT_REQUIRED still bounce at the QA level as before. The router can DOWNGRADE a QA PASS via its own verdict (e.g. a scenario silently committed a fix -> SIGNOFF_REVIEW). (2) The Claude pane emits ONE routing verdict (SIGNOFF_MERGE/REQA/REVIEW/IMPL/BLOCKED) + records pm pr notes; pm polls the transcript (like qa-finalize) and executes the hop via signoff.act_on_signoff_verdict. Router never edits/merges. (3) Gated vs autonomous = project.sign_off_autonomous, DEFAULT gated (conservative) -> a verified PASS is HELD, not merged, until a human merges. NOTE: this means autonomous bug-fix loops stop auto-merging unless sign_off_autonomous=true is set. (4) DEFERRED by design: the TUI auto-merge path in qa_loop_ui._on_qa_complete is UNCHANGED (pr-ff9b728 owns redirect/cleanup of old gates); the rich report/dashboard pane is pr-8e693f6 (here the left pane is a plain evidence-summary shell). Primary transition wiring is the auto-sequence CLI path + pm pr signoff command. (5) fake-claude session type "signoff" added so QA/regression can drive it (default verdict SIGNOFF_MERGE). (2026-05-25T16:53:58Z)
+- ACCEPTANCE / shepherding requirement (was not in the description): the sign-off step must be aware of the PURPOSE and ACCEPTANCE MEASURES of EVERY step in a PR's lifecycle (impl, review, qa) and check each one INDIVIDUALLY — confirm that step's own success conditions were actually met — in addition to the generic 'does the captured behavior prove the claim / no shortcuts' checks. SPECIFICALLY for bug PRs: confirm BOTH a pre-fix capture (bug reproduced on pre-fix code) AND a post-fix capture (bug gone on the fixed code) exist; absence of either is a fail/bounce (the reproduce->fix->verify step's acceptance was not met). Those captures live under $(pm qa captures-path <pr-id>)/impl/ (pre-fix/ + post-fix). They must also be surfaced in the HTML report (pr-8e693f6 / #226). (2026-05-25T16:59:06Z)
+- Design principle — sign-off is the rollout mechanism for PROCESS / ACCEPTANCE-CRITERIA updates. It checks each step against the CURRENT standard, so it must be RE-RUNNABLE on existing and already-MERGED PRs. When a standard changes (e.g. the new pre/post-fix-capture requirement), re-running sign-off on an old PR should detect the gap, add a note, and bounce it through the relevant steps under updated prompting to bring it into compliance — never manual backfill. Implications for the lifecycle/transitions you are building: sign_off must be enterable FROM a merged PR, and a bounce must be able to re-open already-merged work (to regenerate now-missing evidence by re-running repro/verify against the merged fix). Trigger is single-PR mode (pr-ff9b728: pm pr signoff <id>); the plan watcher can batch it across a plan. Net: updating a step/sign-off PROMPT is how the acceptance bar is raised, and re-running sign-off propagates it. (2026-05-25T17:01:35Z)
+- CORRECTION — supersedes note-6f7abcd: DISREGARD the requirement that sign-off be re-runnable on already-merged PRs / that a bounce re-open merged work / that sign_off be enterable from a merged PR. That is FUTURE work, now tracked as its own PR (pr-8015c1d, deferred). For THIS PR, the process-update flow does NOT re-open merged PRs — instead a NEW PR is created (a single new PR for a one-off gap, or a plan respin = a set of new PRs for a broad update), driven through the normal forward flow under updated prompting. So pr-2d5f712 only needs sign_off in the normal forward lifecycle (qa -> sign_off -> merge, or bounce within a not-yet-merged PR). The pre/post-fix-capture acceptance check (note-0357619) still stands for bug PRs going through sign-off. (2026-05-25T17:09:04Z)
+- Follow-ups landed (cd323a8f): (R7) per-step acceptance criteria — prompt now states purpose+criteria for impl/review/qa and routes on the first step that falls short. (R8) bug-PR capture gate — signoff.bug_fix_capture_status reads $CAP/impl/{pre-fix,post-fix}; prompt injects present/MISSING + mandatory route-to-IMPL; act_on_signoff_verdict has a DETERMINISTIC safety net: a bug PR missing either capture has SIGNOFF_MERGE overridden to an impl bounce (can never merge). CORRECTION: re-runnable-on-merged / re-open-merged (earlier note-6f7abcd) was WITHDRAWN by orchestrator and deferred to pr-8015c1d; pm pr signoff still rejects merged PRs (qa/sign_off entry only). HTML-report surfacing of captures = pr-8e693f6 (cross-PR note added there). (2026-05-25T17:13:41Z)
+- Routing refinements from review (please incorporate):
+1) CAPTURE GATE is presence-only, NOT verification. bug_fix_capture_status just checks impl/pre-fix and impl/post-fix each hold >=1 file. File presence does not prove the pre-fix capture was taken against pre-fix code (provenance) — same limitation as the closed pr-eb450a0. It is a deterministic FLOOR (no captureless bug auto-merges), and genuineness is judged by the LLM router + eventually the harness-run regression-as-repro (Phase 10, provenance-bound). Do NOT label it 'verified' anywhere in the prompt/report — say 'captures present'. [The user may decide to DROP this deterministic gate entirely; hold for that decision before hardening it.]
+2) AUTONOMY is project-level today (is_signoff_autonomous reads project.sign_off_autonomous). The plan watcher (pr-ff9b728) needs PER-PLAN gated/autonomous (e.g. bugs autonomous, ux gated). Either thread the plan through is_signoff_autonomous now or leave a clean seam to generalize it to per-plan when ff9b728 lands; note the gap in the spec.
+3) INVARIANT — verdict -> action ONLY under auto-sequence, for ALL hops (transitions + bounces, not just merge). This holds today (act_on_signoff_verdict is called only from the auto-sequence sign_off branch; manual pm pr signoff never acts). Harden it structurally: DECOUPLE the decision (compute the hop / record the verdict as a recommendation, e.g. a note) from the SIDE-EFFECT (status transition + relaunch). Outside auto-sequence, sign-off must be recommendation-only with NO state change. act_on_signoff_verdict should not be able to mutate state from any non-auto-sequence path. (2026-05-25T17:56:51Z)
+- DECISION (supersedes parts of note-1a982f3):
+A) REMOVE autonomy from this PR entirely. Auto-sequence ALWAYS gates at merge: SIGNOFF_MERGE is ALWAYS a recommendation (report ready_to_merge / leave the PR in sign_off; never merge here). Delete is_signoff_autonomous + the project.sign_off_autonomous flag and the autonomous/held branching; act_on_signoff_verdict drops its 'autonomous' param. The decision to actually auto-merge vs hold for a human belongs to the plan auto-start watcher (pr-ff9b728) per its per-plan config. This makes refinement #2 (per-plan autonomy seam) MOOT — just remove autonomy here.
+B) REMOVE the capture gate entirely (reduce complexity). Delete bug_fix_capture_status, _dir_has_content (if now unused), the bug_captures_ok param + the deterministic SIGNOFF_MERGE->IMPL override in act_on_signoff_verdict, and the prompt's injected PRE-FIX/POST-FIX present/MISSING status + mandatory-route rule. The router's general per-step review still considers repro/verify evidence for a bug PR as part of its judgment (no hardcoded gate); #226 still RENDERS pre/post-fix captures in the HTML (display, keep).
+C) KEEP refinement #3 (decouple the verdict decision from the status side-effect; verdict->action only under auto-sequence) — simpler now without the autonomous branch.
+Net: act_on_signoff_verdict(verdict) -> hop in {ready_to_merge, qa, review, impl, blocked}; no autonomous, no capture params; SIGNOFF_MERGE -> ready_to_merge always. (2026-05-25T18:03:47Z)
+- Routing refinements landed (80a23e6b, from note-1a982f3): (2) PER-PLAN AUTONOMY SEAM — is_signoff_autonomous(data, pr=None) now checks project.plan_sign_off_autonomous[<plan>] first, falls back to project.sign_off_autonomous. Map is empty today; pr-ff9b728 populates it (bugs autonomous / ux gated). All call sites pass pr_entry. (3) DECISION/SIDE-EFFECT DECOUPLE — act_on_signoff_verdict REMOVED; split into decide_signoff_hop() (pure, no state change, safe anywhere) + apply_signoff_hop() (the sign_off->qa/in_review/in_progress transition, called ONLY from the auto-sequence sign_off branch). Manual pm pr signoff decides/recommends but never mutates → invariant: a verdict mutates state (ALL hops, not just merge) only under auto-sequence. (1) CAPTURE GATE = presence-only floor, NOT verification/provenance; on HOLD per orchestrator (user may drop it) — no hardening done; gate language says "captures present"/"MISSING", never "verified". Merged origin/master (unioned orchestrator notes). (2026-05-25T18:03:49Z)
+- Scope additions for THIS PR (#225), per the user:
+
+1) ADOPTION + explicit verdict record. When the router emits a verdict, record it durably on the PR, e.g. pr['signoff'] = {verdict, sha (branch HEAD it was computed against), ts, origin: 'manual'|'auto-sequence'}. Auto-sequence should ADOPT an existing recorded verdict instead of relaunching IF it is fresh — recorded sha == current branch HEAD (no code change since). If stale (sha differs) or absent, relaunch. INVARIANT preserved: act_on_signoff_verdict remains the ONLY actor and runs ONLY under auto-sequence, so a hand-triggered 'pm pr signoff' still never acts on its own — but its recorded verdict can be ADOPTED by a later auto-sequence run (no wasted re-run). This supersedes the earlier 'always relaunch / discard the manual verdict' behavior, and the explicit origin/sha record is also the legible marker for the auto-sequence-only invariant.
+
+2) TUI — running sign-off visibility. While the sign-off router is running (window open, no verdict yet) the PR shows a running ANIMATION in the TUI, hooking into the existing spinner/animation used for the review/qa/auto-start running states (see pr_view.py).
+
+3) VERDICT ICONS. Give each sign-off verdict its own icon — ready_to_merge / SIGNOFF_REQA / SIGNOFF_REVIEW / SIGNOFF_IMPL / SIGNOFF_BLOCKED — plus an icon for the sign_off status itself, in the status/icon map (qa_status) and the tech tree.
+
+4) pm pr list. The list command shows the sign_off status icon and the latest sign-off verdict icon, consistent with the TUI.
+
+All four are part of this PR. (2026-05-25T18:34:36Z)
+- Round landed (2cd5f4da) — note-942fa37 removals + note-511d725 additions: (A) AUTONOMY REMOVED: sign-off always gates; decide_signoff_hop(verdict) -> {ready_to_merge,qa,review,impl,blocked,unknown}; SIGNOFF_MERGE always = ready_to_merge recommendation (PR stays sign_off). Deleted is_signoff_autonomous + project.sign_off_autonomous + per-plan seam. Merge decision -> pr-ff9b728. (B) CAPTURE GATE REMOVED: deleted bug_fix_capture_status/_dir_has_content/override/prompt injection; router still reviews repro/verify evidence generally; #226 still renders captures. (C) KEPT decide/apply decouple. (1) ADOPTION: pr["signoff"]={verdict,sha,ts,origin}; hidden `pm pr signoff record <id> <V> --origin <o>` (agent self-records, origin threaded); auto-sequence adopts fresh record (sha==HEAD) else records transcript verdict (origin auto-sequence) then acts; only auto-sequence acts (invariant). (2/3/4) DISPLAY: tech-tree sign_off node spins while running / shows verdict icon once recorded; SIGNOFF_VERDICT_ICONS/STYLES single source in signoff.py (re-exported by tech_tree; colors also in qa_status._VERDICT_COLORS); pm pr list shows [sign_off <icon>]. Full suite 2755 pass (1 pre-existing unrelated hook failure). (2026-05-25T18:49:10Z)
+- review-loop i2: fixed sign_off running spinner never animating — three "active PR" gates (tech_tree._is_active_pr, review_loop_ui.ensure_animation_timer + poll-timer stop check) excluded sign_off, so refresh_active_nodes never repainted the node and the poll timer wouldn't start/stay alive for a sign_off-only active PR (defeated R12 §2). Added sign_off to all three. Also added the sign_off status icon to two display-only status maps that had been missed (graph.render_static_graph, cli __init__ status summary). Reconciled the impl spec: R4 executor section still described the removed act_on_signoff_verdict(autonomous,...) and R6 still echoed sign_off_autonomous/held — updated to the implemented decide_signoff_hop/apply_signoff_hop split + always-gates; fixed signoff-record command name (hyphen). (2026-05-25T19:08:56Z)
+- QA scenario 1 observation (not fixed): the sign-off evidence pane pipes its output through `less -R` (_evidence_pane_cmd in signoff.py); on a host without `less` installed the whole left pane renders blank (just a shell prompt) — the captures/qa_status/diff data sources themselves resolve fine. Consider falling back to a no-pager/cat path (e.g. `${PAGER:-less}` or `command -v less`) so the evidence is still visible where less is absent. less is standard so this is low-priority/environmental. (2026-05-25T22:31:10Z)
+- QA s1 refiner: tech-tree "active sorting" of sign_off is only at COMPONENT granularity. tree_layout._component_sort_key (line ~95) lists sign_off in has_active so the sign_off PR's component/plan sorts to the front; but the within-layer node sort _activity_sort_key (line ~343) does NOT list sign_off (falls to default priority 5, sorting AFTER pending=2). So a sign_off PR sharing a layer with a pending PR would NOT sort among active nodes. The reliable observable "active" signal for the spinner test is the animated ◐◓◑◒ spinner via _is_active_pr (tech_tree.py:1178, sign_off+workdir), not within-layer node order. Consider adding sign_off to _activity_sort_key.status_priority if true node-level active sorting is intended. (2026-05-25T22:59:28Z)
+- QA scenario 6 (sign_off sync) refined: the sign_off-preserve logic lives ONLY in sync_from_github (pr_sync.py:327-330 — OPEN + old_status in ("qa","sign_off") → continue/skip), reached via `pm pr sync-github` (NOT `pm pr sync`, which is git-merge-detection needing a workdir). Drive with out-of-process fake-github: `pm fake-github config set` seeds PRs (state OPEN|MERGED, numbers auto-start at 1); sync only needs gh_pr_number per PR (cwd=None, resolves by number, no workdir). Bootstrap fixture: pm init --backend github (gh import auto-skips when no gh), pm pr add, then edit pm/project.yaml to set status: sign_off + gh_pr_number to match fake. Session tag = git-root path hash, so fixture + sync must run from same TEST_DIR. THEN: OPEN→"No status changes."+still sign_off; MERGED→"Updated 1 PR(s)."/"Merged: <id>"+status merged+merged_at. (2026-05-25T23:00:36Z)
+- QA scenario 2 (sign-off) refiner finding: the evidence-pane "(no captures found)" fallback is effectively DEAD for the empty-captures degradation case. _evidence_pane_cmd runs CAP=$(pm qa captures-path <id>) then if [ -d "$CAP" ]; find ...; else echo "(no captures found)". But qa captures-path -> paths.captures_dir() mkdirs and returns the dir when missing, so CAP is always an existing dir and the find branch always runs; an empty captures dir lists only the bare dir path, never "(no captures found)". The "(no qa status)" fallback IS reachable (no qa_status.json -> QS empty). Worker: verify triple-4 graceful degradation via (a) pane does not crash/blank, (b) "(no qa status)" shows, (c) captures section shows no impl/scenarios entries; and consider fixing the captures branch (test for empty find output, or do not auto-create in captures-path) so "(no captures found)" is reachable. (2026-05-25T23:01:08Z)
+- QA scenario 2 (pm pr signoff) PASS after fixing two sign-off evidence-pane defects in signoff._evidence_pane_cmd (both verified on the real tmux surface; test_signoff.py 36/36 green): (1) evidence pane hard-depended on `less` (note-2eead0c) — `| less -R` rendered the whole left pane blank where less is absent (not installable in the QA container); now `| if command -v less >/dev/null 2>&1; then less -R; else cat; fi`. (2) `(no captures found)` fallback was unreachable (note-aaac6f0) — captures-path auto-creates the dir so an empty captures dir printed only the bare dir path; now lists with `-mindepth 1` gated on whether any entry exists, else echoes `(no captures found)` (empty pr-D pane now shows it; populated pr-A pane lists impl/+scenarios/ without the bare-dir noise). All 5 triples verified: auto-select+qa->sign_off transition w/ signed_off_at, 2-pane window (evidence LEFT via registry), switch-to-existing (no dup), --fresh kill+reopen (new @id), pr-D graceful degradation, and non-qa rejection on stderr+exit1 (pending/in_progress/in_review/already-merged) with no status/window change. NOTE for reviewers: pr.py:1256 (_launch_review_window diff pane) has the IDENTICAL `| less -R` dependency — out of scope here, filing/noting separately. (2026-05-25T23:13:26Z)
+- QA s1 (NEEDS_WORK, fixed db7e8e8d): tech-tree sign_off node did NOT reflect a recorded verdict on LIVE reload. pm pr signoff-record fires trigger_tui_refresh (TUI logs action: reload), but TechTree._signature() omitted the signoff verdict; recording leaves status=sign_off and does NOT bump updated_at, so the signature was unchanged -> _recompute skipped _rebuild -> PRNodes kept a stale self._pr without the signoff record -> node kept spinning, never showed the verdict icon. pm pr list (separate path) was correct, masking it. Fix: add (pr.get("signoff") or {}).get("verdict") to _signature() pr_sig, beside the other display-only markers spec_pending/agent_machine. Verified live on real surface: edit->sign_off spins (workdir,no verdict); signoff-record -> node transitions LIVE to the static verdict icon and stops spinning; distinct icons render together (⊘ BLOCKED / ↻ REQA / ⇤ IMPL). Also confirmed: ◆ glyph bold-blue(themed) on #000033 bg; ⇤ bold-yellow; persistence across fresh processes; invalid verdict -> stderr + exit 1 + no write. Suite green (273 tui/tree + 113 signoff/signature). (2026-05-25T23:13:30Z)
+- QA s5 (concurrent sign-off state) NEEDS_WORK→fixed (commit on branch). Triple 1 (two simultaneous `pm pr signoff` same PR) exposed TWO real races, both fixed: (1) _ensure_workdir (helpers.py) cloned into a FIXED .tmp-{pr_id} path with NO lock — two callers that both find the workdir missing collide, the winner shutil.move()s the dir out from under the loser → loser dies with an unhandled traceback (git checkout --orphan / git remote set-url exit 128, failing cmd varies by interleaving). Fixed: per-PR exclusive flock .workdir-{pr_id}.lock + double-checked adoption of the winners persisted workdir; clone work extracted to _clone_workdir. (2) Fixing #1 UNMASKED the dup-window race the scenario flags: launch_signoff_window had no lock around find_window_by_name→new_window_get_pane, so once both survive provisioning both create a window → TWO signoff-<id> windows (reliably reproduced). Fixed: per-PR launch flock .signoff-launch-{session}-{pr_id}.lock so the loser takes the existing-window fast path and switches. Post-fix: 1 window, loser prints "Switched to existing", 0 tracebacks, yaml valid (8 workdir-present + 3 absent-workdir trials). NOTE: _launch_review_window (pr.py:1139) has the SAME unlocked find/create pattern (memory said pr-8409c64 added _review_window_launch_lock but it is NOT on this branch) — review window dup race likely still latent, out of scope here. Triple 2 (concurrent signoff-record diff verdicts) PASS: store.locked_update serializes → single well-formed {verdict,sha,ts,origin}, one verdict wins, single icon. Triple 3 (bounce guard) PASS: merge-first→auto-sequence prints "merged", SIGNOFF_IMPL never acted on; simultaneous/staggered (8 trials) always end single clean status=merged, never clobbered to bounce target, yaml always valid. Full suite 2764 pass (1 pre-existing unrelated hook-installer failure). (2026-05-25T23:24:43Z)
+- QA scenario 3 (auto-sequence sign_off routing): all 5 stories PASS on real local-backend surface. Found+fixed (commit c16f7015, now rebased): sign_off->impl bounce invoked pr_start(fresh=False); since the impl window normally still exists at sign_off time, the background fast path returned "already exists, no focus change" and NEVER relaunched the impl agent — the bounce did zero rework and the next tick re-advanced straight to in_review. Changed to fresh=True (mirrors sign_off->review): keeps in_progress workdir, kills stale window, fresh impl session. Verified live (@id @35->@59, new impl transcript). sign_off->review/qa/blocked/merge all correct as-is. PREREQ for driving QA via auto-sequence (omitted from this scenario GIVEN): must run `pm pr spec <pr> qa` after the PR is started — else the QA spec-gate (qa_loop.py:3187) halts the loop at INPUT_REQUIRED before any scenario runs. (2026-05-25T23:34:50Z)
+- QA NEEDS_WORK: sign_off becomes a recognized status with its own icon across every surface, and a: NEEDS_WORK; pm pr signoff transitions a QA PR, opens the two-pane window, dedups on re-run,: NEEDS_WORK; auto-sequence advances a QA PASS into sign_off and routes on the verdict, always: NEEDS_WORK; a manual verdict is adopted by a later auto-sequence run, manual never mutates: PASS; concurrent access to the shared sign-off state (project.yaml record, the window,: NEEDS_WORK; GitHub sync preserves a local sign_off refinement while still detecting a real: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-2d5f712-ad009382b7b0e6d6) (2026-05-25T23:42:58Z)
+- review-loop i1: fixed tree_layout._activity_sort_key omitting sign_off (QA refiner had flagged it) — within-layer node sort gave sign_off default priority 5, so a sign_off PR sorted AFTER a pending peer (priority 2), inconsistent with _component_sort_key + spec R1 "sorts as active". Now priority 1 (same as in_review/qa). Added test_sign_off_sorts_as_active + extended test_status_priority_order. Reviewed rest of PR — solid: decide/apply decouple, adoption/stale-relaunch, retire-window bounce guard, display gates all correct and well-tested (174 layout/tree/signoff/auto-seq tests pass). Two out-of-scope items remain noted only (not fixed here): _launch_review_window (pr.py:1256) has the same | less -R dependency AND the unlocked find/create window race that signoff now guards against. (2026-05-26T00:23:56Z)
+- review-loop c4e0 i2: PR is solid (174 targeted tests pass; sign_off across all surfaces, decide/apply decouple + auto-sequence-only invariant, adoption/stale, concurrency locks, display gates all correct). Converted the two prior out-of-scope review-window notes into tracked bug PRs: pr-3f85ad7 (_launch_review_window unlocked find/create dup-window race — same race signoff fixed with a per-PR flock) and pr-71e9ec7 (review diff pane | less -R has no fallback, blank pane where less absent — same fix signoff applied with command -v less). No in-scope changes needed. (2026-05-26T00:28:15Z)
+- QA scenario-8 (verdict-router fan-out) refiner notes — verified surface mechanics: (1) command is `pm pr auto-sequence <id>` (hyphen). (2) The fake-claude does NOT run `pm pr signoff-record`; with fake, a signoff verdict lives ONLY in the transcript, so auto-sequence reaches it via the transcript-read path (pr.py:3117-3125), NOT the fresh-record adoption path. (3) Drive entirely via auto-sequence: from sign_off with no record/window, tick #1 relaunches the router itself at the correct path `<TEST_DIR>/pm/transcripts/auto-sequence/<id>/signoff-<id>.jsonl` and prints "advanced: sign_off_relaunched"; the fake writes the scripted SIGNOFF_* there; tick #2 reads + routes. (4) Exact echoes: IMPL->"sign_off: returning to impl" (status->in_progress, pr_start fresh=True), REVIEW->"sign_off: returning to review (iteration N)" (N=latest review iter+1, =1 for fresh; status->in_review), REQA->"sign_off: re-qa" (status->qa), BLOCKED->"paused: sign_off_blocked" (stays sign_off), no-verdict+window->"running: sign_off", stale/no-window->"advanced: sign_off_relaunched". (5) Bounce hops (qa/review/impl) call _retire_signoff_window (kills signoff-<id> window + unlinks the signoff transcript) and apply_signoff_hop pops pr["signoff"]; BLOCKED/MERGE do NOT retire (window persists). (6) Stale path: record carries sha; auto-sequence compares to head_sha(workdir); to make stale, after a recorded verdict commit into the workdir (git commit --allow-empty) so HEAD moves. (7) Setup: local backend; bootstrap PR status->sign_off via project.yaml fixture edit (allowed); workdir is auto-provisioned by launch_signoff_window/_ensure_workdir on first tick (real git worktree, commit-able). fake config: `pm fake-claude config set '{"signoff":{"verdicts":["SIGNOFF_IMPL"]}}'`; run triples sequentially, reconfiguring fake per verdict (config is per-session-type, not per-PR). For no-verdict triple use a long delay entry so transcript stays verdict-free while window is open. (2026-05-26T00:47:27Z)
+- QA scenario-7 (sign_off ready_to_merge gate) refiner findings: (1) auto-sequence qa->sign_off gate only reads ~/.pm/workdirs/qa/<id>-*/qa_status.json overall==PASS (latest_qa_status_path, tag-independent), so the QA-passed precondition is bootstrappable; full upstream review+QA loop is out of scope here. (2) FAKE-claude signoff pane emits SIGNOFF_MERGE into the transcript but does NOT run the prompt step `pm pr signoff-record` (it is not a real agent) -> pr["signoff"] stays empty after launch, so the TUI node shows the SPINNER until the NEXT auto-sequence tick adopts the transcript verdict and records it (origin=auto-sequence, sha=HEAD). This makes the spinner(triple2)->ready_to_merge(triple3) ordering natural. (3) captures_dir is session-tag scoped by GIT ROOT; the evidence pane runs `pm qa captures-path` from the PR WORKDIR (a worktree = different git root/tag than the main test repo) so seed impl/ + scenarios/ captures from inside the workdir, not the main repo. (4) impl/ captures are produced only by the bug-fix impl phase (bug_fix_prompts $CAP/impl/pre-fix,post-fix), never by the QA loop, so they must be seeded. (5) static graph `pm pr graph` and `pm status` show only the sign_off STATUS icon (sunicode), NOT the verdict icon; verdict icon (SIGNOFF_MERGE=triangle) appears only in `pm pr list` [sign_off <icon>] and the TUI tech-tree node. (6) evidence pane pipes through `less -R` if present. (2026-05-26T00:51:05Z)
+- QA scenario 8 (verdict-router fan-out) PASS, all 6 triples on real local-backend surface, after fixing ONE in-scope bug. Bug: signoff.launch_signoff_window split the Claude ROUTER pane with split_pane_at(evidence_pane,"h",...) WITHOUT cwd. The split runs immediately after new_window_get_pane created the evidence pane with -c <workdir>, before tmux pane_current_path settles, so it races and inherits the session default dir (the umbrella TEST_DIR project) — the router pane (and real Claude) ran in the WRONG repo, and the transcript symlink (computed from the workdir cwd) was left broken so verdict detection only worked via the _read_transcript_text session-id glob band-aid (pr-488b748). Fixed by passing cwd=workdir to split_pane_at (signoff.py ~337); now router pane + symlink both land on the workdir (pre/post-fix captures under scenarios/8). 36/36 test_signoff green. Triples verified: SIGNOFF_IMPL->"sign_off: returning to impl" (in_progress, fresh impl relaunch "Launched Claude", signoff window+transcript retired, record consumed, ticks 3/4 "running: implementation" no-replay); SIGNOFF_REVIEW->"sign_off: returning to review (iteration 1)" (in_review, review-i1 transcript); SIGNOFF_REQA->"sign_off: re-qa" (qa, qa window); SIGNOFF_BLOCKED->"paused: sign_off_blocked" (stays sign_off + window/transcript persist + record written); no-verdict(delayed)->"running: sign_off" (window intact); stale-record (committed --allow-empty in workdir to move HEAD)->"advanced: sign_off_relaunched" (stale BLOCKED NOT replayed, window @id changed, record cleared, fresh run re-records vs new HEAD). NOTE: the analogous review-window split (pr.py:1281) has the IDENTICAL no-cwd race — out of scope here, but worth the same fix; already-tracked review-window bug PRs are pr-3f85ad7/pr-71e9ec7. (2026-05-26T01:02:33Z)
+- QA scenario-7 (sign_off ready_to_merge gate) NEEDS_WORK->fixed: the sign-off ROUTER (Claude) pane started in the wrong cwd. launch_signoff_window created the evidence pane in the workdir (new_window_get_pane -c workdir) but split the router pane with split_pane_at(...) WITHOUT cwd; tmux starts a -c-less split in the server start dir (the main repo on the base branch), not the source pane cwd. Observed: router pane cwd = main repo (master), so its prompt-instructed `git diff {base}...HEAD` returned EMPTY and `pm qa captures-path` resolved to the wrong git-root/tag -> router would review nothing. Fix: pass cwd=workdir to split_pane_at in signoff.py (now both panes in workdir). Side benefit: the fake/real transcript now lands at the symlink target dir (fake cwd==workdir==_claude_project_dir(cwd) used for the symlink), so the dangling-symlink + verdict_transcript glob-fallback (pr-488b748 band-aid) is no longer exercised for the normal path. Verified real tmux surface: pre-fix router cwd=mainrepo/empty-diff -> post-fix router cwd=workdir/diff shows change; full flow advanced:sign_off -> ready_to_merge unchanged. Added regression test_signoff.py::TestWindowLaunchWorkdir (fails pre-fix). NOTE: _launch_review_window (pr.py:1281) review-loop split has the same -c-less split pattern (pr-3f85ad7/companion cds explicitly; review claude pane may have the same latent wrong-cwd) - out of scope here. (2026-05-26T01:03:52Z)
+- QA s9 (manual sign-off) PASS after fixing evidence-pane graceful-degradation (commit 5686bc21->rebased). BUG: _evidence_pane_cmd chained sections with && and did CAP="$(pm qa captures-path <id> 2>/dev/null)"; from the signoff workdir clone (which lacks pm/project.yaml when project state was never committed) captures-path exits 1 -> the && chain aborts -> pane blanks after the captures header (no "(no captures found)"/qa-status/diff). Fixed: || true on CAP + both git diff calls so each section degrades independently (test_signoff 36/36). TESTABILITY GOTCHA (not a product bug, NOT fixed): the MANUAL `pm pr signoff` claude pane self-EXITS under fake-claude `{"_all":{}}` — manual path passes transcript=None so build_claude_shell_cmd generates NO session_id, and run_fake_claude only _hold_open()s `if no_verdict or session_id` (fake_claude.py:550); _all:{} resolves signoff (a verdict type) to default SIGNOFF_MERGE, so the fake emits the verdict and exits, collapsing the 2-pane window to 1. Real claude (interactive) persists, so production is fine. To observe the live 2-pane window via the fake, use remain-on-exit (capture aid) OR give signoff an explicit empty-verdicts entry to force a true no-verdict mock that holds open. Verified window structure (2 panes evidence-LEFT %18 / claude-RIGHT %19, registry roles signoff-evidence/signoff-claude) this way. Also: triple 7 impl-relaunch + "sign_off: returning to impl" needs project state committed on master (pr_start gate) — scenario setup omits pm push/commit; adoption CORE (adopt fresh record, sign_off->in_progress, consume record, retire window, no relaunch) verified regardless. (2026-05-26T01:06:15Z)
+- QA scenario 10 (concurrency on shared sign-off resources) NEEDS_WORK->fixed (9dec639c). Triple 1 (concurrent provision+window-create) PASS as-is: exactly one signoff-<id> window, logs split Opened(winner)/Switched(loser) under the per-PR launch flock, both exit 0, no traceback, yaml valid, single workdir key, status sign_off. Triple 2 (concurrent signoff-record diff verdicts) PASS as-is: single well-formed {verdict,sha,ts,origin} under the project lock, one verdict wins (sha==HEAD, origin manual, ISO ts), single icon renders on pm pr list AND pm tui view tech-tree. Triple 3 (bounce routing vs out-of-band merge) found a REAL leak: when auto-sequence apply_signoff_hop won the lock first it bounced sign_off->qa and spawned pm pr qa-run-bg, then the concurrent pm pr edit --status merged (local equiv of a github sync) overwrote status to merged; apply_signoff_hop only guarded the STATUS transition, not the detached driver, so pr_qa_run_bg (no merged/closed guard) opened a qa-<id> window and ran a full QA planner loop against an already-merged PR (15/30 trials leaked). Status itself was ALWAYS preserved (merged, never clobbered to the qa bounce target). Fixed with layered out-of-band-merge guards: pr_qa_run_bg bails pre-run_qa_sync if merged/closed; run_qa_sync re-checks status after live-PR load, immediately before window creation, after window creation (tears the window down), and inside the planner poll loop (late-merge teardown). Post-fix 40/40 trials clean (18/40 hit the race-winning re-qa path; transient qa window always torn down, none left running). NUANCE for reviewers: this is a fundamental TOCTOU between a blind status write and the detached launch; a qa window can still appear transiently (~1-2s) before a guard tears it down, but a full QA loop never executes against the merged PR and the window is never LEFT running. The deeper fix (an out-of-band transition itself sweeping in-flight qa/review/signoff windows) is arguably pr-ff9b728 territory (redirect/cleanup of old gates). Full suite 2768 pass (1 pre-existing unrelated hook-installer failure). (2026-05-26T01:26:28Z)
+- QA NEEDS_WORK: Forward lifecycle into sign_off ends at a held merge recommendation, with the sign_off status and verdict shown consistently on every surface: NEEDS_WORK; The verdict router fans out every bounce/hold verdict, retires its window+transcript on a bounce so it never re-bounces in a loop, and relaunches a fresh run on a stale record: NEEDS_WORK; Manual sign-off recommends but never mutates, records verdicts safely, rejects bad input/wrong status, dedups its window, and a fresh manual verdict is later adopted by: NEEDS_WORK; Concurrent actors hitting the shared sign-off resources stay race-free — one window, one well-formed verdict record, and a guarded transition that never clobbers external state: NEEDS_WORK (workdir: /home/matt/.pm/workdirs/qa/pr-2d5f712-a953490cbd95dbd7) (2026-05-26T01:29:43Z)
+
+## Implementation Spec (`pm/specs/pr-2d5f712/impl.md`)
+
+Read the spec as evidence of what was intended, not as proof that every
+design choice in it is still right. Do not edit it in this session; record
+any problem with it in the assessment (see Steps). A clarification that changes no requirement, acceptance criterion, scope or user decision may be applied by the next review iteration; anything else needs the owner's approval.
+
+# Spec — pr-2d5f712: Sign-off step (dedicated window + lifecycle status + verdict router)
+
+## Scope boundary (what this PR does / does NOT do)
+
+This PR makes **sign-off a first-class lifecycle step** between `qa` and `merged`:
+a new `sign_off` status, a dedicated tmux window (Claude pane + evidence pane),
+a comprehensive-review prompt, a routing-verdict vocabulary, and the thin pm-side
+executor that performs the routed hop.
+
+**Explicitly deferred to other PRs (do NOT build here):**
+- The improvement-watcher / auto-run / loop-guard / plan auto-start watcher and the
+  *removal* of the old auto-merge / taste-check gates → **pr-ff9b728** ("the old paths
+  are removed (cleanup lives in pr-ff9b728)"). This PR *adds* the replacement path;
+  the old TUI auto-merge gates are left intact so existing QA flows keep working until
+  pr-ff9b728 redirects/removes them.
+- The human-facing behavior-report / dashboard surface shown in the window →
+  **pr-8e693f6**. Here the non-Claude pane is a plain evidence-summary shell pane.
+- Richer reason-strings (pr-b59f0c7) and the structured evidence model (pr-06a96fa)
+  are *soft* alignment only — build against today's verdict+capture model.
+
+## 1. Requirements (grounded in code)
+
+### R1 — New lifecycle status `sign_off`
+Today the enum is `{pending, in_progress, in_review, qa, merged, closed}`.
+Add `sign_off` (logically between `qa` and `merged`). Sites that must change:
+
+- `pm_core/pr_utils.py:5` `PRStatus` Literal and `:7` `VALID_PR_STATES` (canonical;
+  `store._validate_pr_statuses` and `is_valid_pr_status`/`normalize_pr_status` all key off this).
+- `pm_core/cli/pr.py:314` `--status` `click.Choice([...])` for `pr edit`.
+- `pm_core/cli/pr.py:169` hard-coded `valid_statuses` set in `_apply_pr_edit()` (NOT imported — must edit literally).
+- `pm_core/cli/helpers.py:262` `PR_STATUS_ICONS` (CLI rendering) — add `"sign_off"`.
+- `pm_core/cli/helpers.py:438` `_record_status_timestamp` — add a `signed_off_at` timestamp on entry to `sign_off`.
+- `pm_core/tui/tech_tree.py:27` `STATUS_ICONS`, `:79` `STATUS_STYLES`, `:90` `STATUS_BG`,
+  `:101` `STATUS_FILTER_CYCLE` — add `sign_off` to each.
+- `pm_core/tui/tree_layout.py:95` `has_active` set — add `"sign_off"` so a signing-off PR
+  sorts as active (it is a working step like `qa`).
+- `pm_core/pr_sync.py:193` merge-eligibility set and `:328` GitHub-sync "preserve qa"
+  branch — treat `sign_off` like `qa` (eligible for is_merged detection; preserved on
+  github OPEN sync as a local refinement).
+- Color/marker choice: icon `◆` / style `bold blue` / bg `on #000033` / CLI icon `✔️`
+  (distinct from `qa` magenta and `merged` green). Insert `sign_off` after `qa` in
+  `STATUS_FILTER_CYCLE`.
+
+### R2 — Dedicated sign-off window
+New module `pm_core/signoff.py` with `launch_signoff_window(data, pr_entry, *, fresh, background, transcript, session_name)` mirroring
+`pm_core/cli/pr.py:_launch_review_window` (1102–1326):
+- window name `signoff-<display_id>` (via `_pr_display_id`).
+- existing-window fast path (switch if not fresh; on fresh, capture `sessions_on_window`,
+  `home_window.park_if_on`, `kill_window`).
+- two panes: **evidence pane** (left) running an evidence-summary shell command, then
+  `split_pane_at(evidence_pane, "h", claude_cmd, background=True)` for the **Claude pane** (right).
+- register panes via `pane_registry.register_pane` with roles `signoff-evidence`,
+  `signoff-claude`; reset `user_modified`; `switch_sessions_to_window` for captured sessions;
+  `pane_layout.rebalance`.
+- container wrapping mirrors review (`wrap_claude_cmd`, `remove_container`, captures bind-mount
+  via `session_tag`); transcript symlink via `build_claude_shell_cmd(transcript=...)`.
+- model resolution via `resolve_model_and_provider("signoff", ...)` (falls back through
+  model_config defaults; add a `"signoff"` session_type — verify resolver tolerates unknown
+  types and defaults gracefully; if it requires registration, register `signoff`).
+- CLI entry `pm pr signoff [PR_ID] [--fresh] [--background] [--transcript ...]` in
+  `pm_core/cli/pr.py` registered on the `pr` group, calling `signoff.launch_signoff_window`.
+
+### R3 — Comprehensive review prompt
+`prompt_gen.generate_signoff_prompt(data, pr_id, *, session_name, transcript=...)`:
+- PR title/description/notes, plan context, the **full diff vs master** (backend-aware base,
+  same as review: `base_branch` local vs `origin/<base_branch>`).
+- **Every scenario + every step**: per-scenario verdict + reason from `qa_status.json`
+  (read via `qa_status` / the captures `scenarios/<n>/verdict.md`), the scenario titles/foci.
+- **Cross-stage evidence aggregation**: instruct the agent to read the WHOLE per-PR captures
+  dir — `$(pm qa captures-path <pr-id>)` → `impl/` (repro/verify, "primary evidence" for bug
+  fixes) AND `scenarios/<n>/`. Mention the harness-run regression provenance (Phase 10: fails
+  at pre-fix parent sha, passes at fix sha) as part of the record (provenance is from the
+  harness, not a session-written file).
+- **Two evaluations**: (1) BDD — does captured behavior support the diff's claims;
+  (2) meta-QA / anti-shortcut — was the QA itself rigorous (thin evidence, a scenario that
+  drove a mock instead of the real path, an obvious uncovered edge case). Note this builds on
+  the per-scenario quality supervisor (pr-98f670e) and is the PR-level pass.
+- **Router-only contract**: never edit code; all fixes happen in impl/qa so they re-pass
+  review+qa. Conservative bias: on genuine ambiguity emit `SIGNOFF_BLOCKED`.
+- **Audit trail**: instruct the agent to record every classification + chosen hop via
+  `pm pr note add <pr-id> '...'` so an autonomous merge is inspectable.
+- **Emit exactly one routing verdict line** from the vocabulary in R4 (so pm can poll it,
+  same mechanic as qa-finalize's `FINALIZE_DONE`/`FINALIZE_BLOCKED`).
+
+### R4 — Verdict router (vocabulary + executor)
+Routing-verdict constants in `pm_core/signoff.py`:
+- `SIGNOFF_MERGE`   — verified PASS → merge (or gate).
+- `SIGNOFF_REQA`    — PASS unverified (harness problem, e.g. verifier-cwd) OR misframed
+                      scenario (INPUT_REQUIRED) → re-qa; do NOT bounce to impl.
+- `SIGNOFF_REVIEW`  — a code change happened during QA (scenario fixed it itself) → back
+                      through review AND qa.
+- `SIGNOFF_IMPL`    — real gap (INPUT_REQUIRED) → back to implementation.
+- `SIGNOFF_BLOCKED` — escalate/hold: genuine ambiguity, impossible/out-of-scope, or an
+                      assumed-missing feature for which the agent filed a blocking PR.
+`SIGNOFF_VERDICTS = (MERGE, REQA, REVIEW, IMPL, BLOCKED)`.
+
+The four INPUT_REQUIRED sub-cases from the description are handled in the PROMPT and collapse
+onto this vocabulary: misframed→REQA(+note); real gap→IMPL(+note); assumed-missing→agent files
+new PR + `depends_on` via `pm pr add` then BLOCKED (block) or REQA (scope expanded — agent's
+call); nice-to-have→agent files new PR then MERGE (defer) or IMPL (include if trivial);
+impossible/out-of-scope→note + MERGE or BLOCKED. `pm pr add` creates a *pending* PR (no Claude
+session) so the agent may run it; it must not run session-spawning commands.
+
+Executor (SUPERSEDED — see R5/R10/R11 for the implemented shape). The original
+single `act_on_signoff_verdict(..., autonomous, launch)` executor was **removed**
+when autonomy was dropped (R5) and replaced by a decision/side-effect split (R10
+§3): a pure `decide_signoff_hop(verdict) -> {ready_to_merge, qa, review, impl,
+blocked, unknown}` (no state change, safe anywhere) plus `apply_signoff_hop(root,
+pr_id, hop)` (the `sign_off → qa/in_review/in_progress` transition, auto-sequence
+only). The mapping each verdict drives is:
+- `SIGNOFF_MERGE` → `ready_to_merge` recommendation; PR stays `sign_off`, sign-off
+  never merges (the merge decision belongs to pr-ff9b728). No `autonomous` branch.
+- `SIGNOFF_REQA` → `sign_off → qa`, relaunch QA (`_launch_qa_detached`).
+- `SIGNOFF_REVIEW` → `sign_off → in_review`, relaunch a review-loop iteration.
+- `SIGNOFF_IMPL` → `sign_off → in_progress`, relaunch impl (`pr_start` background).
+- `SIGNOFF_BLOCKED` → stay in `sign_off`, echo "paused: sign_off_blocked".
+Status writes use `store.locked_update` + `_record_status_timestamp`, guarded on the
+current status being `sign_off` (mirrors existing transition helpers); a bounce hop
+also consumes the recorded verdict (`pr.pop("signoff")`) so a later re-entry can't
+re-adopt a spent verdict and loop. The wiring lives in the auto-sequence
+`sign_off` branch (R6), not in a standalone executor.
+
+### R5 — Autonomy: REMOVED (orchestrator note-942fa37)
+Autonomy was removed from this PR. Sign-off **always gates at merge**:
+`SIGNOFF_MERGE` is always a recommendation (`decide_signoff_hop` returns
+`"ready_to_merge"`; the PR stays in `sign_off`; sign-off never merges). The
+`is_signoff_autonomous` reader, the `project.sign_off_autonomous` flag, the
+per-plan seam, and the `autonomous`/`held` branching are all deleted. The
+actual auto-merge-vs-hold decision belongs to the plan auto-start watcher
+(pr-ff9b728) per its per-plan config.
+
+### R7 — Per-step acceptance criteria (orchestrator note-0357619)
+Sign-off must know the *purpose + acceptance criteria of EACH lifecycle step*
+(impl / review / qa) and check each individually — not just generic checks. The
+`generate_signoff_prompt` includes a "Per-step acceptance criteria" section that,
+for each step, states its purpose, its acceptance criteria, and the routing
+verdict a shortfall maps to (impl gap → `SIGNOFF_IMPL`; un-re-reviewed code →
+`SIGNOFF_REVIEW`; thin/misframed/unverified QA → `SIGNOFF_REQA`). The reviewer
+reports a per-step verdict and routes on the first step that fell short.
+
+### R8 — Bug-PR capture gate: REMOVED (orchestrator note-942fa37)
+The deterministic capture gate was removed to reduce complexity.
+`bug_fix_capture_status`, `_dir_has_content`, the `bug_captures_ok` param, the
+`SIGNOFF_MERGE → IMPL` override, and the prompt's PRE-FIX/POST-FIX
+present/MISSING injection + mandatory-route rule are all deleted. The router's
+general per-step review still reads `$CAP/impl/pre-fix/` and `$CAP/impl/post-fix/`
+and judges whether the repro/verify evidence genuinely demonstrates the fix (no
+hardcoded gate). The HTML report (#226 / pr-8e693f6) still RENDERS the pre/post-fix
+captures (display only); the cross-PR note on pr-8e693f6 covers that.
+
+### R9 — Re-runnable on merged: DEFERRED (orchestrator note, corrected)
+An earlier orchestrator note (note-6f7abcd) asked for sign-off to be re-runnable
+on already-merged PRs (re-open merged work to roll out process updates). This was
+**corrected/withdrawn** — that capability is deferred to **pr-8015c1d**. For this
+PR, sign-off only covers the normal forward lifecycle (qa → sign_off → merge, or
+a bounce within a not-yet-merged PR). Process updates are handled by creating NEW
+PRs, not by re-opening merged ones. `pm pr signoff` therefore rejects `merged`
+PRs (entry from `qa`/`sign_off` only). The deterministic pre/post-fix capture
+*gate* was removed (R8); the router's LLM-judged review of repro/verify evidence
+for a bug PR (note-0357619) still applies.
+
+### R10 — Routing refinements (orchestrator note-1a982f3, then note-942fa37)
+1. **Capture gate** was first clarified as presence-only and then **removed
+   entirely** (see R8) per note-942fa37.
+2. **Per-plan autonomy seam** — **removed** along with all autonomy (see R5).
+3. **Invariant: verdict → action ONLY under auto-sequence, for ALL hops** — KEPT.
+   The routing is split into a pure DECISION (`decide_signoff_hop`, no state
+   change, safe anywhere) and a SIDE-EFFECT (`apply_signoff_hop`, the
+   sign_off → qa/in_review/in_progress transition). Only the auto-sequence
+   sign_off branch calls `apply_signoff_hop`; manual `pm pr signoff`
+   decides/recommends but never mutates.
+
+### R11 — Verdict record + adoption (orchestrator note-511d725 §1)
+The router records its verdict durably on the PR as
+`pr["signoff"] = {verdict, sha, ts, origin}` (`sha` = the workdir HEAD it was
+computed against; `origin` ∈ {`manual`, `auto-sequence`}).
+- `signoff.record_signoff_verdict(root, pr_id, verdict, sha, origin)` writes it;
+  `fresh_recorded_verdict(pr, current_sha)` returns the verdict iff the record's
+  sha == current HEAD (fresh); `head_sha(workdir)` reads HEAD.
+- The router self-records via hidden `pm pr signoff-record <id> <VERDICT>
+  --origin <origin>` (a separate hyphenated command — `pm pr signoff record`
+  would be parsed by click as `signoff` with `pr_id="record"`; the prompt
+  instructs it; `origin` is threaded
+  manual/auto-sequence through `pr_signoff` → `launch_signoff_window` →
+  `generate_signoff_prompt`). Recording NEVER acts.
+- **Auto-sequence ADOPTS** a fresh recorded verdict (sha == HEAD) instead of
+  relaunching — picking up a hand-triggered run's verdict with no wasted re-run.
+  If no fresh record, it reads the running window's transcript; on a verdict it
+  records it (origin `auto-sequence`) then acts. Stale/absent → relaunch/running.
+- Invariant preserved: only the auto-sequence branch calls `apply_signoff_hop`,
+  so a manual run records but never acts; its verdict is adopted later.
+
+### R12 — Sign-off display (orchestrator note-511d725 §2–4)
+- **Running animation (§2):** a `sign_off` node with a workdir and no recorded
+  verdict shows the spinner (`SPINNER_FRAMES` / `_anim_frame`, the same mechanism
+  as review/qa), via a `sign_off` branch in `TechTreeNode.render`. Once a verdict
+  is recorded the spinner is replaced by the verdict icon.
+- **Verdict icons (§3):** `signoff.SIGNOFF_VERDICT_ICONS` / `SIGNOFF_VERDICT_STYLES`
+  (single source of truth, re-exported by `tech_tree`) give each verdict a distinct
+  marker; the `sign_off` status icon is `◆` (`STATUS_ICONS`). `qa_status._VERDICT_COLORS`
+  also carries the sign-off verdicts.
+- **`pm pr list` (§4):** `format_pr_line` appends the latest recorded verdict icon
+  inside the status bracket for a `sign_off` PR (`[sign_off ⇤]`), consistent with
+  the TUI.
+
+### R6 — Transition wiring (qa-finalize → sign_off; sign_off → next hop)
+Primary autonomous driver = the auto-sequence state machine (`pr_auto_sequence`,
+`pm_core/cli/pr.py:2761`):
+- `status == "qa"`, `overall == "PASS"` branch (`:2883`): instead of `echo "ready_to_merge"`,
+  transition `qa → sign_off`, launch the sign-off window detached (background, transcript under
+  the auto-seq dir for verdict polling), and echo `advanced: sign_off`.
+- New `status == "sign_off"` branch: read the sign-off verdict via a new
+  `_check_signoff_verdict(tdir, pr_id)` (mirrors `_check_review_verdict` — scan the auto-seq
+  transcript with `extract_verdict_from_transcript(..., SIGNOFF_VERDICTS)`):
+  - First ADOPT a fresh recorded verdict (R11: `fresh_recorded_verdict`, sha == HEAD).
+  - Else, if a record exists but is STALE (sha != HEAD), the prior run is an
+    outdated *completed* run — neither its record nor its single transcript
+    reflect the current code, so replaying either would recommend on unreviewed
+    changes. `_retire_signoff_window` it, clear the record, and relaunch a fresh
+    router against current HEAD (echo `advanced: sign_off_relaunched`). The
+    record is cleared so this doesn't re-fire every tick until the fresh router
+    self-records. (R11: "stale → relaunch.")
+  - Else (no record) read the current run's transcript and, on a verdict, record
+    it (`origin auto-sequence`) before acting.
+  - no verdict (no record, transcript empty) → relaunch window if its tmux window
+    is gone (echo `advanced: sign_off_relaunched`), else `running: sign_off`.
+  - `SIGNOFF_MERGE` → always a recommendation (autonomy removed, R5): echo
+    `ready_to_merge`; the PR stays in `sign_off`. Auto-sequence never merges
+    (documented "stop before merge" contract); the autonomous-merge-vs-hold decision
+    is deferred to pr-ff9b728's plan watcher.
+  - `SIGNOFF_REQA` → `sign_off → qa`, `_launch_qa_detached`, echo `sign_off: re-qa`.
+  - `SIGNOFF_REVIEW` → `sign_off → in_review`, launch fresh review-loop iteration, echo `sign_off: returning to review`.
+  - `SIGNOFF_IMPL` → `sign_off → in_progress`, relaunch impl, echo `sign_off: returning to impl`.
+  - `SIGNOFF_BLOCKED` → echo `paused: sign_off_blocked`.
+
+  Every **bounce** hop (qa / review / impl) also calls `_retire_signoff_window`
+  (kills the `signoff-<id>` window via `home_window.park_if_on` + `kill_window`
+  and unlinks the single `signoff-<id>.jsonl` transcript) *before* relaunching
+  the next step. Sign-off — unlike review's iteration-numbered transcripts —
+  reuses one transcript path, and the QA loop only sweeps `qa-*` windows, so a
+  surviving window would be hit by the existing-window fast path on re-entry and
+  `_check_signoff_verdict` would replay the *old* verdict, re-bouncing forever
+  (a re-qa never changes HEAD, so the consumed `pr["signoff"]` record can't guard
+  it). Retiring the window + transcript forces a genuine fresh router run on the
+  next `sign_off` entry. `ready_to_merge` / `blocked` keep the window (the PR
+  legitimately stays in `sign_off`).
+
+The TUI `_on_qa_complete` auto-merge path (`qa_loop_ui.py:494`) is **left unchanged** this PR
+(it is one of the "old paths" pr-ff9b728 redirects). Sign-off is reachable via `pm pr signoff`
+and the auto-sequence. This keeps the large existing QA-flow test/QA surface stable.
+
+## 2. Implicit Requirements
+- Adding `sign_off` to `VALID_PR_STATES` is mandatory or `store._validate_pr_statuses`
+  silently resets it to `pending` on every load.
+- `STATUS_ICONS`/`STATUS_STYLES`/`STATUS_BG` use `.get(status, default)`, so a missing key
+  won't crash — but the tree would render a generic marker; all three plus `STATUS_FILTER_CYCLE`
+  must include `sign_off` for correct rendering and the filter cycle to reach it.
+- The sign-off window requires a PR `workdir` (for the diff/captures + Claude cwd); reuse
+  `_ensure_workdir` like review does.
+- Verdict polling reuses `poll_for_verdict` + `extract_verdict_from_transcript`
+  (`pm_core/qa_loop.py`) and the transcript-symlink seam in `build_claude_shell_cmd`.
+- The evidence pane command must `shell_quote` all user-controlled values (PR title) — same
+  apostrophe hazard documented in `_launch_review_window`.
+- `pm pr add` for filing follow-up PRs must set `depends_on`; verify the CLI supports a
+  `--depends-on`/equivalent or that the agent edits it via `pm pr edit`.
+
+## 3. Ambiguities (resolved)
+- **A1 — Does sign-off route all QA outcomes or only PASS?** Resolved: only after a QA **PASS +
+  successful finalize** (the "qa-finalize → sign_off" transition). QA `NEEDS_WORK`/`INPUT_REQUIRED`
+  still bounce at the QA level as today (nothing to sign off on). The router's own NEEDS_WORK/
+  INPUT_REQUIRED outcomes are sign-off **downgrades** of a QA PASS based on comprehensive review
+  (e.g. a scenario silently committed a fix → REVIEW; meta-QA finds a real gap → IMPL). This
+  reconciles "qa-finalize → sign_off" with the router handling all three verdicts, and minimizes
+  behavioral risk.
+- **A2 — Agent vs pm executes the hop?** Resolved: agent emits one structured routing verdict +
+  records audit notes (router-only, never edits/merges); pm polls the verdict and executes the
+  hop (status transition / relaunch). Mirrors qa-finalize exactly → inspectable + unit-testable.
+  Note: sign-off never merges (R5) — `SIGNOFF_MERGE` is always a `ready_to_merge` recommendation.
+- **A3 — Flag location/default.** OBSOLETE: autonomy was removed from this PR entirely (R5,
+  orchestrator note-942fa37). There is no `project.sign_off_autonomous` flag; sign-off always
+  gates at merge and the autonomous-vs-hold merge decision belongs to the plan watcher
+  (pr-ff9b728).
+- **A4 — Second pane content.** Resolved: a plain evidence-summary shell pane (captures listing +
+  per-scenario verdicts + diff stat); the rich report surface is pr-8e693f6.
+- **A5 — Whether to redirect the TUI auto-merge path now.** Resolved: no — left to pr-ff9b728's
+  cleanup; sign-off is wired via the command + auto-sequence to avoid destabilizing the existing
+  TUI QA flows.
+
+No **[UNRESOLVED]** ambiguities.
+
+## 4. Edge Cases
+- A PR manually edited to `sign_off` then `pm pr signoff` run with no QA artifacts: prompt
+  degrades gracefully (evidence aggregation notes "no captures found"); router can still produce
+  a verdict (likely BLOCKED/REQA).
+- Re-running `pm pr signoff` without `--fresh` switches to the existing window (no duplicate),
+  like review.
+- `SIGNOFF_REQA`/`REVIEW`/`IMPL` must guard the status write on `status == "sign_off"` so a
+  concurrent sync that already moved the PR (e.g. merged externally) doesn't get clobbered.
+- pr_sync: a `sign_off` PR merged externally on GitHub must still be detected (hence adding
+  `sign_off` to the eligibility set) and preserved as a local refinement on OPEN sync.
+- Container mode: the sign-off container's `/pm-captures` must point at the same per-PR captures
+  dir (session_tag bind-mount) so the agent reads impl + scenario captures from inside the pane.
+- Conservative bias is enforced by the prompt (ambiguity → BLOCKED), not by pm — pm faithfully
+  executes whatever single verdict the agent emits; absence of a verdict = `running`/relaunch,
+  never an implicit merge.
+
+
+## QA runs covered by this checkpoint
+
+Each line is one completed QA run that ended NEEDS_WORK. Its per-scenario
+results are in the matching `QA NEEDS_WORK:` PR note above, and each
+scenario's verdict is in its captures directory. The QA spec, when present,
+is `pm/specs/pr-2d5f712/qa.md` — its requirements are part of the acceptance evidence.
+
+- run ad009382b7b0e6d6 — completed 2026-05-25T23:42Z on HEAD «NOT_RECORDED_BEFORE_THIS_FEATURE»; NEEDS_WORK from scenario verdicts; note note-094efa5; QA workdir `/home/matt/.pm/workdirs/qa/pr-2d5f712-ad009382b7b0e6d6`; verdicts `~/.pm/sessions/«SESSION_TAG»/captures/pr-2d5f712/scenarios/<n>/verdict.md`
+- run a953490cbd95dbd7 — completed 2026-05-26T01:29Z on HEAD «NOT_RECORDED_BEFORE_THIS_FEATURE»; NEEDS_WORK from scenario verdicts; note note-c9aeedc; QA workdir `/home/matt/.pm/workdirs/qa/pr-2d5f712-a953490cbd95dbd7`; verdicts `~/.pm/sessions/«SESSION_TAG»/captures/pr-2d5f712/scenarios/<n>/verdict.md`
+
+## Plan Context
+This PR is part of plan "Automated regression and bug fix loop" (plan-regression). Other PRs in this plan:
+- pr-abcf70f: FakeClaudeSession: scriptable Claude replacement for integration testing [merged]
+- pr-3b2847c: QA planner: consolidate related assertions into fewer scenarios [merged]
+- pr-539110b: Review and QA agents file bugs for out-of-scope issues via pm pr add [merged]
+- pr-30588a7: Bug fix flow: reproduce with test, fix, verify [merged]
+- pr-47940bc: Regression test sessions file bugs and improvements into correct plans [merged]
+- pr-e58459b: Auto-sequence button: chain start → review → QA on a single PR [merged]
+- pr-271cb3a: Discovery supervisor watcher (unified for bugs and improvements) [merged]
+- pr-d39a7fb: Improvement-fix implementation watcher [merged]
+- pr-e3a711c: Bug-fix implementation watcher [merged]
+- pr-e84b43c: Watcher review session: Claude pane with work-log access [merged]
+- pr-97ddabf: Watcher-target window for regression test launches [merged]
+- pr-d60d185: End-to-end QA review and auto-start command for the regression loop [merged]
+- pr-fbda1a8: Bridge old and new QA flows: tests for merged watchers under Phase 10 model [pending]
+- pr-b77702b: Dep-merge preamble in PR start/impl prompt for unmerged deps [pending]
+- pr-2c060b2: Claude-based regression test: CLI output rendering at varied terminal widths [pending]
+- pr-c2397e2: QA: refinement prompt asks for additional steps that would improve coverage [pending]
+- pr-b42059d: QA: code coverage of exercised lines factors into PASS verdict [pending]
+- pr-8422dea: QA: extended coverage measures (path coverage, user-story coverage) [pending]
+- pr-6be8ee6: Bug-fix flow: surface TUI QA repro instructions in session prompt [merged]
+- pr-8ed578d: QA: fix-line coverage gate ties coverage to the diff so PASS requires the fix code to be exercised [pending]
+- pr-ca6859f: Watcher self-recovery audit [pending]
+- pr-6f9301e: Headless / benchmark mode for autonomous loops [pending]
+- pr-ed10ac4: No-progress safety stop on review/QA loops [pending]
+- pr-e2b7fdf: Realistic single-prompt task — internet + directive + post-run integrity audit [pending]
+- pr-b3b8df0: QA instruction auto-synthesis at project setup [pending]
+... (+20 more; run `pm pr list --plan plan-regression`)
+
+## Interacting with the TUI
+
+The base pm tmux session is `pm-project_manager-c5a1006b`. Use `-s pm-project_manager-c5a1006b` with pm tui commands so they target the correct session even from workdir clones:
+- `pm tui view -s pm-project_manager-c5a1006b` — capture and view the current TUI screen
+- `pm tui send <keys> -s pm-project_manager-c5a1006b` — send keystrokes to the TUI (e.g. `pm tui send j` to move down)
+
+**Do not** run commands that spawn new Claude sessions yourself (e.g. `pm pr start`, `pm pr done`, `pm plan add`, `pm plan breakdown`, `pm plan review`). These must be triggered through the TUI so panes are managed correctly. Use `pm tui send` to press the appropriate key in the TUI instead.
+
+## Steps
+1. Pull the latest changes for `pm/pr-2d5f712-sign-off-acceptance-gate-qa-verdict-router-auto-ru` from the remote. Do not discard or reset local changes you find; leave them as they are.
+2. Read the complete change, not only the last patch:
+   - `git diff origin/master...HEAD` — the whole PR
+   - `git log --format='%h %ad %s' --date=short origin/master..HEAD` — how it got here; review-loop fixes are prefixed `review-loop <id> i<N>:`
+   - the PR notes above (review and QA fix notes, incidental fixes, user decisions) and the QA runs listed above, including the `verdict.md` of each NEEDS_WORK scenario
+3. Map the interfaces the PR touches: callers of changed functions, durable records and file formats it reads or writes, CLI and TUI surfaces, prompts, and other PRs working nearby (`pm pr list`; the plan context above).
+4. Look for problems that span rounds:
+   - repeated symptoms with a common cause — group the rounds' findings by cause, not by scenario
+   - special cases, flags, retries or guards accumulating one fix at a time
+   - two mechanisms doing the same job, or a new mechanism duplicating an existing one
+   - complexity the actual need does not require, and a simpler design that would still meet it
+   Then check the other direction: if the rounds found unrelated local defects that were fixed and stayed fixed, say so — that is evidence the approach is sound.
+5. Question the specification. For each requirement the rounds kept running into, decide whether it is:
+   - ambiguous (reasonable readers disagree about what it requires),
+   - outdated (the code, the PR notes or a user decision has moved past it),
+   - over-constrained (it prescribes a mechanism where the need is an outcome), or
+   - internally conflicting (two requirements cannot both hold).
+   Keep these apart from genuine implementation bugs (a sound requirement the code does not meet yet) and from necessary safety and acceptance constraints, which stay even when they are costly to satisfy.
+6. Decide. Choose every outcome the evidence supports:
+   - **keep** — the current approach is sound; say why the rounds do not point to a design problem.
+   - **corrections** — concrete changes within this PR for the next review iteration to make: what, where, why, and how it will be verified. You do not make them.
+   - **spec_clarification** — wording that resolves an ambiguity without changing any requirement, acceptance criterion, scope or user decision.
+   - **spec_change_proposal** — a change to a requirement, acceptance criterion or scope. Only the owner can approve it.
+   - **follow_up** — separately scoped work that should not be done in this PR (see Rules for filing).
+   - **breakup_referral** — only when independently useful parts of this PR could land materially earlier and that gain outweighs extraction, duplicate review/QA and coordination costs. Staying together is the default; size and the number of rounds never justify a split on their own.
+7. Write the assessment (format below) to `pm/specs/pr-2d5f712/checkpoints/ckpt-1.md`, then commit only that file and push:
+   `git add pm/specs/pr-2d5f712/checkpoints/ckpt-1.md && git commit -m "checkpoint ckpt-1: architecture/spec assessment" -- pm/specs/pr-2d5f712/checkpoints/ckpt-1.md && git push origin pm/pr-2d5f712-sign-off-acceptance-gate-qa-verdict-router-auto-ru`
+   If the push fails, say so in your final summary; never force-push.
+
+## Rules
+
+- Do not change source code, tests, fixtures, the implementation or QA spec, the PR description, plan files or project settings. The only file you create or commit is the assessment.
+- Do not revert, reset, stash, clean or delete anything. Dirty files, drafts, fixtures, captures, transcripts and earlier assessments stay exactly as they are.
+- Useful incidental fixes stay in this PR by default; do not recommend moving them out to make the PR smaller.
+- Do not weaken or waive anything: no lowering of QA assertions or acceptance criteria, no "pass with follow-ups", no skipped review round. Every fix you recommend still goes through a review iteration that ends NEEDS_WORK, another review, and QA.
+- Decisions the user has made — in the description, in PR notes or in the approved spec — stand. You may question one only by asking the owner; never recommend acting against it.
+- You cannot change merge policy, clear holds, approve specs or start other PRs.
+- Follow-up work: search before filing (`pm pr list --plan plan-regression`, `pm pr list --plan bugs`, `pm pr list`). If a matching PR exists, add a note to it (`pm pr note add <pr-id> '<text>'`) instead of filing. Otherwise file it as pending work: `pm pr add '<title>' --plan <plan-id> --description '<problem, evidence, link to pm/specs/pr-2d5f712/checkpoints/ckpt-1.md>'`. Filing does not start it — never run `pm pr start`. List every PR you filed or reused in the assessment.
+- A breakup referral is a recommendation for the owner. Do not run `pm pr split`.
+
+## Assessment format
+
+Keep it short: a reader should get the decision from the summary in under a minute, and the whole file should rarely need more than about 80 lines. Link evidence (note ids, scenario verdict paths, commits, `file:line`) instead of pasting it.
+
+```markdown
+---
+checkpoint: ckpt-1
+pr: pr-2d5f712
+reviewed_head: <full SHA of the HEAD you reviewed>
+base: master@<full SHA of the base you diffed against>
+covers_qa_runs: [ad009382b7b0e6d6, a953490cbd95dbd7]
+covers_requests: []
+outcomes: [<one or more of: keep, corrections, spec_clarification, spec_change_proposal, follow_up, breakup_referral>]
+human_question: <none | non_blocking | answered>
+followups: [<PR ids filed or reused; empty if none>]
+---
+# Checkpoint ckpt-1 — pr-2d5f712
+
+## Summary
+<2-5 lines: the decision and the main reason>
+
+## What was considered
+- <hypothesis or concern> — evidence: <links> — conclusion: <held or ruled out, and why>
+
+## Current-PR corrections
+- <change> — where: <file/function> — why: <evidence> — verify by: <test, scenario or check>
+(or "None.")
+
+## Specification
+- <requirement, quoted> — <ambiguous | outdated | over-constrained | conflicting> — proposed: <text> — <clarification | requirement change, needs owner approval>
+(or "No problems found with the spec.")
+
+## Follow-up work
+- <PR id, filed or reused> — <scope, and why it is not in this PR>
+(or "None.")
+
+## Breakup
+<"Not recommended" and why; or the smallest useful partition, what stays here, affected dependents, remaining checks and the expected timeline benefit>
+
+## Expected benefit and tradeoffs
+<what the next rounds gain in quality or verification, and what it costs>
+
+## Questions for the owner
+- <question> — <blocking | non-blocking>
+(or "None.")
+```
+
+## Finishing
+
+End your response with exactly one of these keywords on its own line:
+
+- **CHECKPOINT_COMPLETE** — the assessment is written and committed and pushed. Give its path and commit just before this line. pm validates the file, records the checkpoint as complete, and starts the next review iteration with your assessment in its prompt.
+- **INPUT_REQUIRED** — the owner has to answer before the next round can usefully proceed (for example, the next round depends on a requirement change only the owner can approve). Ask specific questions and give the options you see. The owner answers in this pane; then record the question and the owner's answer in the assessment, set `human_question: answered`, commit it, and end with **CHECKPOINT_COMPLETE**. Questions that do not block the next round go in the assessment as non-blocking instead.
+
+Do not output **PASS** or **NEEDS_WORK** — this checkpoint does not judge whether the PR is ready.
