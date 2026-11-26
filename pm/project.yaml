@@ -57134,3 +57134,28 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-a81f6fd
+  plan: bugs
+  title: 'Bug: pm pr add accepts an empty title, creating a blank PR and a dangling
+    branch name pm/pr-<id>-'
+  branch: pm/pr-a81f6fd-bug-pm-pr-add-accepts-an-empty-title-creating-a-bl
+  status: pending
+  depends_on: []
+  description: 'pm_core/cli/pr.py pr_add takes TITLE as a click argument with no blank
+    check. Repro (fresh project, pm init --backend local --no-import, pm pr add "Add
+    login feature"): pm pr add "" --plan improvements --description "x" -> rc 0, "Created
+    pr-bbe56d7:  (now active)" and "  branch: pm/pr-bbe56d7-" (empty slug); pm pr
+    list shows "pr-bbe56d7:  [pending] *" and the TUI renders a card with a blank
+    title line; it also becomes active_pr. Hit in QA S5 of pr-6c0ee2d when a shell-quoting
+    slip in a scripted agent passed an empty $TITLE (captures /pm-captures/scenarios/5/story4/attempt1-driver-bug).
+    Expected: reject a blank/whitespace-only title with a usage error before touching
+    project.yaml; consider the same guard for pm pr edit --title "".'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-26T19:43:56.742826+00:00'
+  updated_at: '2026-11-26T19:44:25.505789+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
