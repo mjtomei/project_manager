@@ -2466,8 +2466,19 @@ prs:
       it, so it is left to those plans.'
     created_at: '2026-11-26T18:42:21Z'
     last_edited: '2026-11-26T18:42:21Z'
+  - id: note-d26732d
+    text: 'Review ea03 i3: no code changes. 923 PR-affected tests pass and the Appendix
+      A re-render shows no drift. master is still ac719072, and no origin/pm/* branch
+      pushed since i2 adds breakdown lines (pr-6c0ee2d is still at 5c4914f5). Cross-PR
+      notes added for open PRs that earlier scans missed: pr-b764a0c (in_review: its
+      branch adds w=work plus a d=breakdown remap, so keep w and drop the d/breakdown
+      parts, note-ee7d3f4), pr-a6ef6be (its w=breakdown ... r=lit-review key line
+      conflicts, note-2fc7bb0) and pr-93b9aa9 (its description quotes the old forbidden
+      list, note-f2c9066).'
+    created_at: '2026-11-26T18:49:54Z'
+    last_edited: '2026-11-26T18:49:54Z'
   created_at: '2026-03-01T17:51:46.490716+00:00'
-  updated_at: '2026-11-26T18:42:21.911945+00:00'
+  updated_at: '2026-11-26T18:49:55.120237+00:00'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-30888b1-fold-plan-breakdown-into-plan-add-st-ab512a43
 - id: pr-3116896
   plan: tui-ux
