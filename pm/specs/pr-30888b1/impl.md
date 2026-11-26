@@ -136,7 +136,7 @@ No **[UNRESOLVED]** items.
   - pr-3526677: `tests/test_completion.py::test_real_cli_tree` merges cleanly but asserts that `plan breakdown ` completes plan ids. It fails after the merge and passes with `plan review `. Noted on pr-3526677.
   - pr-fa9f172: seven textual hunks in `cli/__init__.py`, `cli/plan.py`, `prompt_gen.py` and `tui/pane_ops.py`. Drop the breakdown parts and keep fa9f172's other edits: the `pm pr review` wording, `D=deps  Enter=view file`, the help wording, and the `_report_plan_file_missing` edit branch.
   - pr-fe4ca5d: its popup `b`=breakdown becomes a dead key (note-dcd3305, review 4efb i2).
-  - pr-b764a0c and pr-a6ef6be are 2,000+ commits behind master. Their added `breakdown` text (`pm plan breakdown`, `w=breakdown`, a `d`=breakdown key) is flagged by `test_no_source_references_to_breakdown_step` and the plans-pane key-map tests.
+  - pr-b764a0c and pr-a6ef6be are 2,000+ commits behind master. Their added `breakdown` text (`pm plan breakdown`, `w=breakdown`, a `d`=breakdown key) is flagged by `test_no_source_references_to_breakdown_step` and the plans-pane key-map tests. Review ea03 i3 left notes on both. pr-b764a0c (note-ee7d3f4): keep `w`=work, but drop the `d`=breakdown remap, its launch, the "Break down" guide step, its `tui_tests.py` edits and its breakdown key-map test. pr-a6ef6be (note-2fc7bb0): its `w=breakdown … r=lit-review` key line conflicts, so resolve it without `w`. Also noted: pr-93b9aa9 (note-f2c9066), whose description quotes the old forbidden-command list that still names `pm plan breakdown`.
 
 ## Appendix A — Full prompt text
 

@@ -2139,9 +2139,25 @@ prs:
       5 pre-existing test failures unrelated to this PR.'
     created_at: '2026-03-02T00:32:58Z'
     last_edited: '2026-03-02T00:32:58Z'
+  - id: note-ee7d3f4
+    text: 'From pr-30888b1 (review ea03 i3): pr-30888b1 removes `pm plan breakdown`,
+      the plans-pane `w`=breakdown key, the `breakdown` branch of `pane_ops.handle_plan_action`
+      and REVIEW_PROMPTS["plan-breakdown"]. `pm plan add` now writes the ## PRs section,
+      and `pm plan review` (key c) proposes one when it is missing. When you bring
+      this branch up to master (3,878 commits behind) after pr-30888b1 merges: keep
+      `w`=work, since that key is then free in the plans pane. Drop the `d`=breakdown
+      remap and its `pm plan breakdown` launch in handle_plan_action, and the `d`/breakdown
+      parts of the plans footer, help screen and getting-started key line. Also drop
+      the guide.py "Break down" lifecycle step (pr-30888b1 renumbers the steps to
+      Init, Plan, Review, Load, Work, Review, Merge), the tui_tests.py edits (master
+      deleted that file in favour of pm/qa), and test_work_and_breakdown_keys plus
+      the "d": "breakdown" entry in the tests/test_plans_pane.py key map. tests/test_plan_add_breakdown.py::test_no_source_references_to_breakdown_step
+      fails on any `plan breakdown`, `plan-breakdown` or `=breakdown  ` left in pm_core.'
+    created_at: '2026-11-26T18:48:54Z'
+    last_edited: '2026-11-26T18:49:23Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-b764a0c-add-plan-worker-pane-generic-claude--ab512a43
   created_at: '2026-02-27T10:12:26.609316+00:00'
-  updated_at: '2026-03-23T13:16:19.520063+00:00'
+  updated_at: '2026-11-26T18:49:23.135824+00:00'
 - id: pr-0a7d9ee
   plan: null
   title: Add companion workdir pane for implementation and merge windows
@@ -30934,11 +30950,20 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-17T21:49:17.795998+00:00'
-  updated_at: '2026-05-17T21:49:17.795998+00:00'
+  updated_at: '2026-11-26T18:49:04.956199+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-f2c9066
+    text: 'From pr-30888b1 (review ea03 i3): pr-30888b1 removes `pm plan breakdown`,
+      so the "do not run commands that spawn Claude sessions" lists in prompt_gen.tui_section,
+      the watcher-review prompt and the tui/pane_ops.py assistant prompt now name
+      only `pm pr start`, `pm pr done`, `pm plan add` and `pm plan review`. Your description
+      quotes the old list. Do not reintroduce `pm plan breakdown`: tests/test_plan_add_breakdown.py::test_no_source_references_to_breakdown_step
+      fails on it.'
+    created_at: '2026-11-26T18:49:04Z'
+    last_edited: '2026-11-26T18:49:04Z'
 - id: pr-a6ef6be
   plan: plan-3119574
   title: Session-launching CLI commands + project.yaml review registry
@@ -30972,7 +30997,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/211
   gh_pr_number: 211
   created_at: '2026-05-20T22:53:20.224284+00:00'
-  updated_at: '2026-05-30T21:40:59.458044+00:00'
+  updated_at: '2026-11-26T18:49:00.091740+00:00'
   started_at: '2026-05-21T04:08:35.118589+00:00'
   reviewed_at: '2026-05-21T04:43:53.080388+00:00'
   merged_at: null
@@ -30995,6 +31020,15 @@ prs:
       \ in the methodology docs."
     created_at: '2026-05-30T21:40:59Z'
     last_edited: '2026-05-30T21:40:59Z'
+  - id: note-2fc7bb0
+    text: 'From pr-30888b1 (review ea03 i3): pr-30888b1 removes `pm plan breakdown`
+      and the plans-pane `w`=breakdown key. Your cli/__init__.py getting-started key
+      line (`a=add  w=breakdown  c=review  r=lit-review ...`) will conflict with its
+      `a=add  c=review  l=load  e=edit  v=view`. Resolve it as `a=add  c=review  r=lit-review  l=load  e=edit  v=view`.
+      If you add `r` to the plans pane, tests/test_plan_add_breakdown.py::test_no_source_references_to_breakdown_step
+      rejects any `w=breakdown` or `=breakdown  ` left in pm_core.'
+    created_at: '2026-11-26T18:48:59Z'
+    last_edited: '2026-11-26T18:48:59Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-a6ef6be-session-launching-cli-commands-proje-a17683d9
 - id: pr-1160366
   plan: plan-3119574
