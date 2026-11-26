@@ -2437,8 +2437,21 @@ prs:
       references.'
     created_at: '2026-11-26T18:36:38Z'
     last_edited: '2026-11-26T18:36:38Z'
+  - id: note-3c9be20
+    text: 'Review ea03 i2: no code changes; 327 PR-affected tests pass. Earlier branch
+      scans only grepped for added breakdown lines, so pending PRs whose descriptions
+      target `plan breakdown` were missed. Cross-PR notes added: pr-a7d4dae (bug 1
+      already fixed, only the _MANUAL_TESTING_GUIDANCE INPUT_REQUIRED wording is left),
+      pr-df6cd9f and pr-86c2188 (put the breakdown-prompt work in plan add / plan
+      review), pr-fcaa434 (its plan_breakdown hunk becomes modify/delete, keep the
+      deletion; merge-tree marker counts match master per file, so no new conflict).
+      Still not addressed: pm/plans prose (plan-mind, refactor-migration-map, refactor-new-files,
+      plan-sensorium) still describes a future PlanBreakdownStream. No loaded PR implements
+      it, so it is left to those plans.'
+    created_at: '2026-11-26T18:42:21Z'
+    last_edited: '2026-11-26T18:42:21Z'
   created_at: '2026-03-01T17:51:46.490716+00:00'
-  updated_at: '2026-11-26T18:36:38.707873+00:00'
+  updated_at: '2026-11-26T18:42:21.911945+00:00'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-30888b1-fold-plan-breakdown-into-plan-add-st-ab512a43
 - id: pr-3116896
   plan: tui-ux
@@ -8372,11 +8385,19 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-13T17:53:46.060213+00:00'
-  updated_at: '2026-03-13T17:53:46.060213+00:00'
+  updated_at: '2026-11-26T18:40:56.510945+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-c87748e
+    text: 'From pr-30888b1 (review ea03 i2): `pm plan breakdown` is removed. Its PR-breakdown
+      step now runs inside `pm plan add` (pm_core/cli/plan.py::plan_add), and the
+      pre-load `pm plan review` proposes a breakdown when a plan has no ## PRs. Put
+      the planning-prompt decision-point guidance in plan add and plan review, not
+      "plan breakdown".'
+    created_at: '2026-11-26T18:40:56Z'
+    last_edited: '2026-11-26T18:40:56Z'
 - id: pr-ebc8615
   plan: watchers
   title: 'Decision point watcher: monitor and surface parallel explorations'
@@ -12142,9 +12163,21 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-11T21:35:26.923277+00:00'
-  updated_at: '2026-04-12T00:58:16.384705+00:00'
+  updated_at: '2026-11-26T18:40:51.133807+00:00'
   started_at: null
   reviewed_at: null
+  notes:
+  - id: note-6ab9e8f
+    text: 'From pr-30888b1 (review ea03 i2): pr-30888b1 removes `pm plan breakdown`
+      and its prompt, and folds the breakdown guidance into `pm plan add`. Bug 1 here
+      is already fixed on master: the plan add prompt ends with `pm plan load <id>`
+      (key l) and lists `pm plan review` only as optional, and the pre-load plan review
+      also ends with load. Only bug 2 is left: `_MANUAL_TESTING_GUIDANCE` in pm_core/cli/plan.py
+      still says "so the review loop can use INPUT_REQUIRED appropriately". After
+      pr-30888b1 that constant is used by plan add, both plan review variants and
+      plan import. There is no breakdown prompt to fix.'
+    created_at: '2026-11-26T18:40:50Z'
+    last_edited: '2026-11-26T18:40:50Z'
 - id: pr-a353c3d
   plan: improvements
   title: Launch plan pane actions in a dedicated plans window instead of the main
@@ -22478,11 +22511,22 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/202
   gh_pr_number: 202
   created_at: '2026-05-04T16:49:56.497186+00:00'
-  updated_at: '2026-05-05T17:34:57.749578+00:00'
+  updated_at: '2026-11-26T18:41:05.826235+00:00'
   started_at: '2026-05-05T12:17:16.474249+00:00'
   reviewed_at: '2026-05-05T17:34:57.749578+00:00'
   merged_at: null
-  notes: []
+  notes:
+  - id: note-1956650
+    text: 'From pr-30888b1 (review ea03 i2): `pm plan breakdown` (plan_breakdown in
+      pm_core/cli/plan.py) is removed, so drop it from the affected-commands list.
+      When this branch next merges master after pr-30888b1, its launch_claude_in_window
+      hunk inside plan_breakdown becomes a modify/delete conflict; resolve it by keeping
+      the deletion. A merge-tree against master and against pr-30888b1 both show 13
+      conflict markers, so this adds no new conflict. The plan_add, plan_review and
+      other hunks are unaffected, and tests/test_window_launch.py has no breakdown
+      case.'
+    created_at: '2026-11-26T18:41:05Z'
+    last_edited: '2026-11-26T18:41:05Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-fcaa434-bug-plan-subcommands-launch-claude-i-e2eb17b8
 - id: pr-3526677
   plan: improvements
@@ -40308,11 +40352,20 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T00:15:38.677768+00:00'
-  updated_at: '2026-10-23T22:00:24.118139+00:00'
+  updated_at: '2026-11-26T18:41:01.078645+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-97e2b6f
+    text: 'From pr-30888b1 (review ea03 i2): `pm plan breakdown` and REVIEW_PROMPTS["plan-breakdown"]
+      are removed. The PR-breakdown prompt family is now the second half of the `pm
+      plan add` prompt (pm_core/cli/plan.py::plan_add), so the plan-development and
+      PR-breakdown families render from one builder and one session. The fresh-generation
+      check "plan add and breakdown" becomes a single `pm plan add` run, with `pm
+      plan review` as the recovery path when a plan ends without ## PRs.'
+    created_at: '2026-11-26T18:41:00Z'
+    last_edited: '2026-11-26T18:41:00Z'
 - id: pr-3ae2fc3
   plan: improvements
   title: Add spec-review pauses to autostart
