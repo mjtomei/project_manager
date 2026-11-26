@@ -168,8 +168,16 @@ def cache_root() -> Path:
                            IMAGE_CACHE_DIR_SETTING)
     except NonLocalPathError as exc:
         raise ImageCacheError(str(exc)) from exc
-    (root / "entries").mkdir(parents=True, exist_ok=True)
-    (root / "locks").mkdir(parents=True, exist_ok=True)
+    try:
+        (root / "entries").mkdir(parents=True, exist_ok=True)
+        (root / "locks").mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        # e.g. image-cache-dir names a local SSD that is not mounted yet.
+        raise ImageCacheError(
+            f"the shared image cache cannot be created at {root}: {exc}. "
+            f"Make it writable, or set '{IMAGE_CACHE_DIR_SETTING}' to a "
+            f"writable local directory (pm set {IMAGE_CACHE_DIR_SETTING} "
+            f"<path>), then retry; " + _off_remedy()) from exc
     return root
 
 
@@ -283,18 +291,28 @@ def ensure_prepared(image_ref: str) -> CacheEntry:
     lock = root / "locks" / f"{key}.lock"
     _log.info("image cache: preparing %s (%s) — one-time per image version",
               image_ref, key)
-    with bounded_flock(lock, LOCK_TIMEOUT) as got:
-        if not got:
-            raise ImageCacheError(
-                f"timed out after {int(LOCK_TIMEOUT)}s waiting for another "
-                f"process to prepare the shared image cache for "
-                f"'{image_ref}' (lock {lock}). Check for a stuck "
-                f"'pm-image-cache-prep-*' container ({_runtime()} ps -a), "
-                f"remove it and retry; " + _off_remedy())
-        entry = load_entry(key, root)
-        if entry and entry.image_id == image_id:
-            return entry
-        entry = _prepare(root, image_ref, image_id, tags, key)
+    try:
+        with bounded_flock(lock, LOCK_TIMEOUT) as got:
+            if not got:
+                raise ImageCacheError(
+                    f"timed out after {int(LOCK_TIMEOUT)}s waiting for "
+                    f"another process to prepare the shared image cache for "
+                    f"'{image_ref}' (lock {lock}). Check for a stuck "
+                    f"'pm-image-cache-prep-*' container ({_runtime()} ps "
+                    f"-a), remove it and retry; " + _off_remedy())
+            entry = load_entry(key, root)
+            if entry and entry.image_id == image_id:
+                return entry
+            entry = _prepare(root, image_ref, image_id, tags, key)
+    except OSError as exc:
+        # The lock file, the prep dir, entry.json or the publishing rename
+        # (a full disk, a permission change): still the cache's actionable
+        # error, never a bare traceback that callers would report as a
+        # runtime failure.
+        raise ImageCacheError(
+            f"preparing the shared image cache for '{image_ref}' under "
+            f"{root} failed: {exc}. Fix the cause and retry; "
+            + _off_remedy()) from exc
     try:
         gc(dry_run=False, protect={key})
     except Exception:
@@ -436,10 +454,14 @@ def _prepare(root: Path, image_ref: str, image_id: str, tags: list[str],
         raise
     _remove_quietly(name)
     final = entries / key
-    if final.exists():
-        # An incomplete/unreadable leftover (load_entry returned None).
-        _remove_tree(final)
-    os.rename(prep_dir, final)
+    try:
+        if final.exists():
+            # An incomplete/unreadable leftover (load_entry returned None).
+            _remove_tree(final)
+        os.rename(prep_dir, final)
+    except OSError:
+        _remove_tree(prep_dir)
+        raise
     _log.info("image cache: prepared %s (%s) in %.1fs, %s bytes", image_ref,
               key, meta["prep_seconds"], meta["store_bytes"])
     return CacheEntry(key=key, path=final, meta=meta)

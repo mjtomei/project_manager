@@ -302,6 +302,44 @@ class TestEnsurePrepared:
         assert "pm-image-cache-prep" in str(exc.value)
         assert f"pm set {image_cache.MODE_SETTING} off" in str(exc.value)
 
+    def test_unwritable_cache_dir_is_actionable(self, fake, home, tmp_path):
+        """image-cache-dir on a path pm cannot create (an SSD not mounted
+        yet): the cache's own error naming the setting — not a bare
+        PermissionError, which launchers report as 'is podman running?'."""
+        from pm_core.paths import (IMAGE_CACHE_DIR_SETTING,
+                                   set_global_setting_value)
+        ro = tmp_path / "ro"
+        ro.mkdir()
+        set_global_setting_value(IMAGE_CACHE_DIR_SETTING, str(ro / "cache"))
+        ro.chmod(0o555)
+        try:
+            if os.access(ro, os.W_OK):   # root ignores the mode
+                pytest.skip("running with CAP_DAC_OVERRIDE")
+            with pytest.raises(ImageCacheError) as exc:
+                image_cache.ensure_prepared("pm-dev:latest")
+        finally:
+            ro.chmod(0o755)
+        msg = str(exc.value)
+        assert str(ro / "cache") in msg
+        assert f"pm set {IMAGE_CACHE_DIR_SETTING} <path>" in msg
+        assert f"pm set {image_cache.MODE_SETTING} off" in msg
+        assert fake.count("run") == 0
+
+    def test_failed_publish_is_actionable_and_leaves_nothing(
+            self, fake, home, monkeypatch):
+        real_rename = os.rename
+
+        def rename(src, dst):
+            if Path(dst).name == KEY:
+                raise OSError(28, "No space left on device")
+            return real_rename(src, dst)
+        monkeypatch.setattr(image_cache.os, "rename", rename)
+        with pytest.raises(ImageCacheError, match="No space left"):
+            image_cache.ensure_prepared("pm-dev:latest")
+        entries = home / ".pm" / "image-cache" / "entries"
+        assert list(entries.iterdir()) == []
+        assert fake.removed   # the prep container too
+
     def test_missing_image_is_actionable(self, fake, home):
         fake.fail["image"] = "no such image"
         with pytest.raises(ImageCacheError) as exc:
@@ -706,3 +744,72 @@ def test_overlay_support_problem_names_what_is_missing(monkeypatch):
                         else real_exists(self))
     msg = image_cache.overlay_support_problem()
     assert msg and "/dev/fuse" in msg and "VFS" in msg
+
+
+class TestCli:
+    """``pm container cache …`` and ``pm container engine-setup``."""
+
+    @pytest.fixture(autouse=True)
+    def _not_a_consumer(self, tmp_path, monkeypatch):
+        # Hermetic when the suite itself runs inside a cache consumer; the
+        # `consumer` fixture, set up after this one, mounts a fake entry.
+        monkeypatch.setattr(image_cache, "CONSUMER_MOUNT",
+                            str(tmp_path / "no-cache-mounted"))
+
+    def _invoke(self, *args):
+        from click.testing import CliRunner
+        from pm_core.cli import cli
+        return CliRunner().invoke(cli, ["container", *args])
+
+    def test_gc_dry_run_lists_without_removing(self, fake, home):
+        root = image_cache.cache_root()
+        gone = _publish(root, "2" * 20, "sha256:" + "2" * 64)
+        fake.present = False
+        r = self._invoke("cache", "gc", "--dry-run")
+        assert r.exit_code == 0, r.output
+        assert f"would remove: {gone} (image no longer on the host" in r.output
+        assert gone.exists()
+        r = self._invoke("cache", "gc")
+        assert r.exit_code == 0, r.output
+        assert f"removed: {gone}" in r.output and not gone.exists()
+        assert "Nothing to remove." in self._invoke("cache", "gc").output
+
+    def test_gc_with_runtime_down_removes_nothing(self, fake, home):
+        root = image_cache.cache_root()
+        gone = _publish(root, "2" * 20, "sha256:" + "2" * 64)
+        fake.present = False
+        fake.fail["ps"] = "cannot connect"
+        r = self._invoke("cache", "gc")
+        assert r.exit_code == 1
+        assert "Nothing removed: the container runtime could not list" \
+            in r.output
+        assert gone.exists()
+
+    def test_status_lists_entries_and_use(self, fake, home):
+        root = image_cache.cache_root()
+        _publish(root, KEY, IMAGE_ID)
+        _publish(root, "1" * 20, "sha256:" + "1" * 64)
+        fake.refs = {KEY}
+        r = self._invoke("cache", "status")
+        assert r.exit_code == 0, r.output
+        assert f"Root: {root}" in r.output
+        assert f"{KEY}" in r.output and "[in use]" in r.output
+        assert "[unused]" in r.output
+
+    def test_engine_setup_outside_a_consumer_fails(self, home):
+        r = self._invoke("engine-setup")
+        assert r.exit_code == 1
+        assert "launched without it" in r.output
+        assert not (home / ".config").exists()
+
+    def test_prepare_refused_inside_a_consumer(self, consumer, fake):
+        r = self._invoke("cache", "prepare")
+        assert r.exit_code == 1
+        assert "prepare entries on the host" in r.output
+        assert fake.count("run") == 0
+
+    def test_prepare_error_is_reported(self, fake, home):
+        fake.fail["image"] = "no such image"
+        r = self._invoke("cache", "prepare", "--image", "pm-dev:latest")
+        assert r.exit_code == 1
+        assert "pm container build-base" in r.output

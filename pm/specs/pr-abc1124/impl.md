@@ -175,7 +175,10 @@ the task and on the measurements above.
 * Any failure raises `ImageCacheError` whose message names the cause and
   the remedies (fix and retry / `pm container cache prepare` /
   `pm set container-image-cache off`); the partial prep dir and container
-  are removed.
+  are removed.  That includes filesystem errors (an `image-cache-dir` pm
+  cannot create, a full disk while writing `entry.json` or publishing):
+  a bare `OSError` would reach `wrap_claude_cmd`'s catch-all, which
+  reports "Is podman running?" (review 62b4 i9).
 
 ### R2 — Consumer wiring in the existing launch path (`pm_core/container.py`)
 
@@ -485,6 +488,12 @@ the task and on the measurements above.
   `TimeoutExpired` (review 62b4 i7).
 * `podman save` → load is a full import exactly once per image version per
   cache root; a second user/cache root prepares its own.
+* A tag added on the host to an image ID that already has an entry is not
+  in that entry: entries are immutable once published, and the warm path
+  only compares IDs.  Consumers see the tags the ID had at preparation
+  (and the ID itself); the consumer's missing-image error lists them.
+  Re-preparing on a tag change would re-import the whole image for an
+  alias, so it is not done.
 
 ## 6. Revised recipe / instruction text (complete)
 

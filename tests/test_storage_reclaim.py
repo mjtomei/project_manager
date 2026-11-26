@@ -367,3 +367,54 @@ def test_pr_cleanup_reclaims(monkeypatch):
     assert seen == {"bg": "pr-9"} and s["reclaimed"] == "background"
     s = pr_cleanup.cleanup_pr_resources(None, pr, wait_reclaim=True)
     assert seen["sync"] == "pr-9" and s["reclaimed"] == []
+
+
+class TestReclaimCli:
+    """``pm container reclaim``: preview, outcome and exit status."""
+
+    def _invoke(self, *args):
+        from click.testing import CliRunner
+        from pm_core.cli import cli
+        return CliRunner().invoke(cli, ["container", "reclaim", *args])
+
+    def test_dry_run_previews_and_keeps_everything(self, home, rt):
+        run, scratch = _run(home, "pr-1-cli1")
+        (run / "qa_run.json").write_text(json.dumps(
+            {"pr_id": "pr-1", "loop_id": "cli1", "ended_at": 1.0}))
+        st = _store(scratch / "eng")
+        _, held = _run(home, "pr-1-cli2")
+        _store(held / "eng")
+        rt.mounts = [str(held)]
+        r = self._invoke("--pr", "pr-1", "--dry-run")
+        assert r.exit_code == 0, r.output
+        assert f"would remove store {st}" in r.output
+        assert f"keep {held}: a container still mounts" in r.output
+        assert "1 planned" in r.output and "1 scratch dir(s) held" in r.output
+        assert st.exists()
+
+    def test_reclaims_and_reports(self, home, rt):
+        _, scratch = _run(home, "pr-1-cli3")
+        st = _store(scratch / "eng")
+        r = self._invoke("--pr", "pr-1")
+        assert r.exit_code == 0, r.output
+        assert f"removed store {st}" in r.output
+        assert "1 removed" in r.output
+        assert not st.exists()
+
+    def test_failed_removal_exits_non_zero(self, home, rt, monkeypatch):
+        _, scratch = _run(home, "pr-1-cli4")
+        st = _store(scratch / "eng")
+        monkeypatch.setattr(sr, "_delete", lambda d: "Permission denied")
+        r = self._invoke("--pr", "pr-1")
+        assert r.exit_code == 1
+        assert f"FAILED (Permission denied) store {st}" in r.output
+
+    def test_runtime_down_removes_nothing(self, home, rt):
+        _, scratch = _run(home, "pr-1-cli5")
+        st = _store(scratch / "eng")
+        rt.fail = True
+        r = self._invoke()
+        assert r.exit_code == 1
+        assert "Nothing removed: the container runtime could not list" \
+            in r.output
+        assert st.exists()
