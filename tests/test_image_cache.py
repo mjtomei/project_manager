@@ -51,6 +51,7 @@ class FakeRuntime:
         self.fail = fail or {}
         self.calls: list[tuple] = []
         self.volumes: dict[str, str] = {}   # container path -> host path
+        self.stale: list[tuple[str, str]] = []  # (prep name, key)
         self.lock = threading.Lock()
 
     def __call__(self, *args, timeout=None, check=False):
@@ -85,8 +86,12 @@ class FakeRuntime:
         if head == "version":
             return _cp(out="3.4.4\n")
         if head == "ps":
-            label = args[args.index("--filter") + 1].split("=", 1)[1]
-            rows = [{"Labels": {label: k}} for k in sorted(self.refs)]
+            flt = args[args.index("--filter") + 1].split("=", 1)[1]
+            if "=" in flt:  # label=<name>=<key>: names of matching preps
+                label, key = flt.split("=", 1)
+                return _cp(out="".join(f"{n}\n" for n, k in self.stale
+                                       if k == key))
+            rows = [{"Labels": {flt: k}} for k in sorted(self.refs)]
             return _cp(out=json.dumps(rows))
         if head == "unshare":
             import shutil
@@ -301,6 +306,18 @@ class TestEnsurePrepared:
         entries = home / ".pm" / "image-cache" / "entries"
         assert list(entries.iterdir()) == []
         assert fake.removed  # prep container removed
+
+    def test_killed_preparer_leftovers_are_cleared(self, fake, home):
+        """A preparer killed mid-way leaves its prep container and dir; the
+        next preparation (holding the key's lock) removes both."""
+        root = image_cache.cache_root()
+        leftover = root / "entries" / f".prep-{KEY}-4242-abcdef"
+        (leftover / "store").mkdir(parents=True)
+        fake.stale = [(f"pm-image-cache-prep-{KEY[:12]}-abcdef", KEY)]
+        image_cache.ensure_prepared("pm-dev:latest")
+        assert f"pm-image-cache-prep-{KEY[:12]}-abcdef" in fake.removed
+        assert not leftover.exists()
+        assert [p.name for p in (root / "entries").iterdir()] == [KEY]
 
     def test_id_mismatch_aborts(self, fake, home):
         fake.loaded_id = "sha256:" + "ef" * 32

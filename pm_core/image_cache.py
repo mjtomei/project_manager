@@ -306,6 +306,7 @@ def _prepare(root: Path, image_ref: str, image_id: str, tags: list[str],
     if "podman" not in runtime:
         raise ImageCacheError("the shared image cache requires podman")
     entries = root / "entries"
+    _clear_stale_preps(entries, key)
     token = secrets.token_hex(3)
     prep_dir = entries / f".prep-{key}-{os.getpid()}-{token}"
     prep_dir.mkdir(parents=True)
@@ -400,6 +401,21 @@ def _prepare(root: Path, image_ref: str, image_id: str, tags: list[str],
     return CacheEntry(key=key, path=final, meta=meta)
 
 
+def _clear_stale_preps(entries: Path, key: str) -> None:
+    """Remove prep containers and dirs of *key* left by a killed preparer.
+
+    Called with the key's lock held, so no other preparation of *key* can
+    be running: anything still carrying its prep label or name is stale.
+    """
+    r = _rt("ps", "-a", "--filter", f"label={PREP_LABEL}={key}",
+            "--format", "{{.Names}}", timeout=30)
+    for stale in (r.stdout or "").split() if r.returncode == 0 else []:
+        _log.info("image cache: removing stale prep container %s", stale)
+        _remove_quietly(stale)
+    for d in entries.glob(f".prep-{key}-*"):
+        _remove_tree(d)
+
+
 def _exec_ok(name: str, argv: list[str], what: str,
              timeout: int = _STEP_TIMEOUT) -> subprocess.CompletedProcess:
     r = _rt("exec", name, *argv, timeout=timeout)
@@ -440,10 +456,11 @@ def _stream_load(runtime: str, image_ref: str, name: str,
                 f"cache preparation (save | load of '{image_ref}') did not "
                 f"finish within {PREP_TIMEOUT}s")
         if save_rc != 0 or load_rc != 0:
-            save_err.seek(0)
-            load_err.seek(0)
-            detail = (save_err.read().decode("utf-8", "replace").strip()
-                      or load_err.read().decode("utf-8", "replace").strip())
+            # A dead load makes save fail with SIGPIPE (rc 141): report the
+            # side that failed first.
+            src = load_err if load_rc != 0 else save_err
+            src.seek(0)
+            detail = _podman_error(src.read().decode("utf-8", "replace"))
             raise ImageCacheError(
                 f"cache preparation could not copy '{image_ref}' into the "
                 f"cache (save rc={save_rc}, load rc={load_rc}): "
@@ -833,9 +850,12 @@ def consumer_check(image_ref: str | None = None,
                 for ln in r.stdout.splitlines() if len(ln.split()) == 2}
         bad = [f"{p} is {seen.get(p, '?')}, expected {want}"
                for p, want in _PROBES if seen.get(p) != want]
-        if r.returncode != 0 or bad:
+        if r.returncode != 0:
+            res.add(False, "could not read the mapping probes with 'podman "
+                           f"unshare': {_podman_error(r.stderr)}")
+        elif bad:
             res.add(False, "UID/GID mapping does not match the cache: "
-                           + ("; ".join(bad) or (r.stderr or "").strip()[:200])
+                           + "; ".join(bad)
                            + ". The entry was prepared for engines at another "
                              "nesting level; it cannot be used here")
         else:
@@ -848,7 +868,8 @@ def consumer_check(image_ref: str | None = None,
                            capture_output=True, text=True, timeout=60, env=env)
         if r.returncode != 0:
             res.add(False, f"image '{want}' is not visible to the engine "
-                           f"(cache holds {', '.join(entry.get('names') or [])})")
+                           f"(cache holds {', '.join(entry.get('names') or [])}"
+                           f"): {_podman_error(r.stderr)}")
         else:
             iid = str(json.loads(r.stdout)[0].get("Id", ""))
             from_cache = iid.split(":")[-1] == str(entry.get("image_id")).split(":")[-1]
@@ -890,14 +911,25 @@ def ensure_consumer_engine(home: str | None = None) -> None:
         capture_output=True, text=True, timeout=60,
         env={**os.environ, "HOME": home})
     got = r.stdout.split()
-    if r.returncode != 0 or got != [want for _, want in _PROBES]:
+    if r.returncode != 0:
+        raise ImageCacheError(
+            f"could not read the shared image cache's mapping probes with "
+            f"'podman unshare' (HOME={home}): {_podman_error(r.stderr)}")
+    if got != [want for _, want in _PROBES]:
         raise ImageCacheError(
             f"the shared image cache at {CONSUMER_MOUNT} was prepared for "
             f"engines at another user-namespace level (probes read "
-            f"{' '.join(got) or (r.stderr or '').strip()[:200]}, expected "
-            f"0:0 1:1); it cannot serve this engine. Launch from a container "
-            f"whose cache matches, or " + _off_remedy())
+            f"{' '.join(got)}, expected 0:0 1:1), so its files would show "
+            f"the wrong owners here; it cannot serve this engine. Launch "
+            f"from a container whose cache matches, " + _off_remedy())
     _checked_homes.add(home)
+
+
+def _podman_error(stderr: str | None) -> str:
+    """The meaningful part of podman's stderr (drops logrus warnings)."""
+    lines = [ln for ln in (stderr or "").strip().splitlines()
+             if ln.strip() and not ln.startswith("time=")]
+    return (" ".join(lines) or "no error output")[:300]
 
 
 def missing_in_consumer_message(image_ref: str) -> str:

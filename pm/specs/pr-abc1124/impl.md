@@ -155,7 +155,9 @@ the task and on the measurements above.
   3. otherwise take `locks/<key>.lock` (`fcntl.flock`, bounded wait — default
      30 min, the prep is idempotent) and re-check — this is the coordination
      for simultaneous requests from threads and processes;
-  4. prepare in a fresh `.prep-*` dir: start a prep container
+  4. with the lock held, remove any prep container / `.prep-<key>-*` dir a
+     killed preparer left for this key (they cannot be live), then
+     prepare in a fresh `.prep-*` dir: start a prep container
      (`run -d --userns=keep-id <nested args> --label pm.image-cache-prep=<key>
      -v <prep-dir>:/var/lib/pm-image-cache <image-id> sleep infinity`),
      stream `podman save <ref>` into

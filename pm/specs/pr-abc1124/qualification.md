@@ -99,12 +99,83 @@ test project with `nested_podman: true` and a private `HOME=/scratch/npm`
 
 ## 3. Failure modes are actionable, with no fallback
 
-(filled from `H-failures.json`)
+Bounded fixtures (`H-failures.json`); real runtime unless noted.
+
+| Case | Result |
+|---|---|
+| H1 preparation fails (image without podman: `ubuntu:22.04`) | `ContainerError` after 19 s: "the shared image cache … is unavailable. Cause: … (save rc=141, load rc=127): executable file `podman` not found … To retry: … 'pm container cache prepare' … 'pm set container-image-cache off'". No consumer container, no prep container, no partial entry left; a stale `.prep-*` dir and prep container from a previously killed preparer were cleared under the lock. |
+| H2 incompatible entry (store + probes prepared one keep-id level above the consumers) | `pm container cache check` FAIL: "uid1 is 65534:65534, expected 1:1 … prepared for engines at another nesting level". Nested pm launch: `ContainerError` "…prepared for engines at another user-namespace level (probes read 0:0 65534:65534 …) … cannot serve this engine". Nothing launched. |
+| H3 overlay support missing (consumer without `/dev/fuse`) | check FAIL and nested launch `ContainerError`: "overlay support is unavailable in this container (/dev/fuse missing) … pm does not fall back to VFS". |
+| H4 image not in the cache (nested pm configured for `localhost/pm-other:1`) | `ContainerError` naming the cached image and the remedies; afterwards the engine holds only the shared `pm-dev` (`R/O=true`) and no containers — nothing was built, pulled or imported. |
+| Cache root / scratch on network storage | refused with the setting to change (unit tests with an NFS/CIFS mount table; `pm set image-cache-dir|scratch-dir` refuse too). |
+| Mode `off` | today's behaviour, by explicit choice only (unit test). |
+
+pm never selects VFS and never launches on the host in any of these paths;
+container-mode failures stay `ContainerError` (the fail-closed boundary
+pr-cd04629 centralises).
 
 ## 4. Disk
 
-(filled from `F-G-disk.txt`)
+Allocated bytes (`du`, `-x` where a store could have live mounts):
+
+| | bytes |
+|---|---|
+| shared entry for `pm-dev:latest` (all 14 layers, once per image version) | 1,938,542,592 |
+| **VFS store of the same image** (what a VFS fixture paid per engine; `F-G-disk.txt`, loaded in 157 s) | **16,934,260,736** |
+| worker 1 private graphroot (workload + marker + 8 MB) | 8,605,696 |
+| worker 2 private graphroot (workload + marker + 16 MB) | 16,994,304 |
+| nested pm engine, three containers (two keep-id) | 446,464 |
+| worker 2 after a `FROM localhost/pm-dev` build fixture adding a 16 MB layer (93 s) | 33,882,112 (+16.9 MB build) |
+
+So an ordinary ~1.9 GB image no longer costs ~17 GB per scenario engine:
+the image is stored once (1.94 GB) and each engine holds only its private
+changes (here 0.4–34 MB).  Transient writes remain: the cold preparation
+streams the image through `podman load`, which stages it in the prep
+container before unpacking (removed with the prep container); builds and
+workloads write what they write.  The host-wide disk counter during the
+cold preparation (8.7 GB in 136 s) also includes other tenants' I/O on the
+shared host disk, so it is an upper bound, not this PR's cost.
 
 ## 5. Cleanup and path separation
 
-(filled from `I-reclaim.txt`)
+**Reclaim** (`I-reclaim.txt`, `pm container reclaim --pr pr-qual`):
+
+1. Both workers running: dry run plans only an earlier, ended run's two
+   stores (208 KiB + 204 KiB) and keeps both live scratch dirs ("a container
+   still mounts …").
+2. Worker 1's container removed, worker 2 still running: removed worker 1's
+   engine store (11.1 MiB), the nested pm engine's store (452 KiB) and an
+   image export `tiny-export.tar` (2.9 MiB), plus the earlier run's stores;
+   kept `draft.md`, engine configs, the nested test project and the checkout
+   (`~/.pm/workdirs/qa/<run>/s-1/repo`); wrote `.pm-reclaim.json`.  Worker 2
+   held.
+3. Worker 2 removed: its store (32.3 MiB) reclaimed.
+
+The same function runs from `pr_cleanup.cleanup_pr_resources` (merged /
+closed PRs, `pm pr cleanup --resources`) and in the background at QA run
+start for earlier runs of the PR (unit-tested).  Cache entries are evicted
+only when no container (any state) carries their label and their image is
+gone from the host (unit-tested; `pm container cache gc`).
+
+**Source / evidence vs local paths** — scenario scratch now lives under
+`~/.pm/scratch/qa/<run>/s-N` while the checkout stays under the workdir
+root; `workdirs-dir` and `captures-dir` may point at network storage,
+`scratch-dir` and `image-cache-dir` are refused there (unit tests with
+simulated `nfs4`/`cifs` mounts; `pm set` refuses too).
+
+**NAS: qualification outstanding.**  No NAS is mounted in this container,
+so Git and container access on a real NAS-backed checkout/evidence dir has
+not been exercised.  To finish it on the host: `pm set workdirs-dir
+<nas>/pm-workdirs`, `pm set captures-dir <nas>/pm-captures`, run one QA
+scenario with a nested engine, and check that the scenario's checkout and
+captures are on the NAS while `/scratch` and the engine graphroot are on
+local disk (`stat -f`), plus `git push` through the proxy from the NAS
+checkout.
+
+## Not covered here
+
+* Engines one keep-id level below a consumer (containers launched by a
+  nested pm) get no shared cache — by design (spec A3).
+* The default `/home/pm` engine of a *host-launched* consumer was not run
+  from here (this topology is one level deeper; see above).  It is the same
+  engine config, on a native-overlay rootfs like this impl container's.
