@@ -39129,7 +39129,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-14T15:34:14.432857+00:00'
-  updated_at: '2026-11-02T00:45:28.966024+00:00'
+  updated_at: '2026-11-26T19:08:37.187701+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -39153,6 +39153,20 @@ prs:
       in pm/.gitignore.'
     created_at: '2026-11-02T00:45:28Z'
     last_edited: '2026-11-02T00:45:28Z'
+  - id: note-45ecf2c
+    text: 'Same fix site, notes.txt is the inverse case: pm init still appends notes.txt
+      to the ensured pm/.gitignore entries (pm_core/cli/__init__.py ~L151, comment
+      "notes.txt is gitignored (local)"), but notes._update_gitignore (pm_core/notes.py
+      ~L135) says notes.txt is committed now and strips it on the next notes ensure.
+      So in a fresh pm init --backend local project a pm/notes.txt written right after
+      init is silently left out of git add -A (status --short empty, so it looks committed),
+      and the first pm plan/pr command then rewrites pm/.gitignore, leaving " M pm/.gitignore"
+      and "?? pm/notes.txt". Seen in pr-6c0ee2d QA S3 (/pm-captures/scenarios/3, fixture
+      commit had only architecture.md + project.yaml + .gitignore). Fix: have pm init
+      call notes._update_gitignore (notes-local.txt, .no-notes-splash) instead of
+      ignoring notes.txt.'
+    created_at: '2026-11-26T19:08:36Z'
+    last_edited: '2026-11-26T19:08:36Z'
 - id: pr-4bde874
   plan: bugs
   title: 'Bug: test_installer_writes_standalone_receiver fails whenever PM_HOST_HOME
