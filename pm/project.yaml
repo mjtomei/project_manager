@@ -31077,7 +31077,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/222
   gh_pr_number: 222
   created_at: '2026-05-21T04:06:05.061620+00:00'
-  updated_at: '2026-11-26T22:10:43.769663+00:00'
+  updated_at: '2026-11-26T22:33:03.435908+00:00'
   started_at: '2026-05-25T02:58:20.169677+00:00'
   reviewed_at: '2026-05-25T03:13:02.415469+00:00'
   merged_at: null
@@ -31572,6 +31572,23 @@ prs:
       master code).'
     created_at: '2026-11-26T22:10:43Z'
     last_edited: '2026-11-26T22:10:43Z'
+  - id: note-45fd058
+    text: 'Review loop c6a2 i13: NEEDS_WORK (nit only), fixed + pushed. No correctness
+      issues found in the stash/registry flow at 76d1cc57. Re-checked: lock scope
+      and callers (no caller holds the registry lock, so no self-deadlock), the plan/apply/ff/restore
+      paths incl. interrupts, pathspec stash index semantics with plan None plus a
+      staged registry hunk (the pop sees the same blob on both sides, so no text merge),
+      the reaper TOCTOU and kept-stash costs (already considered), and git config
+      traps (color, quotePath, autocrlf via hash-object path filters). Cleanup: `_stash_top`
+      duplicated the module''s `_ref` helper; it is removed, and `_stash_ref`, `_stash_for_merge`,
+      `_worktree_has` and `_stash_already_applied` now call `_ref` (no behaviour change).
+      Incidental, out of scope, filed as pr-dc0ba10: `pm push` (git_ops.push_pm_branch)
+      rewrites the live registry through unlocked `git checkout`s (lost writes; can
+      leave the repo on pm/sync-*), and its github `pull --rebase` text-stashes pm/project.yaml
+      under a user''s rebase.autoStash=true (the original corruption). Evidence /pm-captures/review-c6a2-i13:
+      full suite at 951bd840 5744 passed / 1 skipped (full-suite.txt).'
+    created_at: '2026-11-26T22:33:03Z'
+    last_edited: '2026-11-26T22:33:03Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-ca6981c-bug-pm-merge-s-git-stash-pop-corrupt-ac115969
 - id: pr-c41f029
   plan: bugs
@@ -56854,6 +56871,53 @@ prs:
   gh_pr_number: null
   created_at: '2026-11-26T18:50:15.279071+00:00'
   updated_at: '2026-11-26T18:50:15.279071+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-dc0ba10
+  plan: bugs
+  title: 'Bug: pm push rewrites the live pm/project.yaml via unlocked git checkouts
+    and text-stashes it on pull --rebase under rebase.autoStash'
+  branch: pm/pr-dc0ba10-bug-pm-push-rewrites-the-live-pm-project-yaml-via-
+  status: pending
+  depends_on: []
+  description: 'Found in pr-ca6981c review c6a2 i13 (same failure class as #253 S74
+    / pr-ca6981c, but in `pm push`, not merge). pm_core/git_ops.py push_pm_branch
+    (~L222-330), the internal-pm-dir path:
+
+    (1) `git add pm/`, `git checkout -b pm/sync-<ts>`, commit, then _checkout_and_restore_pm
+    runs `git checkout <original>` + `git checkout <sync> -- pm/` with no registry
+    lock held. git''s checkout unlinks and recreates pm/project.yaml, and for a moment
+    it holds the original branch''s committed registry, without pm''s uncommitted
+    state. A concurrent pm writer (TUI, `pm pr note add`, an agent) that pre-loads
+    or takes the lock in that window loads the reverted registry. The restoring checkout
+    then overwrites the writer''s save with the sync commit''s copy (a lost write).
+    If a writer saved after the commit, `git checkout <original>` refuses (check=False),
+    so the repo is left on the sync branch and the restore still clobbers that write.
+    pm/ also ends up staged.
+
+    (2) github backend: `pull_rebase(repo_root)` then runs with pm/ staged. Plain
+    git refuses, which is silent (check=False). Under a user''s `rebase.autoStash=true`,
+    git text-stashes pm/project.yaml across the rebase and pops it, and a pull that
+    touched the registry leaves conflict markers plus a leaked autostash: the original
+    pr-ca6981c corruption.
+
+    Repro: internal pm dir, run `pm push` while a loop runs `pm pr note add <pr> x`.
+    Some notes go missing (or the repo stays on pm/sync-*). For (2): `git config rebase.autoStash
+    true`, a github-backend origin with a newer master commit touching pm/project.yaml,
+    then `pm push`.
+
+    Fix direction: never touch the worktree. Build the sync commit with plumbing on
+    a temporary index (GIT_INDEX_FILE: read-tree HEAD, add pm/, write-tree, commit-tree,
+    update-ref refs/heads/pm/sync-<ts>) and push that, so no checkout ever rewrites
+    the live registry. Drop the post-push pull or pass --no-autostash to it; pr-ca6981c''s
+    _ff_with_autostash is the locked, structural way to update the main repo.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-26T22:19:10.647556+00:00'
+  updated_at: '2026-11-26T22:19:10.647556+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
