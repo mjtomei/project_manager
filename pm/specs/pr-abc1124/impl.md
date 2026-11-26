@@ -111,6 +111,25 @@ fuse-overlayfs 1.7.1, kernel 7.0, rootless, keep-id):
    uid `u` (1 ≤ u < 1000) maps to `u+1` one level up.  Root maps to root at
    every level.  A store prepared for consumers at level L therefore shows
    non-root image files one ID off to an engine at level L+1.
+7. (Found during implementation.)  In a container launched from inside a
+   container, rootless engines cannot start at all: its uid_map is
+   `0 1 999; 999 1000 1; 1000 0 1; 1001 1001 64534`, the image's
+   `/etc/subuid` (`pm:1:999`, `pm:1001:64535`) spans two parent extents and
+   names a uid that does not exist, and the kernel accepts a new extent only
+   inside one parent extent → `newuidmap: write to uid_map failed:
+   Operation not permitted`.  Splitting the ranges at the container's own
+   extent boundaries (`pm:1:998`, `pm:999:1`, `pm:1001:64534`) fixes it; for
+   a host-launched container the image's ranges already fit and nothing
+   changes.  pm applies this fit as a root setup step in every
+   nested-podman container (and the prep container).
+8. (Found during implementation.)  In such a container the root filesystem
+   is the parent engine's fuse-overlayfs mount; a graphroot there "mounts"
+   containers without invoking the mount program and every workload fails
+   with `executable file not found`.  A graphroot on a bind-mounted
+   directory (`/scratch`) works.  Host-launched containers have a native
+   overlay rootfs, so their default graphroot is fine (as in this impl
+   container).  `engine-setup` and `cache check` refuse a FUSE graphroot
+   with the fix.
 
 The audit evidence paths named in the task
 (`/home/matt/.local/state/pm-pr-shepherd/disk-audit-20261105T040137Z`,
@@ -296,7 +315,14 @@ the task and on the measurements above.
 * `create_container` must not block the existing reuse path and must keep
   secrets out of logged command lines (unchanged).
 * Tests must never touch the real `~/.pm`, the live host runtime or real
-  settings: unit tests patch `HOME`, `_run_runtime` and subprocess.
+  settings: unit tests patch `HOME`, `_run_runtime` and subprocess; an
+  autouse fixture turns the cache `off` and stubs background reclaim.
+* Rootless engines must be able to start in every nested-podman container
+  pm creates, at any depth (fact 7): `create_container` and the prep
+  container run the subuid fit as root after setup.
+* A store being reclaimed is first renamed (`.pm-reclaiming-*`) so a
+  deletion cut short is finished by the next pass rather than leaving an
+  unrecognisable half-store.
 
 ## 4. Ambiguities and resolutions
 
@@ -452,7 +478,10 @@ image — it does not fall back to building, VFS or the host.
 Containers launched by that nested pm (one level deeper) do not receive the
 shared cache: each nesting level shifts non-root file ownership by one, so
 the store is only valid at the level it was prepared for. Don't run podman
-inside those deeper containers unless that is what the scenario tests.
+inside those deeper containers unless that is what the scenario tests; if
+it is, give the engine a HOME on a bind-mounted directory such as
+`/scratch` — their root filesystem is itself a fuse-overlayfs mount, where
+podman cannot mount containers.
 
 ## Image-build tests
 

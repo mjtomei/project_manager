@@ -359,7 +359,7 @@ def _prepare(root: Path, image_ref: str, image_id: str, tags: list[str],
                for p, ids in _PROBES])
         _exec_ok(name, ["podman", "unshare", "sh", "-c", probe_cmds],
                  "write the UID/GID mapping probes")
-        du = _exec_ok(name, ["podman", "unshare", "du", "-s",
+        du = _exec_ok(name, ["podman", "unshare", "du", "-sx",
                              "--block-size=1", f"{CONSUMER_MOUNT}/store"],
                       "measure the store")
         try:
@@ -701,6 +701,18 @@ def write_engine_config(home: str | None = None, *, force: bool = False,
     return written
 
 
+def overlay_support_problem() -> str | None:
+    """Why engines here cannot mount overlay layers, or None."""
+    missing = [p for p in ("/dev/fuse", MOUNT_PROGRAM) if not Path(p).exists()]
+    if not missing:
+        return None
+    return (f"overlay support is unavailable in this container "
+            f"({' and '.join(missing)} missing), so an engine here cannot "
+            f"mount the shared image's layers. Relaunch the container from a "
+            f"project with 'nested_podman: true' (which passes /dev/fuse) and "
+            f"an image that ships fuse-overlayfs. pm does not fall back to VFS")
+
+
 def _fuse_graphroot_problem(graphroot: Path) -> str | None:
     """A graphroot on a FUSE filesystem cannot hold container mounts.
 
@@ -797,12 +809,8 @@ def consumer_check(image_ref: str | None = None,
                        f"the shared store must be read-only")
     else:
         res.add(True, f"{CONSUMER_MOUNT} mounted read-only")
-    if not Path("/dev/fuse").exists() or not Path(MOUNT_PROGRAM).exists():
-        res.add(False, f"overlay support missing (/dev/fuse or "
-                       f"{MOUNT_PROGRAM} absent): the container needs the "
-                       f"nested_podman flags and an image with fuse-overlayfs")
-    else:
-        res.add(True, "fuse-overlayfs available")
+    overlay = overlay_support_problem()
+    res.add(overlay is None, overlay or "fuse-overlayfs available")
     home = os.path.abspath(home or os.environ.get("HOME") or str(Path.home()))
     problem = engine_config_problem(home)
     res.add(problem is None, problem or f"engine config for HOME={home} "
@@ -866,6 +874,9 @@ def ensure_consumer_engine(home: str | None = None) -> None:
     home = os.path.abspath(home or os.environ.get("HOME") or str(Path.home()))
     if home in _checked_homes:
         return
+    overlay = overlay_support_problem()
+    if overlay:
+        raise ImageCacheError(overlay)
     p = _config_dir(home) / "storage.conf"
     if not p.exists():
         write_engine_config(home)

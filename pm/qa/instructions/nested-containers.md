@@ -69,7 +69,10 @@ image — it does not fall back to building, VFS or the host.
 Containers launched by that nested pm (one level deeper) do not receive the
 shared cache: each nesting level shifts non-root file ownership by one, so
 the store is only valid at the level it was prepared for. Don't run podman
-inside those deeper containers unless that is what the scenario tests.
+inside those deeper containers unless that is what the scenario tests; if
+it is, give the engine a HOME on a bind-mounted directory such as
+`/scratch` — their root filesystem is itself a fuse-overlayfs mount, where
+podman cannot mount containers.
 
 ## Image-build tests
 

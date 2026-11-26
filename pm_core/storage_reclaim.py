@@ -312,7 +312,7 @@ def _du(path: Path) -> int | None:
             return path.stat().st_blocks * 512
         except OSError:
             return None
-    cmd = ["du", "-s", "--block-size=1", str(path)]
+    cmd = ["du", "-sx", "--block-size=1", str(path)]
     if "podman" in _runtime():
         r = _rt("unshare", *cmd, timeout=300)
     else:

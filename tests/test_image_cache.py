@@ -429,6 +429,7 @@ def consumer(tmp_path, monkeypatch, home):
         "names": ["localhost/pm-dev:latest"]}))
     monkeypatch.setattr(image_cache, "CONSUMER_MOUNT", str(mount))
     monkeypatch.setattr(image_cache, "CONSUMER_STORE", str(mount / "store"))
+    monkeypatch.setattr(image_cache, "overlay_support_problem", lambda: None)
     image_cache._checked_homes.clear()
     return mount
 
@@ -507,3 +508,20 @@ def test_missing_in_consumer_message_names_the_cache(consumer):
     assert "does not build, pull or import" in msg
     assert "VFS" in msg and "host" in msg
     assert f"pm set {image_cache.MODE_SETTING} off" in msg
+
+
+def test_missing_overlay_support_fails_the_nested_launch(consumer, tmp_path,
+                                                        monkeypatch):
+    monkeypatch.setattr(image_cache, "overlay_support_problem",
+                        lambda: "overlay support is unavailable (/dev/fuse missing)")
+    with pytest.raises(ImageCacheError, match="/dev/fuse"):
+        image_cache.ensure_consumer_engine(str(tmp_path / "h3"))
+
+
+def test_overlay_support_problem_names_what_is_missing(monkeypatch):
+    real_exists = Path.exists
+    monkeypatch.setattr(Path, "exists",
+                        lambda self: False if str(self) == "/dev/fuse"
+                        else real_exists(self))
+    msg = image_cache.overlay_support_problem()
+    assert msg and "/dev/fuse" in msg and "VFS" in msg
