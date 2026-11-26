@@ -739,16 +739,23 @@ class TestBuildStatus:
         assert _run(s, "a")["state"] == "waiting"
         assert "blocked on d (in_progress)" in _run(s, "a")["reason"]
         rows = st.status_rows(s)
-        dep_rows = [r for r in rows if r["pr_id"] == "d"]
-        assert len(dep_rows) == 2 and dep_rows[0]["also"] == ["b"]
+        # One forest row per PR: the shared dep sits under the first target
+        # and names the other as a reference.
+        assert [(r["pr_id"], r["depth"]) for r in rows] == [
+            ("a", 0), ("d", 1), ("b", 0)]
+        d_row = rows[1]
+        assert d_row["parent"] == "a" and d_row["also"] == ["b"]
 
     def test_dep_that_is_also_a_target_not_listed_as_needing_itself(self):
         prs = [_pr("d", status="qa"), _pr("q", deps=["d"])]
         s = _status(prs, ["d", "q"])
         assert _run(s, "d")["needed_by"] == ["d", "q"]
-        dep_rows = [r for r in st.status_rows(s)
-                    if r["pr_id"] == "d" and r["kind"] == "dep"]
-        assert len(dep_rows) == 1 and dep_rows[0]["also"] == []
+        rows = st.status_rows(s)
+        # d is a target *and* q's dependency: one row, a target nested
+        # under q (the root), not a second root nor a dep duplicate.
+        assert [(r["pr_id"], r["kind"], r["depth"]) for r in rows] == [
+            ("q", "target", 0), ("d", "target", 1)]
+        assert rows[1]["also"] == [] and rows[1]["parent"] == "q"
 
     def test_review_pass_under_skip_qa_does_not_promise_qa(self):
         """skip_qa: after review PASS no QA runs, so the reason must point
@@ -1142,13 +1149,16 @@ def test_runs_popup_renders_targets_and_closes(tmp_path):
             assert isinstance(screen, AutoRunsScreen)
             text = str(screen.query_one("#runs-body", Static).render())
             assert "◎ a" in text and "◎ b" in text
-            assert "scenario 1/2 done" in text
-            assert "wait-for-merge" in text
+            # QA progress shown once, as the phase token.
+            assert "qa 1/2 PASS:1" in text
+            assert "scenario 1/2 done" not in text
             # Every target header names its policy, auto-merge included
-            # (QA s19: U showed no policy); deps carry only a hold label.
-            assert "◎ a [wait-for-merge]" in text
-            assert "◎ b [auto-merge]" in text
-            assert "d [auto-merge]" not in text
+            # (QA s19: U showed no policy); a dep under the wait target it
+            # inherits the hold from carries no label of its own.
+            assert "◎ a WAITING pending [wait-for-merge]" in text
+            assert "◎ b RUNNING qa 1/2 PASS:1 [auto-merge]" in text
+            assert "wait-for-merge ←" not in text
+            assert "[auto-merge] T d" not in text
             # j moves selection; Enter on a run without window keeps popup open
             await pilot.press("j")
             await pilot.press("enter")

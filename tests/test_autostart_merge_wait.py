@@ -428,23 +428,35 @@ class TestStatus:
         prs = _diamond() + [_pr("h", deps=["b"])]
         status = self._status(prs, tmp_path, wait=["f"], targets=["h"])
         text = st.format_text(status)
-        assert "◎ f [wait-for-merge]" in text
-        assert "└ a [wait-for-merge ← f]" in text
-        # h is an auto-merge target; its dep b is held by f.
-        assert "◎ h " in text and "◎ h [" not in text
+        # The wait target states its policy once; its deps inherit it
+        # silently (no "wait-for-merge ← f" per dep or per blocker).
+        assert "◎ f WAITING pending [wait-for-merge]" in text
+        assert "└ a QUEUED pending T a" in text
+        assert "blocked on c (pending), d (pending)" in text
+        assert text.count("wait-for-merge") == 2
+        # h is an auto-merge target; its dep b is shared with f's closure
+        # (via d).  One dependency forest: b appears once, under h (the
+        # first target to reach it), where f's hold is an exception to h's
+        # policy, and its other dependent is a reference.
+        assert "◎ h WAITING pending [auto-merge]" in text
+        assert "└ b QUEUED pending [wait-for-merge ← f]" in text
+        assert text.count("└ b ") == 1 and text.count("└ a ") == 1
+        assert "also needed by d" in text
         rows = st.status_rows(status)
-        labels = {(r["kind"], r["pr_id"]): st.policy_labels(r) for r in rows}
-        assert labels[("target", "f")] == [("wait-for-merge", "wait")]
-        assert labels[("dep", "b")] == [("wait-for-merge ← f", "wait")]
-        assert labels[("target", "h")] == [("auto-merge", "auto")]
+        assert [r["pr_id"] for r in rows] == ["h", "b", "f", "c", "a", "d"]
+        labels = {r["pr_id"]: st.policy_labels(r) for r in rows}
+        assert labels["f"] == [("wait-for-merge", "policy")]
+        assert labels["a"] == [] and labels["c"] == [] and labels["d"] == []
+        assert labels["b"] == [("wait-for-merge ← f", "exception")]
+        assert labels["h"] == [("auto-merge", "policy")]
 
     def test_auto_target_inside_wait_closure_says_held(self, tmp_path):
         status = self._status(_diamond(), tmp_path, targets=["a"], wait=["f"])
         rows = st.status_rows(status)
         row = next(r for r in rows if r["kind"] == "target" and r["pr_id"] == "a")
-        assert st.policy_labels(row) == [("auto-merge, held", "auto"),
-                                         ("wait-for-merge ← f", "wait")]
-        assert "◎ a [auto-merge, held; wait-for-merge ← f]" in \
+        assert st.policy_labels(row) == [("auto-merge", "policy"),
+                                         ("wait-for-merge ← f", "exception")]
+        assert "◎ a QUEUED pending [auto-merge] [wait-for-merge ← f]" in \
             st.format_text(status)
 
     def test_target_row_without_run_still_names_wait(self):
@@ -452,7 +464,7 @@ class TestStatus:
         # closure is merged), but its header still names its policy.
         row = {"pr_id": "f", "kind": "target", "policy": st.POLICY_WAIT,
                "run": {"pr_id": "f", "policy": st.POLICY_AUTO, "held_by": []}}
-        assert st.policy_labels(row) == [("wait-for-merge", "wait")]
+        assert st.policy_labels(row) == [("wait-for-merge", "policy")]
 
 
 def test_runs_popup_shows_wait_policy(tmp_path):
@@ -479,8 +491,9 @@ def test_runs_popup_shows_wait_policy(tmp_path):
             app.push_screen(AutoRunsScreen())
             await pilot.pause()
             text = str(app.screen.query_one("#runs-body", Static).render())
-            assert "◎ f [wait-for-merge]" in text
-            assert "└ a [wait-for-merge ← f]" in text
+            assert "◎ f WAITING pending [wait-for-merge]" in text
+            assert "└ a QUEUED pending T a" in text
+            assert "← f" not in text
 
     asyncio.run(body())
 

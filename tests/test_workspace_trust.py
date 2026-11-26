@@ -528,8 +528,13 @@ def test_adopted_review_polls_with_pr_workdir(tmp_path):
     # breadcrumb records that (pr-e040aeb's fabrication guard).
     state.iteration_attempted = True
     pr_data = {"id": "pr-x", "workdir": "/wd/pr-x"}
+    # pane_transcript_path is patched too: "%5" may be a real pane on the
+    # host's default tmux server (a live pm session), whose transcript
+    # would otherwise be read and its verdict adopted.
     with patch("pm_core.review_loop._get_pm_session", return_value="pm-s"), \
          patch("pm_core.review_loop._find_claude_pane", return_value="%5"), \
+         patch("pm_core.claude_launcher.pane_transcript_path",
+               return_value=None), \
          patch("pm_core.hook_events.read_event", return_value=None), \
          patch("pm_core.review_loop._poll_for_verdict",
                return_value="PASS") as poll:
