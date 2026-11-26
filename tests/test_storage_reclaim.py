@@ -160,6 +160,25 @@ class TestPlan:
         sr.reclaim("pr-1")
         assert st.exists()
 
+    def test_mount_source_is_resolved_once_and_symlinks_hold(
+            self, home, rt, monkeypatch):
+        _, scratch = _run(home, "pr-1-ccd")
+        st = _store(scratch / "eng")
+        link = home / "scratch-link"
+        link.symlink_to(scratch.parent)
+        rt.mounts = [str(link)] + [f"/elsewhere/{i}" for i in range(5)]
+        for i in range(2, 5):
+            _run(home, "pr-1-ccd", idx=i)
+        calls = []
+        real = os.path.realpath
+        monkeypatch.setattr(sr.os.path, "realpath",
+                            lambda p: calls.append(str(p)) or real(p))
+        out = sr.reclaim("pr-1")
+        assert st.exists() and not out.removed
+        assert all("still mounts" in p.held for p in out.plans)
+        # One resolution per mount source, not one per (source, scratch).
+        assert calls.count(str(link)) == 1
+
     def test_live_run_is_held(self, home, rt):
         run, scratch = _run(home, "pr-1-ddd")
         (run / "qa_run.json").write_text(json.dumps(

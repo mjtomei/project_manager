@@ -234,7 +234,7 @@ def container_mount_sources() -> list[str] | None:
 
 
 def _related(a: str, b: str) -> bool:
-    a, b = os.path.realpath(a), os.path.realpath(b)
+    """Resolved paths *a* and *b* are the same, or one lies below the other."""
     return a == b or a.startswith(b + "/") or b.startswith(a + "/")
 
 
@@ -375,12 +375,18 @@ def plan(pr_id: str | None = None, exclude_run: str | None = None) -> Outcome:
     if sources is None:
         out.problem = "the container runtime could not list containers"
         return out
+    # Resolved once, not per scratch dir: every container's mounts against
+    # every scenario's scratch, resolved pairwise, took ~17 s for 300
+    # mounts and 1000 scratch dirs.
+    real_sources = [(s, os.path.realpath(s)) for s in sources]
     # Read once, on the first scratch dir with something to reclaim.
     cwds: list[str] | None = None
     mount_points: list[str] | None = None
     for run_dir, scratch in scenario_scratch_dirs(pr_id, exclude_run):
         p = ScratchPlan(scratch=scratch, run_dir=run_dir)
-        held = next((s for s in sources if _related(s, str(scratch))), None)
+        real_scratch = os.path.realpath(scratch)
+        held = next((s for s, real in real_sources
+                     if _related(real, real_scratch)), None)
         if held:
             p.held = f"a container still mounts {held}"
         elif is_container_store(scratch):

@@ -361,7 +361,17 @@ class TestPmSet:
         assert paths.scratch_base() == tmp_path / "fast"
         r = self._set("scratch-dir", "default")
         assert r.exit_code == 0, r.output
+        assert r.output.strip() == "scratch-dir = ~/.pm/scratch (default)"
         assert paths.scratch_base() == home / ".pm" / "scratch"
+
+    def test_listing_marks_default_locations_once(self, home, tmp_path):
+        listing = self._set("list").output.splitlines()
+        line = next(ln for ln in listing if ln.split()[0] == "scratch-dir")
+        assert line.split()[1:] == ["~/.pm/scratch", "(default)"]
+        assert self._set("scratch-dir", str(tmp_path / "fast")).exit_code == 0
+        listing = self._set("list").output.splitlines()
+        line = next(ln for ln in listing if ln.split()[0] == "scratch-dir")
+        assert line.split()[1:] == [str(tmp_path / "fast")]
 
     def test_relative_path_refused(self, home):
         r = self._set("workdirs-dir", "relative/path")

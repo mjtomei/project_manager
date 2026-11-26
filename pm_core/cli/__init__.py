@@ -283,10 +283,10 @@ _SETTING_DEFAULTS = {
     "trust-prompt-grace-seconds": str(DEFAULT_PROMPT_GRACE_SECONDS),
     "spec-mode": "prompt",
     "container-image-cache": "auto",
-    "workdirs-dir": "(default ~/.pm/workdirs)",
-    "captures-dir": "(default ~/.pm/sessions/<tag>/captures)",
-    "scratch-dir": "(default ~/.pm/scratch)",
-    "image-cache-dir": "(default ~/.pm/image-cache)",
+    "workdirs-dir": "~/.pm/workdirs",
+    "captures-dir": "~/.pm/sessions/<tag>/captures",
+    "scratch-dir": "~/.pm/scratch",
+    "image-cache-dir": "~/.pm/image-cache",
 }
 _LIST_ALIASES = {"list", "ls", "l"}
 
@@ -397,7 +397,7 @@ def set_cmd(setting, value):
                                    pm_home, require_local_path)
         if value == "default":
             (pm_home() / "settings" / setting).unlink(missing_ok=True)
-            click.echo(f"{setting} = {_SETTING_DEFAULTS.get(setting)}")
+            click.echo(f"{setting} = {_SETTING_DEFAULTS.get(setting)} (default)")
             return
         path = Path(os.path.expanduser(value))
         if not path.is_absolute():
