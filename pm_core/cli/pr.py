@@ -3191,17 +3191,30 @@ def _is_dirty_overlap_error(result: subprocess.CompletedProcess) -> bool:
 
 
 def _dirty_file_paths(cwd: Path) -> list[str]:
-    """Return repo-relative paths of dirty files in the working tree.
+    """Repo-relative paths of the dirty files a pathspec stash can carry.
 
     Parsed from ``git status --porcelain -z``: the paths are raw (never
     C-quoted), so they can be fed back to git as pathspecs, and a
     worktree-only change (`` M file``) keeps its leading status column.
     ``-unormal`` overrides a user's ``status.showUntrackedFiles=no``, which
     would hide an untracked file that blocks the fast-forward.
+
+    Two kinds of staged change are left out, so they stay staged in place
+    (the fast-forward keeps them unless it changes those paths, and the
+    stash records the whole index anyway):
+
+    - a staged deletion: the path is in neither the index nor the working
+      tree, so ``git stash push -- <path>`` saves the stash and then fails
+      on it ("did not match any files");
+    - a staged rename, both paths: its source is such a deletion, and a
+      stash of the destination alone makes the pop a rename/delete
+      conflict.  ``status.renames=true`` reports it as one rename even
+      when the user's config turns rename detection off.
     """
-    result = git_ops.run_git("status", "--porcelain", "-z", "-unormal",
+    result = git_ops.run_git("-c", "status.renames=true", "status",
+                             "--porcelain", "-z", "-unormal",
                              cwd=cwd, check=False)
-    entries = (result.stdout or "").rstrip("\n").split("\0")
+    entries = (result.stdout or "").split("\0")
     paths = []
     i = 0
     while i < len(entries):
@@ -3209,9 +3222,11 @@ def _dirty_file_paths(cwd: Path) -> list[str]:
         i += 1
         if len(entry) < 4:
             continue
-        paths.append(entry[3:])
-        if "R" in entry[:2] or "C" in entry[:2]:
+        xy = entry[:2]
+        if "R" in xy or "C" in xy:
             i += 1          # the rename/copy source follows as its own entry
+        if xy[0] not in "DR":
+            paths.append(entry[3:])
     return paths
 
 
@@ -3463,7 +3478,25 @@ def _stash_for_merge(cwd: Path, pr_display_id: str = "",
     # nothing was saved ("No local changes to save", rc 0): the top is then
     # someone else's stash.
     after = _stash_top(cwd)
-    if stash_r.returncode != 0 or not after or after == before:
+    saved = bool(after) and after != before
+    if saved and stash_r.returncode != 0:
+        # git saved the stash and then failed reverting the files (e.g. a
+        # path that vanished since the status).  If it reverted nothing,
+        # drop it, so a failed stash never leaks one; otherwise the pop
+        # after the update restores what it did revert.  No live registry
+        # is passed: a registry change in it (a staged hunk) counts as not
+        # applied, so such a stash is kept and popped.
+        if _stash_already_applied(cwd, after, lambda: None):
+            ref = _stash_ref(cwd, after)
+            if ref is not None:
+                git_ops.run_git("stash", "drop", "-q", ref, cwd=cwd,
+                                check=False)
+            saved = False
+        else:
+            click.echo(f"Warning: git stash failed after saving the stash; "
+                       f"pm restores it after the update:\n"
+                       f"{git_ops.git_detail(stash_r)}", err=True)
+    if not saved:
         click.echo(f"Failed to stash: {git_ops.git_detail(stash_r)}",
                    err=True)
         if has_pm and lock_tui:

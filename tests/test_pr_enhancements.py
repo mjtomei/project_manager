@@ -493,7 +493,7 @@ class TestPullAfterMerge:
                                  stderr="")
             if args[0] == "rev-parse":
                 return MagicMock(returncode=0, stdout="master", stderr="")
-            if args[0] == "status":
+            if "status" in args:        # after `-c status.renames=true`
                 return MagicMock(returncode=0, stdout=" M file.py\n", stderr="")
             if args[0] == "merge":
                 n["merge"] += 1

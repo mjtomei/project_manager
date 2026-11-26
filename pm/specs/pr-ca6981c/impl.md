@@ -274,12 +274,25 @@ prints the `git update-index --cacheinfo` command that restores it
    blocks the fast-forward; review c6a2 i6) and apply `_stashable_paths`.
    That drops
    `_NEVER_STASH_RELS` (the registry, `.lock`, `.tmp`) and expands a
-   collapsed untracked `pm/`.
+   collapsed untracked `pm/`. Staged deletions and staged renames (both
+   paths) are never named; they stay staged in place, since the stash
+   records the whole index anyway (review c6a2 i8):
+   - a staged deletion is in neither the index nor the worktree, so
+     `git stash push -- <path>` saves the stash and then fails on it ("did
+     not match any files"): the update failed and the stash leaked;
+   - a rename's source is such a deletion, and a stash of its destination
+     alone made the pop a rename/delete conflict. `-c status.renames=true`
+     reports a rename as one entry even under a user's
+     `status.renames=false`.
 2. `git stash push --include-untracked -m "pm: auto-stash for merge" --
    :(literal)<p>...`.
 3. Record the new `stash@{0}` commit. If the top did not change ("No local
    changes to save", rc 0), it is someone else's stash: treat that as a
-   failed stash.
+   failed stash. git saves the stash before it reverts the files, so a
+   push can fail with a stash already stored (e.g. a path that vanished
+   since the status). If that stash's changes are all still in the
+   worktree (`_stash_already_applied`), it is dropped and the stash
+   failed; otherwise it is popped after the update like any other.
 4. Raise the TUI overlay only when pm/ files are stashed.
 
 `_unstash_after_merge` pops the stash by its commit (`_stash_ref`), not by
@@ -359,6 +372,10 @@ lock is a different one.
 - **Stash-pop conflict in ordinary files:** the update has landed and the
   registry is reconciled and valid. The stash is kept with a drop
   instruction. No window opens (master no longer opens merge windows).
+- **A staged deletion or rename** in the main repo: left staged in place
+  while the stash takes the other dirty files. If the update itself
+  changes one of those paths, the fast-forward fails with git's message and
+  nothing is stashed for it.
 - **A pop git refuses** (e.g. an untracked stashed file now exists from the
   merge): the stash is kept, and the message names it. git >= 2.34 has
   already applied the tracked part then, so the message says to restore
@@ -374,8 +391,9 @@ lock is a different one.
 
 - Guard: `find_conflict_markers` forms and benign values; the `load()`
   message; a missing file is still a `FileNotFoundError`.
-- `_dirty_file_paths`: worktree-only change; raw paths and renames;
-  untracked files despite `status.showUntrackedFiles=no`.
+- `_dirty_file_paths`: worktree-only change; raw paths; a staged rename
+  left out with its source entry consumed; untracked files despite
+  `status.showUntrackedFiles=no`.
 - `_persist_with_backoff`: retry-then-succeed; exhaustion.
 - `_ff_with_autostash` on real git:
   - overlapping edits reconcile (live wins, merged-in note and field kept,
@@ -391,6 +409,11 @@ lock is a different one.
     with the command that restores it;
   - a stash failure, or an empty stash push, restores the registry and
     never pops the user's own stash;
+  - a staged deletion or rename (also under `status.renames=false`) stays
+    staged across a stash taken for another file, with no conflict or
+    leaked stash;
+  - a stash push that fails after saving: dropped when it reverted
+    nothing, popped after the update when it did;
   - git never rewrites the live registry (same inode across merge and
     stash push/pop);
   - a clean registry is updated without leaving a dirty tree;

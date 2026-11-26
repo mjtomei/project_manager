@@ -211,13 +211,16 @@ class TestDirtyFilePaths:
         repo = _init_repo(tmp_path)
         _seed_project(repo)
         (repo / "old name.txt").write_text("x\n")
+        (repo / "z.txt").write_text("z\n")
         _git("add", "-A", cwd=repo)
         _git("commit", "-q", "-m", "f", cwd=repo)
         _git("mv", "old name.txt", "new name.txt", cwd=repo)
         (repo / "café \"q\".txt").write_text("u\n")
+        (repo / "z.txt").write_text("changed\n")
         paths = pr_mod._dirty_file_paths(repo)
-        # Not C-quoted, rename gives the new path only.
-        assert sorted(paths) == ["café \"q\".txt", "new name.txt"]
+        # Not C-quoted.  The staged rename is left out (both paths: its
+        # source entry is consumed, not read as a path of its own).
+        assert sorted(paths) == ["café \"q\".txt", "z.txt"]
 
     def test_untracked_listed_despite_user_status_config(self, tmp_path):
         """A user's ``status.showUntrackedFiles=no`` hid untracked files from
@@ -469,6 +472,93 @@ class TestRegistryAcrossFastForward:
         assert _git("rev-parse", "stash@{0}", cwd=repo).stdout == user
         assert (repo / "mine.txt").read_text() == "local\n"
         assert (pm / "project.yaml").read_bytes() == before
+
+    @pytest.mark.parametrize("kind", ["delete", "rename",
+                                      "rename, user renames off"])
+    def test_staged_delete_or_rename_kept_across_the_stash(self, tmp_path,
+                                                           kind):
+        """A pathspec stash cannot carry these.  Naming a staged deletion
+        made `git stash push` save the stash and then fail on the path (the
+        update failed and the stash leaked); naming a rename's destination
+        alone made the pop a rename/delete conflict.  They stay staged in
+        place instead, and the stash takes the file that blocks the
+        update."""
+        repo = _init_repo(tmp_path)
+        pm = _seed_project(repo)
+        (repo / "old.txt").write_text("1\n2\n3\n")
+        (repo / "code.txt").write_text("a\nb\nc\nd\ne\n")
+        _git("add", "-A", cwd=repo)
+        _git("commit", "-q", "-m", "files", cwd=repo)
+        _incoming(repo, pm, _add_note("note-in", "x"),
+                  files={"code.txt": "A\nb\nc\nd\ne\n"})
+        (repo / "code.txt").write_text("a\nb\nc\nd\nE\n")    # blocks the ff
+        if kind == "delete":
+            _git("rm", "-q", "old.txt", cwd=repo)
+        else:
+            if kind != "rename":
+                _git("config", "status.renames", "false", cwd=repo)
+            _git("mv", "old.txt", "new.txt", cwd=repo)
+        staged = _git("diff", "--cached", "--name-status", cwd=repo).stdout
+
+        r = pr_mod._ff_with_autostash(repo, "incoming")
+        assert r.returncode == 0, r.stderr
+        assert _git("rev-parse", "HEAD", cwd=repo).stdout == \
+            _git("rev-parse", "incoming", cwd=repo).stdout
+        assert (repo / "code.txt").read_text() == "A\nb\nc\nd\nE\n"
+        assert _git("diff", "--cached", "--name-status",
+                    cwd=repo).stdout == staged
+        assert _git("diff", "--name-only", "--diff-filter=U",
+                    cwd=repo).stdout == ""
+        assert _stash_list(repo) == ""
+        d = store.load(pm)
+        assert [n["id"] for n in _pr(d, "pr-001")["notes"]] == ["note-in"]
+
+    def test_stash_that_failed_before_reverting_is_dropped(self, tmp_path):
+        """`git stash push` saves the stash before it reverts the files, so a
+        path that vanished since the status (a temp file) fails it with a
+        stash already stored.  Nothing was reverted, so it is dropped rather
+        than leaked, and the update fails with everything in place."""
+        repo = _init_repo(tmp_path)
+        pm = _seed_project(repo)
+        _with_code_overlap(repo, pm, _add_note("note-in", "x"))
+        _edit(pm, lambda d: _pr(d, "pr-001").update(updated_at="local"))
+        before = (pm / "project.yaml").read_bytes()
+        real = pr_mod._dirty_file_paths
+
+        with mock.patch.object(pr_mod, "_dirty_file_paths",
+                               lambda cwd: real(cwd) + ["vanished.tmp"]):
+            r = pr_mod._ff_with_autostash(repo, "incoming")
+        assert r.returncode != 0
+        assert _stash_list(repo) == ""
+        assert (repo / "code.txt").read_text() == "v1 local\n"
+        assert (pm / "project.yaml").read_bytes() == before
+
+    def test_stash_that_failed_after_reverting_is_restored(self, tmp_path):
+        """If the failing `git stash push` did revert files, they exist only
+        in the stash: pm still pops it after the update instead of reporting
+        a failed stash and leaving them there."""
+        repo = _init_repo(tmp_path)
+        pm = _seed_project(repo)
+        (repo / "code.txt").write_text("a\nb\nc\nd\ne\n")
+        _git("add", "code.txt", cwd=repo)
+        _git("commit", "-q", "-m", "code", cwd=repo)
+        _incoming(repo, pm, _add_note("note-in", "x"),
+                  files={"code.txt": "A\nb\nc\nd\ne\n"})
+        (repo / "code.txt").write_text("a\nb\nc\nd\nE\n")    # blocks the ff
+        real = pr_mod.git_ops.run_git
+
+        def run_git(*args, **kw):
+            r = real(*args, **kw)
+            if args[:2] == ("stash", "push"):
+                return subprocess.CompletedProcess(args, 1, r.stdout, "boom")
+            return r
+
+        with mock.patch.object(pr_mod.git_ops, "run_git",
+                               side_effect=run_git):
+            r = pr_mod._ff_with_autostash(repo, "incoming")
+        assert r.returncode == 0, r.stderr
+        assert (repo / "code.txt").read_text() == "A\nb\nc\nd\nE\n"
+        assert _stash_list(repo) == ""
 
     def test_git_never_rewrites_the_live_registry(self, tmp_path):
         """git's checkout unlinks and recreates a file, so lock-free readers
