@@ -177,8 +177,11 @@ removed.
 ### 2c. `pr.py`: `_ff_with_autostash` (R1, R2, R5, R6)
 
 ```
+target = rev-parse target^{commit}             # one commit for plan and ff
+head = rev-parse HEAD
 plan = _plan_registry(repo, target)            # before the lock (slow part)
 with store._lock(repo/pm, timeout=10):         # busy -> failed result, untouched
+    if HEAD != head: plan = _plan_registry(repo, target)  # another update ran
     _apply_registry(repo, plan)                # atomic rename + stage target blob
     r = git merge --ff-only --no-autostash target  # keeps the registry entry
     if r failed with "would be overwritten":
@@ -189,8 +192,30 @@ with store._lock(repo/pm, timeout=10):         # busy -> failed result, untouche
             try:     r = git merge --ff-only --no-autostash target
             finally: restored = _unstash_after_merge(repo, info)
     finally: if r failed: _restore_registry(repo, plan)
-if r ok and restored: _reap_auto_stashes(repo) # read-only checks, after unlock
+    if r ok and restored: _reap_auto_stashes(repo)   # still under the lock
 ```
+
+The plan runs before the lock and can take seconds on a large registry
+(the pure-Python dump alone is ~3.7 s on this repo's), so two things can
+change meanwhile (review c6a2 i2):
+- **The target ref.** A concurrent fetch moves `origin/<base>`. The index
+  is staged with the planned commit's blob, so the target is pinned to that
+  commit up front. Otherwise the fast-forward goes to the newer commit and
+  fails spuriously ("would be overwritten: pm/project.yaml").
+- **HEAD.** Another update (a second merge) fast-forwards it first. The
+  plan's merge base and the HEAD entry the auto-stash is taken against are
+  then stale: the stash would carry a registry change, git would refuse its
+  pop, and the user's other files would stay stashed. So the plan is redone
+  under the lock when HEAD moved. That case is rare, and it costs about what
+  any pm write costs.
+
+The reaper runs under the lock too. Every pm auto-stash push and pop
+happens under it, so a reaper outside it could treat another update's
+in-flight auto-stash as an applied leftover. Two windows allow that: after
+the stash is stored but before its files are reverted, and after the pop's
+apply but before its drop. Dropping it there either loses that stash, or
+shifts the positions so the pop's own `stash drop stash@{N}` removes a
+different entry (e.g. the user's WIP).
 
 `--no-autostash` overrides a user's `merge.autoStash=true`, which would
 otherwise make git itself text-stash the swapped-in registry, reset it and
@@ -246,6 +271,9 @@ for merge` when its changes are already applied:
   (`hash-object` vs `rev-parse`);
 - `pm/project.yaml`: `merge_3way(stash^1, stash, current) == current`, i.e.
   every change the stash made is present or superseded in the live registry.
+  This is checked last, and the live registry is loaded only if some
+  candidate changed it. Only stashes from an older pm do, so the lock hold
+  normally stays at a few git calls.
 
 Entries are dropped highest index first, after re-checking that each ref
 still names the same commit. Entries that are not applied are listed with
@@ -254,19 +282,23 @@ inspect/drop hints.
 `_resolve_project_yaml_pop(cwd, ref="stash@{0}")` is master's resolver. It is
 now parameterized by ref, and it merges only files whose two sides parse as
 pm registries (they have a `project` key). A user's file that merely has the
-name is left alone.
+name is left alone. pm's auto-stash never carries the repo's own registry,
+so the resolver now only fires for a nested pm project's registry, whose
+lock is a different one.
 
 ## 3. Implicit requirements
 
 - **No self-deadlock.** Nothing inside the held region calls
   `locked_update` / `_lock` on the same root. `trigger_tui_merge_lock` only
   writes a marker file. The registry is written with an atomic rename, not
-  through `locked_update`.
+  through `locked_update`. `_resolve_project_yaml_pop` locks only the
+  conflicted registry's own root, which is never `repo/pm` (see 2c).
 - **Master's mocked tests keep passing.** The mocked `run_git` returns
   `"master"` for every `rev-parse`, and `stash pop` is still called as
   `("stash", "pop", ref)`. `test_fetches_and_fast_forwards_in_repo_dir` now
   normalizes the cwd type (str/Path), since the reaper runs in the repo dir
-  too.
+  too. It also mocks `origin/master^{commit}` to a sha and asserts the
+  fast-forward goes to that pinned commit.
 - **Paths are raw.** `-z` porcelain plus `:(literal)` pathspecs, so spaces,
   non-ASCII, quotes and glob characters survive.
 
@@ -283,6 +315,10 @@ name is left alone.
   is a second guard.
 - **A writer hammers the lock:** the merge's polling acquire can starve.
   After 10 s it fails safe and touches nothing.
+- **Two updates of the same repo** (concurrent merges, a fetch during the
+  plan): they serialize on the lock. The target is pinned, a moved HEAD
+  triggers a re-plan, and reaping never sees the other update's in-flight
+  auto-stash.
 - **Stash-pop conflict in ordinary files:** the update has landed and the
   registry is reconciled and valid. The stash is kept with a drop
   instruction. No window opens (master no longer opens merge windows).
@@ -315,16 +351,20 @@ name is left alone.
   - a staged registry hunk survives a failed update;
   - a writer that re-dirties the registry never enters the text stash;
   - an uncommitted `pm/` dir never stashes the registry;
-  - a user's `merge.autoStash=true` never text-stashes the registry.
+  - a user's `merge.autoStash=true` never text-stashes the registry;
+  - the target ref moving while planning is ignored (pinned commit);
+  - another update moving HEAD before the lock triggers a re-plan, and the
+    stash still pops cleanly.
 - Locking:
   - the lock is held during every rewriting git step (first fast-forward
     included) and released afterwards;
+  - reaping (`stash list` / `stash drop`) runs under the lock;
   - a busy lock leaves the checkout untouched, and the post-publish pull
     then exits 1 without a recovery window (`test_pr_enhancements.py`);
   - a concurrent writer thread loses no notes (3 runs).
 - Restore and reap:
   - a conflicted pop keeps the stash, leaves the registry valid and opens no
-    window;
+    window (the warning names a path with a space unsplit);
   - a refused pop keeps the stash intact;
   - reaping drops applied entries (files plus a structural registry case)
     and keeps a non-applied entry and WIP.

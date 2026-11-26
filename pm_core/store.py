@@ -166,8 +166,10 @@ def load(root: Optional[Path] = None, validate: bool = True) -> dict:
         lineno, marker = markers[0]
         raise ProjectYamlParseError(
             f"{path} contains git conflict markers from a failed stash/merge: "
-            f"line {lineno}: {marker.rstrip()!r}. Resolve the markers (or restore "
-            f"the file from git, e.g. 'git checkout -- {path.name}'), then re-run."
+            f"line {lineno}: {marker.rstrip()!r}. Resolve the markers by hand "
+            f"(the file is read-only: chmod u+w it first), then re-run. "
+            f"'git checkout -- {path}' restores the committed file instead, "
+            f"but discards pm's uncommitted state."
         )
 
     try:

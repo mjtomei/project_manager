@@ -136,6 +136,9 @@ class TestConflictMarkerGuard:
         msg = str(exc.value)
         assert "conflict markers" in msg
         assert "line 5" in msg  # the <<<<<<< line
+        # Remediation works from any cwd and says what a checkout loses.
+        assert f"git checkout -- {root / 'project.yaml'}" in msg
+        assert "discards pm's uncommitted state" in msg
 
     def test_missing_file_is_still_file_not_found(self, tmp_path):
         with pytest.raises(FileNotFoundError):
@@ -515,6 +518,83 @@ class TestRegistryAcrossFastForward:
         assert store.find_conflict_markers(
             (pm / "project.yaml").read_text()) == []
 
+    def test_target_ref_moving_while_planning_is_ignored(self, tmp_path):
+        """The plan runs before the lock and can take seconds on a large
+        registry; a concurrent fetch moving ``origin/<base>`` meanwhile must
+        not make the fast-forward go to a commit whose registry the index
+        was not staged with."""
+        repo = _init_repo(tmp_path)
+        pm = _seed_project(repo)
+        _incoming(repo, pm, _add_note("note-in", "x"))
+        planned = _git("rev-parse", "incoming", cwd=repo).stdout.strip()
+        _git("checkout", "-q", "incoming", cwd=repo)
+        _edit(pm, lambda d: _pr(d, "pr-002").update(description="newer"))
+        _git("commit", "-qam", "newer", cwd=repo)
+        newer = _git("rev-parse", "HEAD", cwd=repo).stdout.strip()
+        _git("checkout", "-q", "master", cwd=repo)
+        _git("update-ref", "refs/heads/incoming", planned, cwd=repo)
+        _edit(pm, lambda d: _pr(d, "pr-002").update(title="local"))
+        real_plan = pr_mod._plan_registry
+
+        def plan_then_fetch(repo_, target):
+            p = real_plan(repo_, target)
+            _git("update-ref", "refs/heads/incoming", newer, cwd=repo)
+            return p
+
+        with mock.patch.object(pr_mod, "_plan_registry",
+                               side_effect=plan_then_fetch):
+            r = pr_mod._ff_with_autostash(repo, "incoming")
+        assert r.returncode == 0, r.stderr
+        assert _git("rev-parse", "HEAD", cwd=repo).stdout.strip() == planned
+        d = store.load(pm)
+        assert [n["id"] for n in _pr(d, "pr-001")["notes"]] == ["note-in"]
+        assert _pr(d, "pr-002")["title"] == "local"
+        assert _git("diff", "--cached", "--name-only", cwd=repo).stdout == ""
+
+    def test_replans_when_another_update_moves_head_first(self, tmp_path):
+        """Another update (a second merge) can fast-forward HEAD between this
+        one's plan and its lock.  The stash must still be taken against the
+        *current* HEAD's registry entry, or it carries a registry change and
+        its pop is refused (the user's other files left unrestored)."""
+        repo = _init_repo(tmp_path)
+        pm = _seed_project(repo)
+        (repo / "code.txt").write_text("a\nb\nc\nd\ne\n")
+        _git("add", "code.txt", cwd=repo)
+        _git("commit", "-q", "-m", "code", cwd=repo)
+        _git("checkout", "-q", "-b", "incoming", cwd=repo)
+        _edit(pm, _add_note("note-1", "first merge"))
+        _git("commit", "-qam", "c1", cwd=repo)
+        c1 = _git("rev-parse", "HEAD", cwd=repo).stdout.strip()
+        _edit(pm, lambda d: _pr(d, "pr-002").update(description="c2"))
+        (repo / "code.txt").write_text("A\nb\nc\nd\ne\n")
+        _git("commit", "-qam", "c2", cwd=repo)
+        _git("checkout", "-q", "master", cwd=repo)
+        _edit(pm, lambda d: _pr(d, "pr-002").update(title="local"))
+        (repo / "code.txt").write_text("a\nb\nc\nd\nE\n")   # stash path
+        real_plan = pr_mod._plan_registry
+        other = []
+
+        def plan_then_other_update(repo_, target):
+            p = real_plan(repo_, target)
+            if not other:
+                other.append(None)          # the other update plans too
+                other[0] = pr_mod._ff_with_autostash(repo, c1)
+            return p
+
+        with mock.patch.object(pr_mod, "_plan_registry",
+                               side_effect=plan_then_other_update):
+            r = pr_mod._ff_with_autostash(repo, "incoming")
+        assert other[0].returncode == 0, other[0].stderr
+        assert r.returncode == 0, r.stderr
+        assert (repo / "code.txt").read_text() == "A\nb\nc\nd\nE\n"
+        assert _stash_list(repo) == ""
+        d = store.load(pm)
+        assert [n["id"] for n in _pr(d, "pr-001")["notes"]] == ["note-1"]
+        assert _pr(d, "pr-002")["description"] == "c2"
+        assert _pr(d, "pr-002")["title"] == "local"
+        assert store.find_conflict_markers(
+            (pm / "project.yaml").read_text()) == []
+
 
 # ---------------------------------------------------------------------------
 # Locking: concurrent writers serialize against the whole fast-forward
@@ -533,8 +613,8 @@ class TestRegistryLock:
         real = pr_mod.git_ops.run_git
 
         def run_git(*args, **kw):
-            # Every step that rewrites files; the read-only reaping of leaked
-            # stashes runs after the lock is released.
+            # Every step that rewrites files (reaping: see
+            # test_reaping_runs_under_the_lock).
             if args[0] in ("merge", "checkout", "update-index") or \
                     args[:2] in (("stash", "push"), ("stash", "pop")):
                 try:
@@ -550,6 +630,39 @@ class TestRegistryLock:
         assert probes and all(state == "held" for _, state in probes), probes
         with store._lock(pm, timeout=0):
             pass                                  # released afterwards
+
+    def test_reaping_runs_under_the_lock(self, tmp_path):
+        """Every pm auto-stash push and pop happens under the registry lock.
+        A reaper running outside it could take another update's in-flight
+        auto-stash (stored, files not yet reverted) for an applied leftover
+        and drop it, or drop by a position that update's pop then reuses."""
+        repo = _init_repo(tmp_path)
+        pm = _seed_project(repo)
+        (repo / "a.txt").write_text("base\n")
+        _git("add", "a.txt", cwd=repo)
+        _git("commit", "-q", "-m", "a", cwd=repo)
+        (repo / "a.txt").write_text("applied\n")
+        _git("stash", "push", "-m", "pm: auto-stash for merge", cwd=repo)
+        (repo / "a.txt").write_text("applied\n")          # leaked, applied
+        _incoming(repo, pm, _add_note("note-in", "x"))
+        probes = []
+        real = pr_mod.git_ops.run_git
+
+        def run_git(*args, **kw):
+            if args[:2] in (("stash", "list"), ("stash", "drop")):
+                try:
+                    with store._lock(pm, timeout=0):
+                        probes.append((args[:2], "free"))
+                except store.StoreLockTimeout:
+                    probes.append((args[:2], "held"))
+            return real(*args, **kw)
+
+        with mock.patch.object(pr_mod.git_ops, "run_git",
+                               side_effect=run_git):
+            assert pr_mod._ff_with_autostash(repo, "incoming").returncode == 0
+        assert (("stash", "drop"), "held") in probes, probes
+        assert all(state == "held" for _, state in probes), probes
+        assert _stash_list(repo) == ""
 
     def test_busy_lock_leaves_checkout_untouched(self, tmp_path, capsys):
         repo = _init_repo(tmp_path)
@@ -634,20 +747,20 @@ class TestStashRestoreAndReap:
                                                            capsys):
         repo = _init_repo(tmp_path)
         pm = _seed_project(repo)
-        (repo / "code.txt").write_text("base\n")
-        _git("add", "code.txt", cwd=repo)
+        (repo / "my code.txt").write_text("base\n")
+        _git("add", "my code.txt", cwd=repo)
         _git("commit", "-q", "-m", "code", cwd=repo)
         _incoming(repo, pm, _add_note("note-in", "x"),
-                  files={"code.txt": "incoming edit\n"})
+                  files={"my code.txt": "incoming edit\n"})
         _edit(pm, lambda d: _pr(d, "pr-001").update(updated_at="local"))
-        (repo / "code.txt").write_text("local edit\n")
+        (repo / "my code.txt").write_text("local edit\n")
 
         with mock.patch.object(pr_mod, "_launch_merge_window") as launch:
             r = pr_mod._ff_with_autostash(repo, "incoming")
         assert r.returncode == 0                  # the update itself landed
         launch.assert_not_called()                # no merge-time session
         err = capsys.readouterr().err
-        assert "conflicted in: code.txt" in err
+        assert "conflicted in: my code.txt." in err   # raw path, not split
         assert "git stash drop stash@{0}" in err
         assert "auto-stash for merge" in _stash_list(repo)   # kept
         d = store.load(pm)

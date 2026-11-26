@@ -463,15 +463,20 @@ class TestPullAfterMerge:
             [c[1].get("cwd") for c in g.run_git.call_args_list], launch
 
     def test_fetches_and_fast_forwards_in_repo_dir(self, tmp_path):
+        fetched = "f" * 40
+
         def rg(*args, **kw):
+            if args[0] == "rev-parse" and "origin/master^{commit}" in args:
+                return MagicMock(returncode=0, stdout=fetched + "\n",
+                                 stderr="")
             if args[0] == "rev-parse":
                 return MagicMock(returncode=0, stdout="master", stderr="")
             return MagicMock(returncode=0, stdout="", stderr="")
         ok, calls, cwds, launch = self._pull(tmp_path, rg)
         assert ok
         assert ("fetch", "origin") in calls
-        assert ("merge", "--ff-only", "--no-autostash",
-                "origin/master") in calls
+        # To the fetched commit, pinned (a later fetch cannot move it).
+        assert ("merge", "--ff-only", "--no-autostash", fetched) in calls
         assert {str(c) for c in cwds} == {str(tmp_path)}
         launch.assert_not_called()
 

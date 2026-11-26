@@ -3438,6 +3438,13 @@ def _stash_for_merge(cwd: Path, pr_display_id: str = "",
             "count": len(remaining)}
 
 
+def _unmerged_paths(cwd: Path) -> list[str]:
+    """Repo-relative paths with unmerged index entries (raw, ``-z``)."""
+    r = git_ops.run_git("diff", "--name-only", "-z", "--diff-filter=U",
+                        cwd=cwd, check=False)
+    return [p for p in (r.stdout or "").split("\0") if p]
+
+
 def _resolve_project_yaml_pop(cwd: Path, ref: str = "stash@{0}") -> bool:
     """Resolve a ``project.yaml`` conflict left by a failed ``stash pop``.
 
@@ -3448,14 +3455,13 @@ def _resolve_project_yaml_pop(cwd: Path, ref: str = "stash@{0}") -> bool:
     stash *ref* when nothing else conflicted.  Returns True when the pop is
     fully resolved.
 
-    pm's own merge auto-stash never holds the registry any more
-    (:data:`_NEVER_STASH_RELS`), so this covers a registry that reached a
-    text stash some other way (a stash from an older pm, ``git pull
-    --autostash``).  Only pm registries are merged — a file that merely has
-    this name is left for the user.
+    pm's merge auto-stash never holds the repo's own registry
+    (:data:`_NEVER_STASH_RELS`), so this only fires for another pm registry
+    the stash carried (a nested pm project; its lock is not the one
+    :func:`_ff_with_autostash` holds).  Only pm registries are merged — a
+    file that merely has this name is left for the user.
     """
-    unmerged = git_ops.run_git("diff", "--name-only", "--diff-filter=U",
-                               cwd=cwd, check=False).stdout.split()
+    unmerged = _unmerged_paths(cwd)
     yaml_paths = [p for p in unmerged if Path(p).name == "project.yaml"]
     if not yaml_paths:
         return False
@@ -3500,8 +3506,7 @@ def _restore_merge_stash(cwd: Path, sha: str, count: int) -> bool:
     if pop_r.returncode == 0:
         click.echo(f"Restored {count} stashed file(s).")
         return True
-    unmerged = git_ops.run_git("diff", "--name-only", "--diff-filter=U",
-                               cwd=cwd, check=False).stdout.split()
+    unmerged = _unmerged_paths(cwd)
     try:
         resolved = bool(unmerged) and _resolve_project_yaml_pop(cwd, ref)
     except (store.StoreLockTimeout, OSError):
@@ -3561,9 +3566,13 @@ def _ff_with_autostash(repo_dir: str | Path, target: str,
     over the merged one (#253 S74).  If the lock stays busy the checkout is
     left untouched and a :class:`_RegistryLockBusy` result is returned.
     After a successful update with everything restored, leaked auto-stashes
-    are reaped.
+    are reaped (still under the lock).
     """
     repo_path = Path(repo_dir)
+    # The plan runs before the lock (seconds on a large registry): pin the
+    # target to one commit, since a concurrent fetch can move a ref like
+    # ``origin/<base>`` meanwhile and the index is staged for the plan's.
+    target = _ref(repo_dir, f"{target}^{{commit}}") or target
 
     def ff():
         # --no-autostash: a user's ``merge.autoStash=true`` would otherwise
@@ -3573,6 +3582,7 @@ def _ff_with_autostash(repo_dir: str | Path, target: str,
                                cwd=repo_dir, check=False)
 
     restored = True
+    planned_head = _ref(repo_dir, "HEAD")
     plan = _plan_registry(repo_path, target)
     reg_root = _registry_root(repo_path)
     with contextlib.ExitStack() as held:
@@ -3584,6 +3594,12 @@ def _ff_with_autostash(repo_dir: str | Path, target: str,
                 return _RegistryLockBusy(
                     ["git", "merge", "--ff-only", target], 1, "",
                     f"{e}\npm did not touch {repo_dir}.")
+        if _ref(repo_dir, "HEAD") != planned_head:
+            # Another update moved HEAD while this one planned.  The plan's
+            # merge base and the HEAD entry the auto-stash is taken against
+            # are stale (a stash carrying a registry change is refused on
+            # pop), so plan again, under the lock this time.
+            plan = _plan_registry(repo_path, target)
         if plan is not None and not _apply_registry(repo_path, plan):
             plan = None
         merge_r = None
@@ -3611,8 +3627,12 @@ def _ff_with_autostash(repo_dir: str | Path, target: str,
                                    f"+ merged changes).")
                 else:
                     _restore_registry(repo_path, plan)
-    if merge_r.returncode == 0 and restored:
-        _reap_auto_stashes(repo_path)
+        if merge_r.returncode == 0 and restored:
+            # Under the lock, like every pm auto-stash push and pop: another
+            # update's in-flight auto-stash (stored, files not yet reverted,
+            # or applied but not yet dropped) is then never taken for an
+            # applied leftover, nor shifted under its positional drop.
+            _reap_auto_stashes(repo_path)
     return merge_r
 
 
@@ -3650,16 +3670,19 @@ def _worktree_has(cwd: Path, blob_rev: str, rel: str) -> bool:
 
 
 def _stash_already_applied(cwd: Path, sha: str, current) -> bool:
-    """True if every change stash *sha* holds is already in the working tree."""
+    """True if every change stash *sha* holds is already in the working tree.
+
+    *current* returns the live registry (or None).  The registry, which
+    takes parsing, is checked last and only for a stash that changed it.
+    """
     tracked = git_ops.run_git("diff", "--name-only", "-z", f"{sha}^1", sha,
                               cwd=cwd, check=False)
     if tracked.returncode != 0:
         return False
-    for rel in filter(None, tracked.stdout.split("\0")):
-        if rel == _REGISTRY_REL:
-            if not _registry_change_applied(cwd, sha, rel, current):
-                return False
-        elif not _worktree_has(cwd, f"{sha}:{rel}", rel):
+    paths = [p for p in tracked.stdout.split("\0") if p]
+    for rel in paths:
+        if rel != _REGISTRY_REL and not _worktree_has(cwd, f"{sha}:{rel}",
+                                                      rel):
             return False
     if git_ops.run_git("rev-parse", "-q", "--verify", f"{sha}^3", cwd=cwd,
                        check=False).returncode == 0:
@@ -3670,7 +3693,8 @@ def _stash_already_applied(cwd: Path, sha: str, current) -> bool:
         for rel in filter(None, untracked.stdout.split("\0")):
             if not _worktree_has(cwd, f"{sha}^3:{rel}", rel):
                 return False
-    return True
+    return _REGISTRY_REL not in paths or _registry_change_applied(
+        cwd, sha, _REGISTRY_REL, current())
 
 
 def _reap_auto_stashes(cwd: Path) -> int:
@@ -3679,7 +3703,8 @@ def _reap_auto_stashes(cwd: Path) -> int:
     A stash is dropped only when every change it holds is already in the
     working tree (the registry compared structurally), so nothing is lost;
     other auto-stashes are kept and listed.  Other stashes (WIP, the user's)
-    are never touched.  Returns the number dropped.
+    are never touched.  The caller holds the registry lock, which every pm
+    auto-stash push and pop also runs under.  Returns the number dropped.
     """
     listing = git_ops.run_git("stash", "list", "--format=%gd%x09%H%x09%gs",
                               cwd=cwd, check=False)
@@ -3696,13 +3721,20 @@ def _reap_auto_stashes(cwd: Path) -> int:
             candidates.append((ref, sha))
     if not candidates:
         return 0
-    current = None
-    reg_root = _registry_root(cwd)
-    if reg_root is not None:
-        try:
-            current = store.load(reg_root, validate=False)
-        except store.ProjectYamlParseError:
-            current = None
+    loaded: list = []
+
+    def current() -> dict | None:
+        # Only a stash from an older pm carries a registry change; skip the
+        # parse (the caller holds the registry lock) unless one does.
+        if not loaded:
+            reg_root = _registry_root(cwd)
+            try:
+                loaded.append(store.load(reg_root, validate=False)
+                              if reg_root is not None else None)
+            except store.ProjectYamlParseError:
+                loaded.append(None)
+        return loaded[0]
+
     dropped, kept = 0, []
     # Highest index first, so the lower refs stay valid while dropping.
     for ref, sha in sorted(candidates, key=lambda c: int(c[0][7:-1]),
