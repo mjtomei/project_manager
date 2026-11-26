@@ -7,14 +7,23 @@ nothing in pm still offers the removed command, key, or review prompt.
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
 from click.testing import CliRunner
 
 from pm_core import guide, store
-from pm_core.cli import cli
+from pm_core.cli import cli, helpers
 from pm_core.cli.plan import plan as plan_group
 from pm_core.plans.review import REVIEW_PROMPTS
 from pm_core.tui import pane_ops
 from pm_core.tui.plans_pane import PlansPane
+
+
+@pytest.fixture(autouse=True)
+def _no_project_override_leak(monkeypatch):
+    """`cli -C <tmp>` sets the module global ``helpers._project_override`` and
+    nothing resets it, so later tests would inherit this file's deleted tmp
+    root.  monkeypatch restores the pre-test value at teardown."""
+    monkeypatch.setattr(helpers, "_project_override", None)
 
 
 def _state(tmp_path: Path, prs: list[dict] | None = None,
@@ -149,7 +158,6 @@ class TestReviewCoversMissingBreakdown:
         assert result.exit_code == 0, result.output
         assert 'If the plan file has no "## PRs" section yet' in result.output
         assert "start by proposing a PR breakdown" in result.output
-
 
     def test_load_without_prs_points_at_review(self, tmp_path):
         """`plan load` on a plan with no ## PRs names the recovery path that

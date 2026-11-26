@@ -2339,8 +2339,18 @@ prs:
       PR merges second must drop that case. Suite 5699/1s: /pm-captures/pr-30888b1-review-4efb-i1/.'
     created_at: '2026-11-26T16:08:29Z'
     last_edited: '2026-11-26T16:08:29Z'
+  - id: note-76a72be
+    text: 'Review 4efb i2: tests/test_plan_add_breakdown.py now resets helpers._project_override
+      per test (autouse monkeypatch); its `cli -C` calls leaked a deleted tmp root
+      into later tests (same class as pr-5dfc63b). Re-ran the pr-6c0ee2d trial merge
+      at its new head 57fb8168: same single conflict (drop plan_breakdown) and same
+      2 [breakdown] test_prompt_gen failures; spec Ambiguity 5 updated. Cross-PR note
+      left on pr-fe4ca5d (popup `b`=breakdown becomes a dead key). Suite 5699 passed/1
+      skipped: /pm-captures/pr-30888b1-review-4efb-i2/.'
+    created_at: '2026-11-26T16:28:52Z'
+    last_edited: '2026-11-26T16:28:52Z'
   created_at: '2026-03-01T17:51:46.490716+00:00'
-  updated_at: '2026-11-26T16:08:30.261106+00:00'
+  updated_at: '2026-11-26T16:28:53.246504+00:00'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-30888b1-fold-plan-breakdown-into-plan-add-st-ab512a43
 - id: pr-3116896
   plan: tui-ux
@@ -22823,11 +22833,22 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/196
   gh_pr_number: 196
   created_at: '2026-05-04T17:20:58.908941+00:00'
-  updated_at: '2026-05-04T19:01:38.024215+00:00'
+  updated_at: '2026-11-26T16:28:47.918932+00:00'
   started_at: '2026-05-04T17:52:14.172608+00:00'
   reviewed_at: '2026-05-04T19:01:38.024215+00:00'
   merged_at: null
-  notes: []
+  notes:
+  - id: note-dcd3305
+    text: 'From pr-30888b1 review 4efb i2: pr-30888b1 removes `pm plan breakdown`,
+      the plans-pane `w` key and the `breakdown` branch of `pane_ops.handle_plan_action`
+      (plan add now writes the ## PRs section; pre-load plan review proposes one when
+      it is missing). This PR maps popup key `b` -> "breakdown" (`_PLAN_SHORTCUT_KEYS`,
+      `_PLAN_PER_PLAN_ACTIONS` in cli/session.py) and accepts `plan breakdown` in
+      pr_view.handle_command_submitted; after pr-30888b1 lands that key silently does
+      nothing. Whichever merges second: drop `b`/"breakdown" from those sets, the
+      command-bar tuple and their tests.'
+    created_at: '2026-11-26T16:28:47Z'
+    last_edited: '2026-11-26T16:28:47Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-fe4ca5d-improvement-prefix-key-plan-picker-p-1d7ca7a5
 - id: pr-f74988c
   plan: improvements
