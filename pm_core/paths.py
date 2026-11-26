@@ -331,9 +331,13 @@ def captures_dir(pr_id: str,
     surface (host orchestrator, scenario container, bug-fix flow
     session, review pane, CLI). Resolution:
 
-    1. The host path ``~/.pm/sessions/<tag>/captures/<pr_id>/`` if it
-       already exists. ``tag`` is *session_tag* if supplied, else the
-       tmux-derived tag, else the cwd-derived tag.
+    1. The host path ``~/.pm/sessions/<tag>/captures/<pr_id>/`` (or
+       ``<captures-dir>/<tag>/<pr_id>/``) if it already exists. ``tag`` is
+       *session_tag* if supplied, else the tmux-derived tag, else the
+       cwd-derived tag. When ``captures-dir`` is set but only the default
+       location holds the PR's dir — evidence from before the setting
+       changed, which is not migrated — that dir is used, so one PR's
+       evidence never splits across two places.
     2. Otherwise the container bind-mount at
        :data:`CONTAINER_CAPTURES_MOUNT` if it exists and belongs to
        *pr_id*: the container's :data:`CAPTURES_PR_ENV` names the mounted
@@ -362,6 +366,9 @@ def captures_dir(pr_id: str,
         host_path = _captures_root_for_tag(session_tag) / pr_id
         if host_path.is_dir():
             return host_path
+        legacy = _legacy_captures_root(session_tag)
+        if legacy is not None and (legacy / pr_id).is_dir():
+            return legacy / pr_id
     mount = Path(CONTAINER_CAPTURES_MOUNT)
     # The mount belongs to one PR (PM_CAPTURES_PR, set at container
     # creation). A throwaway pm project driven inside the container
@@ -408,15 +415,74 @@ def _captures_root_for_tag(session_tag: str) -> Path:
     return sessions_dir() / session_tag / "captures"
 
 
-def captures_roots_glob() -> str:
-    """Shell glob matching every session's captures root, for prompts that
-    list runs across sessions: ``~/.pm/sessions/*/captures`` by default,
-    ``<captures-dir>/*`` (shell-quoted) when ``captures-dir`` is set."""
+def _legacy_captures_root(session_tag: str | None = None,
+                          start_path: Path | None = None) -> Path | None:
+    """The default captures root ``~/.pm/sessions/<tag>/captures`` when
+    ``captures-dir`` moved new evidence elsewhere and that root exists
+    (it holds evidence from before the change — nothing is migrated);
+    otherwise None.  The tag is resolved only when ``captures-dir`` is set.
+    """
+    if configured_dir(CAPTURES_DIR_SETTING) is None:
+        return None
+    if session_tag is None:
+        session_tag = _resolve_session_tag(start_path)
+    if not session_tag:
+        return None
+    legacy = sessions_dir() / session_tag / "captures"
+    if legacy == _captures_root_for_tag(session_tag) or not legacy.is_dir():
+        return None
+    return legacy
+
+
+def host_pr_captures_dir(pr_id: str, session_tag: str | None = None,
+                         start_path: Path | None = None) -> Path | None:
+    """The host captures dir of *pr_id*, for host code that reads or writes
+    one file there (``report.html``, ``integration.json``).
+
+    The same dir :func:`captures_dir` resolves on the host: the PR's dir in
+    :func:`captures_root`, or — when ``captures-dir`` is set and only the
+    default root holds it (evidence from before the change) — that one.
+    Not created; None when no session tag can be derived.
+    """
+    root = captures_root(session_tag, start_path)
+    if root is None:
+        return None
+    d = root / pr_id
+    if not d.is_dir():
+        legacy = _legacy_captures_root(session_tag, start_path)
+        if legacy is not None and (legacy / pr_id).is_dir():
+            return legacy / pr_id
+    return d
+
+
+def captures_roots(session_tag: str | None = None,
+                   start_path: Path | None = None) -> list[Path]:
+    """Every host captures root of the session, :func:`captures_root` first.
+
+    The default ``~/.pm/sessions/<tag>/captures`` follows when
+    ``captures-dir`` moved new evidence elsewhere and it still exists: PRs
+    whose evidence started there keep it there.  Empty when no tag can be
+    derived.
+    """
+    root = captures_root(session_tag, start_path)
+    if root is None:
+        return []
+    legacy = _legacy_captures_root(session_tag, start_path)
+    return [root] + ([legacy] if legacy is not None else [])
+
+
+def captures_roots_globs() -> list[str]:
+    """Shell globs matching every session's captures roots, for prompts
+    that list runs across sessions: ``~/.pm/sessions/*/captures`` by
+    default; ``<captures-dir>/*`` (shell-quoted) first when ``captures-dir``
+    is set, then the default, which still holds evidence (and the runs of
+    any PR or test dir) begun before the change."""
+    default = "~/.pm/sessions/*/captures"
     configured = configured_dir(CAPTURES_DIR_SETTING)
     if configured is not None:
         import shlex
-        return f"{shlex.quote(str(configured))}/*"
-    return "~/.pm/sessions/*/captures"
+        return [f"{shlex.quote(str(configured))}/*", default]
+    return [default]
 
 
 # Container-internal path where the host's captures_dir is bind-mounted

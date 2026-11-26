@@ -310,9 +310,23 @@ the task and on the measurements above.
   the workdirs root when `workdirs-dir` is unset (unchanged), else the
   local default `~/.pm/workdirs` — flock on a NAS is emulated or
   unsupported and can hang while the share stalls.
+* Existing evidence likewise keeps working after `captures-dir` moves
+  (review 62b4 i5): a PR's captures dir is the configured
+  `<captures-dir>/<tag>/<pr>` when it exists, else the default
+  `~/.pm/sessions/<tag>/captures/<pr>` when only that exists (evidence
+  from before the change), else the configured one (created).
+  `captures_dir` (writers, container mounts, `pm qa captures-path`) and
+  `paths.host_pr_captures_dir` (host readers/writers of one file: the
+  sign-off merge gate's `report.html` hash, `pm pr signoff record`,
+  `report_meta`, `integration.json`) resolve it the same way, so one PR's
+  evidence never splits across two roots and a recorded sign-off is not
+  reported as "report.html changed".  The dashboard serves
+  `paths.captures_roots()` (configured root, then the default when it
+  exists) and lists each PR's report from the first root holding it.
 * Prompts that glob captures across sessions use
-  `paths.captures_roots_glob()` (`<captures-dir>/*` when set), e.g. the
-  discovery supervisor's `ls -t …/regression/<id>/*/prompt.md`.
+  `paths.captures_roots_globs()` (`<captures-dir>/*`, then the default
+  `~/.pm/sessions/*/captures`, when set), e.g. the discovery supervisor's
+  `ls -t …/regression/<id>/*/prompt.md`.
 
 ### R6 — Shared recipe/instructions
 

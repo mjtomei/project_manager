@@ -145,15 +145,117 @@ class TestConfigured:
         assert qa_loop.instruction_run_live("pr-1")
 
     def test_captures_glob_follows_captures_dir(self, home, tmp_path):
-        assert paths.captures_roots_glob() == "~/.pm/sessions/*/captures"
+        assert paths.captures_roots_globs() == ["~/.pm/sessions/*/captures"]
         ev = tmp_path / "my evidence"
         paths.set_global_setting_value("captures-dir", str(ev))
-        assert paths.captures_roots_glob() == f"'{ev}'/*"
+        # The default stays listed: runs begun before the move are there.
+        assert paths.captures_roots_globs() == [
+            f"'{ev}'/*", "~/.pm/sessions/*/captures"]
         from pm_core.prompt_gen import generate_discovery_supervisor_prompt
         out = generate_discovery_supervisor_prompt(
             {"project": {"name": "demo"}}, session_name="pm-s")
-        assert (f"ls -t '{ev}'/*/regression/<id>/*/prompt.md 2>/dev/null"
-                in out)
+        assert (f"ls -t '{ev}'/*/regression/<id>/*/prompt.md "
+                f"~/.pm/sessions/*/captures/regression/<id>/*/prompt.md "
+                f"2>/dev/null" in out)
+
+    def test_existing_evidence_is_found_after_captures_dir_moves(
+            self, home, nas):
+        """Evidence from before captures-dir moved is not migrated: a PR
+        that has it keeps using that dir (writers, mounts and host readers
+        agree), while a PR without captures starts in the new location."""
+        old_root = home / ".pm" / "sessions" / "tag" / "captures"
+        (old_root / "pr-old").mkdir(parents=True)
+        (old_root / "pr-old" / "report.html").write_text("<html>old</html>")
+        paths.set_global_setting_value("captures-dir", str(nas / "ev"))
+
+        assert paths.captures_root("tag") == nas / "ev" / "tag"
+        assert paths.captures_roots("tag") == [nas / "ev" / "tag", old_root]
+        for resolve in (paths.captures_dir, paths.host_pr_captures_dir):
+            assert resolve("pr-old", session_tag="tag") == old_root / "pr-old"
+        assert paths.host_pr_captures_dir("pr-new", session_tag="tag") == (
+            nas / "ev" / "tag" / "pr-new")
+        assert paths.captures_dir("pr-new", session_tag="tag") == (
+            nas / "ev" / "tag" / "pr-new")
+        # Once the new location holds the PR's dir (moved by hand), it wins.
+        (nas / "ev" / "tag" / "pr-old").mkdir()
+        assert paths.host_pr_captures_dir("pr-old", session_tag="tag") == (
+            nas / "ev" / "tag" / "pr-old")
+
+        # Unset: one root, as before.
+        paths.set_global_setting_value("captures-dir", "")
+        assert paths.captures_roots("tag") == [old_root]
+
+    def test_recorded_signoff_survives_a_captures_dir_move(self, home, nas,
+                                                           monkeypatch):
+        """The merge gate re-hashes report.html; after captures-dir moved
+        it must still find the approved report, not refuse the merge with
+        "report.html changed"."""
+        import hashlib
+        from pm_core import integration, signoff
+        old = home / ".pm" / "sessions" / "tag" / "captures" / "pr-1"
+        old.mkdir(parents=True)
+        report = old / "report.html"
+        report.write_text('<meta name="pm-signoff-verdict" '
+                          'content="SIGNOFF_MERGE">')
+        monkeypatch.setattr(paths, "_resolve_session_tag",
+                            lambda start_path=None: "tag")
+        bound = {"head": "HEAD", "base_branch": "master", "base_sha": "B",
+                 "candidate_tree": "T", "status": integration.CLEAN}
+        pr = {"id": "pr-1", "signoff": {
+            "verdict": signoff.SIGNOFF_MERGE, "sha": "HEAD", "ts": "now",
+            "origin": "manual", "integration": bound,
+            "report_hash": hashlib.sha256(report.read_bytes()).hexdigest()}}
+        assert signoff.merge_gate_refusal(pr, "HEAD", "master") is None
+
+        paths.set_global_setting_value("captures-dir", str(nas / "ev"))
+        assert signoff.merge_gate_refusal(pr, "HEAD", "master") is None
+        assert signoff.report_meta("pr-1") == {"verdict": "SIGNOFF_MERGE"}
+        assert integration.integration_json_path("pr-1") == (
+            old / "integration.json")
+        # An edit is still caught in the old location.
+        report.write_text("<html>edited</html>")
+        assert "changed since" in signoff.merge_gate_refusal(
+            pr, "HEAD", "master")
+
+    def test_dashboard_serves_reports_from_the_old_root(self, tmp_path):
+        """The dashboard lists and serves a PR's report from the first
+        captures root that holds it."""
+        import http.server
+        import threading
+        import urllib.request
+        from pm_core import behavior_report, dashboard_server
+        new_root, old_root = tmp_path / "new", tmp_path / "old"
+        (new_root / "pr-b").mkdir(parents=True)
+        (new_root / "pr-b" / "report.html").write_text("new-b")
+        (old_root / "pr-a").mkdir(parents=True)
+        (old_root / "pr-a" / "report.html").write_text("old-a")
+        (old_root / "pr-a" / "clip.txt").write_text("evidence")
+        data = {"prs": [{"id": "pr-a"}, {"id": "pr-b"}, {"id": "pr-c"}]}
+        rows = {r.pr_id: r for r in behavior_report.gather_dashboard_rows(
+            data, new_root, [old_root])}
+        assert rows["pr-a"].has_report and rows["pr-b"].has_report
+        assert not rows["pr-c"].has_report
+
+        handler = dashboard_server._make_handler(tmp_path, new_root,
+                                                 [old_root])
+        httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        base = f"http://127.0.0.1:{httpd.server_address[1]}"
+        try:
+            def get(path):
+                with urllib.request.urlopen(base + path, timeout=5) as r:
+                    return r.read().decode()
+            assert get("/pr-a/report.html") == "old-a"
+            assert get("/pr-a/clip.txt") == "evidence"
+            assert get("/pr-b/report.html") == "new-b"
+            with pytest.raises(urllib.error.HTTPError):
+                get("/pr-c/report.html")
+            # '..' cannot climb out of the roots through the fallback.
+            with pytest.raises(urllib.error.HTTPError):
+                get("/../old/pr-a/report.html")
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
 
     def test_legacy_scratch_kept_for_in_flight_runs(self, home, tmp_path):
         legacy = tmp_path / "run" / "s-1" / "scratch"

@@ -397,9 +397,9 @@ def omitted_path_count(vals: list, total, omitted_from_list: int) -> int:
 
 
 def integration_json_path(pr_id: str) -> Path | None:
-    from pm_core.paths import captures_root
-    croot = captures_root()
-    return croot / pr_id / "integration.json" if croot else None
+    from pm_core.paths import host_pr_captures_dir
+    cdir = host_pr_captures_dir(pr_id)
+    return cdir / "integration.json" if cdir else None
 
 
 def integration_pointer(pr_id: str) -> str:

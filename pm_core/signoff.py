@@ -385,9 +385,9 @@ def merge_gate_refusal(pr: dict, current_sha: str | None,
     recorded_hash = (pr.get("signoff") or {}).get("report_hash")
     if recorded_hash:
         import hashlib
-        from pm_core.paths import captures_root
-        croot = captures_root()
-        report = croot / pr_id / "report.html" if croot else None
+        from pm_core.paths import host_pr_captures_dir
+        cdir = host_pr_captures_dir(pr_id)
+        report = cdir / "report.html" if cdir else None
         current_hash = (
             hashlib.sha256(report.read_bytes()).hexdigest()
             if report is not None and report.is_file() else None)
@@ -688,11 +688,11 @@ def apply_signoff_hop(root: Path, pr_id: str, hop: str,
 def report_meta(pr_id: str) -> dict[str, str]:
     """``pm-signoff-*`` meta tags of the PR's ``report.html`` (or {})."""
     from pm_core.behavior_report import extract_signoff_meta
-    from pm_core.paths import captures_root
-    croot = captures_root()
-    if not croot:
+    from pm_core.paths import host_pr_captures_dir
+    cdir = host_pr_captures_dir(pr_id)
+    if not cdir:
         return {}
-    return extract_signoff_meta(croot / pr_id / "report.html")
+    return extract_signoff_meta(cdir / "report.html")
 
 
 def build_return_record(pr: dict, verdict: str, hop: str, *,

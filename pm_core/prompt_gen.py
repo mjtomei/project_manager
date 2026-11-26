@@ -1739,8 +1739,9 @@ def generate_discovery_supervisor_prompt(data: dict, session_name: str | None = 
 
     id_label = f" [{loop_id}]" if loop_id else ""
     iteration_label = f" (iteration {iteration}){id_label}" if iteration else id_label
-    from pm_core.paths import captures_roots_glob
-    captures_glob = captures_roots_glob()
+    from pm_core.paths import captures_roots_globs
+    regression_prompts = " ".join(
+        f"{g}/regression/<id>/*/prompt.md" for g in captures_roots_globs())
 
     prompt = f"""This is one tick of the **Discovery Supervisor** watcher for project "{project_name}".{iteration_label}
 
@@ -1839,7 +1840,7 @@ clone, or building/creating its container). The runner writes the run's
 started runs newest first with:
 
 ```
-ls -t {captures_glob}/regression/<id>/*/prompt.md 2>/dev/null
+ls -t {regression_prompts} 2>/dev/null
 ```
 
 Run ids (the dir names) start with their UTC start time. If a test's pane has

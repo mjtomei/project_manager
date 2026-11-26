@@ -358,7 +358,9 @@ def set_cmd(setting, value):
       workdirs-dir     PR, meta and QA source workdirs (may be network storage)
 
       captures-dir     Retained QA/review evidence, as <dir>/<session-tag>/<pr>
-                       (may be network storage)
+                       (may be network storage). A PR whose evidence already
+                       exists in the old location keeps using it; move that
+                       PR's dir by hand to switch it
 
       scratch-dir      QA scenario scratch and private container engines
                        (must be local disk)

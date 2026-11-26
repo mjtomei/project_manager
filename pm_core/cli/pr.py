@@ -1896,15 +1896,15 @@ def pr_signoff_record(pr_id: str):
 
     from pm_core import signoff as signoff_mod
     from pm_core.behavior_report import _extract_verdict
-    from pm_core.paths import captures_root
+    from pm_core.paths import host_pr_captures_dir
 
     root = state_root()
     data = store.load(root)
     pr_entry = _require_pr(data, pr_id)
     pr_id = pr_entry["id"]
 
-    croot = captures_root()
-    report = croot / pr_id / "report.html" if croot else None
+    cdir = host_pr_captures_dir(pr_id)
+    report = cdir / "report.html" if cdir else None
     if report is None or not report.is_file():
         click.echo(
             f"PR {pr_id}: no report.html to approve — run "
@@ -4807,19 +4807,21 @@ def pr_dashboard(port: int | None, bind: str | None, do_open: bool):
     Foreground / blocking. Ctrl-C shuts the server down.
     """
     from pm_core import dashboard_server
-    from pm_core.paths import captures_root
+    from pm_core.paths import captures_roots
 
     root = state_root()
-    # captures_root() creates the dir when a tag resolves, so croot exists
-    # by the time we get a non-None path back.
-    croot = captures_root()
-    if croot is None:
+    # captures_roots() creates the first root when a tag resolves, so it
+    # exists by the time we get a non-empty list back.  A second root is
+    # the default one when 'captures-dir' moved new evidence elsewhere.
+    croots = captures_roots()
+    if not croots:
         click.echo(
             "Could not resolve the captures root (not inside a git repo / no "
             "session tag?).", err=True)
         raise SystemExit(1)
     dashboard_server.serve(
-        pm_root=root, captures_root_dir=croot,
+        pm_root=root, captures_root_dir=croots[0],
+        fallback_roots=croots[1:],
         host=bind or dashboard_server.DEFAULT_BIND,
         port=port if port is not None else dashboard_server.DEFAULT_PORT,
         open_browser=do_open)
