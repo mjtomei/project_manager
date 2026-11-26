@@ -272,7 +272,14 @@ the task and on the measurements above.
   bytes, time, reason) is left in the scratch dir.
 * Hooks (existing lifecycle owners only — no new scheduler):
   * `pr_cleanup.cleanup_pr_resources`, after containers are removed:
-    reclaim every run of that PR (`summary["reclaimed"]`).
+    reclaim every run of that PR.  Its TUI callers (merge detection in
+    sync, the PR view's resource cleanup) run it in a daemon thread
+    (`summary["reclaimed"] == "background"`) so the TUI never waits on a
+    multi-GB delete; `pm pr cleanup --resources` passes
+    `wait_reclaim=True` and gets the removed paths in
+    `summary["reclaimed"]`, because a CLI process that exits first would
+    cut the deletion short (the `.pm-reclaiming-*` claim then lets the next
+    pass finish it).
   * QA run start (`qa_loop`, where `cleanup_orphaned_qa_containers` runs):
     reclaim earlier runs of the same PR in a daemon thread so the run
     start is not delayed.
