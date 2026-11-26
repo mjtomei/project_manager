@@ -1,10 +1,10 @@
 """pm/architecture.md prompt awareness.
 
-Covers ``notes.architecture_section`` (absent / small / over-budget documents)
-and its wiring into the plan (``cli/plan.py``), implementation, bug-fix and
-review (``prompt_gen.py``) prompts: with a document the prompts carry the
-architecture guidance and the "File Structural Debt" filing rule; without one
-they carry neither.
+Covers ``architecture_prompts.architecture_section`` (absent / small /
+over-budget documents) and its wiring into the plan (``cli/plan.py``),
+implementation, bug-fix and review (``prompt_gen.py``) prompts: with a
+document the prompts carry the architecture guidance and the "File Structural
+Debt" filing rule; without one they carry neither.
 """
 
 from unittest.mock import patch
@@ -13,6 +13,7 @@ import pytest
 from click.testing import CliRunner
 
 from pm_core import notes, prompt_gen, store
+from pm_core.architecture_prompts import architecture_section
 from pm_core.cli import cli
 from pm_core.prompt_bounds import ARCHITECTURE_BUDGET, prompt_bytes
 
@@ -89,29 +90,29 @@ def _assert_clean(prompt: str):
 
 
 # ---------------------------------------------------------------------------
-# notes.architecture_section
+# architecture_prompts.architecture_section
 # ---------------------------------------------------------------------------
 
 class TestArchitectureSection:
     @pytest.mark.parametrize("prompt_type", ["plan", "impl", "review"])
     def test_absent_returns_empty(self, tmp_path, prompt_type):
-        assert notes.architecture_section(tmp_path, prompt_type) == ""
+        assert architecture_section(tmp_path, prompt_type) == ""
 
     def test_whitespace_only_counts_as_absent(self, tmp_path):
         _write_arch(tmp_path, "  \n\n\t\n")
-        assert notes.architecture_section(tmp_path, "impl") == ""
+        assert architecture_section(tmp_path, "impl") == ""
 
     def test_unreadable_counts_as_absent(self, tmp_path):
         # A directory at the path: reading raises IsADirectoryError.  The
         # document is optional context, so a prompt must still build.
         (tmp_path / notes.ARCHITECTURE_FILENAME).mkdir()
         assert notes.load_architecture(tmp_path) == ""
-        assert notes.architecture_section(tmp_path, "impl") == ""
+        assert architecture_section(tmp_path, "impl") == ""
 
     def test_undecodable_bytes_do_not_crash(self, tmp_path):
         (tmp_path / notes.ARCHITECTURE_FILENAME).write_bytes(
             b"# Architecture\n\xff\xfe bad bytes\nFR1 / DP1\n")
-        block = notes.architecture_section(tmp_path, "impl")
+        block = architecture_section(tmp_path, "impl")
         assert "FR1 / DP1" in block
 
     def test_ensure_notes_file_does_not_create_it(self, tmp_path):
@@ -122,7 +123,7 @@ class TestArchitectureSection:
 
     def test_small_document_inlined_whole(self, tmp_path):
         _write_arch(tmp_path)
-        block = notes.architecture_section(tmp_path, "impl")
+        block = architecture_section(tmp_path, "impl")
         assert SMALL_DOC.strip() in block
         assert "truncated to fit" not in block
         _assert_aware(block)
@@ -130,7 +131,7 @@ class TestArchitectureSection:
     def test_over_budget_document_is_abbreviated_with_pointer(self, tmp_path):
         doc = _big_doc(3 * ARCHITECTURE_BUDGET)
         _write_arch(tmp_path, doc)
-        block = notes.architecture_section(tmp_path, "impl")
+        block = architecture_section(tmp_path, "impl")
         pointer = notes.architecture_pointer(tmp_path)
         # The excerpt is bounded and its marker names the file to read.
         assert "architecture document truncated to fit" in block
@@ -139,22 +140,22 @@ class TestArchitectureSection:
         assert PROVENANCE in block
         assert CHANGE_LOG_TAIL in block
         # Bounded: the excerpt budget plus the fixed guidance/rule text.
-        static = notes.architecture_section(tmp_path, "impl", max_bytes=0)
+        static = architecture_section(tmp_path, "impl", max_bytes=0)
         assert prompt_bytes(block) <= ARCHITECTURE_BUDGET + prompt_bytes(static)
         assert prompt_bytes(block) < prompt_bytes(doc)
 
     def test_guidance_and_rule_survive_abbreviation(self, tmp_path):
         # Only the document excerpt is bounded; the instructions are whole.
         _write_arch(tmp_path, _big_doc(3 * ARCHITECTURE_BUDGET))
-        block = notes.architecture_section(tmp_path, "review", max_bytes=500)
+        block = architecture_section(tmp_path, "review", max_bytes=500)
         _assert_aware(block)
         assert "**NEEDS_WORK**" in block
         assert "**INPUT_REQUIRED**" in block
 
     def test_multibyte_document_bounded_in_bytes(self, tmp_path):
         _write_arch(tmp_path, "# Architektur — Übersicht\n" + "ü" * 40_000)
-        block = notes.architecture_section(tmp_path, "plan", max_bytes=4_000)
-        static = notes.architecture_section(tmp_path, "plan", max_bytes=0)
+        block = architecture_section(tmp_path, "plan", max_bytes=4_000)
+        static = architecture_section(tmp_path, "plan", max_bytes=0)
         assert prompt_bytes(block) <= 4_000 + prompt_bytes(static)
 
     def test_pointer_in_repo_pm_dir(self, tmp_path):
@@ -163,7 +164,7 @@ class TestArchitectureSection:
         root.mkdir()
         _write_arch(root)
         assert notes.architecture_pointer(root) == "pm/architecture.md"
-        assert "`pm/architecture.md`" in notes.architecture_section(root, "impl")
+        assert "`pm/architecture.md`" in architecture_section(root, "impl")
 
     def test_pointer_standalone_pm_dir_is_absolute(self, tmp_path):
         # A standalone pm dir is not part of the target repo's clones, so
@@ -171,13 +172,13 @@ class TestArchitectureSection:
         _write_arch(tmp_path)
         expected = str(tmp_path / "architecture.md")
         assert notes.architecture_pointer(tmp_path) == expected
-        assert f"`{expected}`" in notes.architecture_section(tmp_path, "impl")
+        assert f"`{expected}`" in architecture_section(tmp_path, "impl")
 
     def test_role_guidance_differs(self, tmp_path):
         _write_arch(tmp_path)
-        plan = notes.architecture_section(tmp_path, "plan")
-        impl = notes.architecture_section(tmp_path, "impl", pr_id="pr-abc")
-        review = notes.architecture_section(tmp_path, "review")
+        plan = architecture_section(tmp_path, "plan")
+        impl = architecture_section(tmp_path, "impl", pr_id="pr-abc")
+        review = architecture_section(tmp_path, "review")
         assert "While planning:" in plan
         assert "say so explicitly in the plan file" in plan
         assert "cite its id in the plan" in plan
@@ -194,14 +195,23 @@ class TestArchitectureSection:
             assert "lazy (function-level) import" in block
             assert "hidden shared-state cycles" in block
 
+    def test_review_states_each_verdict_rule_once(self, tmp_path):
+        _write_arch(tmp_path)
+        review = architecture_section(tmp_path, "review")
+        assert review.count("**INPUT_REQUIRED**") == 1
+        # One for upward coupling, one for an uncited workaround.
+        assert review.count("**NEEDS_WORK**") == 2
+        assert "New upward coupling is **NEEDS_WORK**" in review
+        assert "cites no\nimprovements PR id is **NEEDS_WORK**" in review
+
     def test_impl_note_command_without_pr_id_uses_placeholder(self, tmp_path):
         _write_arch(tmp_path)
-        block = notes.architecture_section(tmp_path, "impl")
+        block = architecture_section(tmp_path, "impl")
         assert "pm pr note add <pr-id> 'architecture:" in block
 
     def test_unknown_prompt_type_raises_even_without_document(self, tmp_path):
         with pytest.raises(ValueError):
-            notes.architecture_section(tmp_path, "qa")
+            architecture_section(tmp_path, "qa")
 
 
 # ---------------------------------------------------------------------------

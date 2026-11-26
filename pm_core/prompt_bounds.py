@@ -21,7 +21,7 @@ shortened:
   telling the session what to do, and the session can read the file in full,
   so a head+tail excerpt whose marker names the file loses nothing.  The
   guidance wrapped around the excerpt is instruction text and is inlined
-  whole (see ``pm_core.notes.architecture_section``).
+  whole (see ``pm_core.architecture_prompts.architecture_section``).
 
 Everything instruction-shaped is inlined **whole and never truncated**:
 implementation and QA specs, PR descriptions, session notes, QA instruction

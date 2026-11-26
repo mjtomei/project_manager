@@ -1,6 +1,7 @@
 """Claude prompt generation for PR work sessions."""
 
 from pm_core import store, notes
+from pm_core.architecture_prompts import architecture_section
 from pm_core.backend import get_backend
 from pm_core.paths import get_global_setting
 from pm_core.prompt_bounds import (
@@ -368,7 +369,7 @@ def generate_prompt(data: dict, pr_id: str, session_name: str | None = None) -> 
         general_notes_block, impl_specific_block = notes.notes_for_prompt(root, "impl")
         # pm/architecture.md awareness + structural-debt filing rule; empty
         # (prompt unchanged) when the project has no architecture document.
-        arch_block = notes.architecture_section(root, "impl", pr_id=pr_id)
+        arch_block = architecture_section(root, "impl", pr_id=pr_id)
     except FileNotFoundError:
         pass
 
@@ -503,7 +504,7 @@ This PR is part of plan "{plan['name']}" ({plan['id']}). Other PRs in this plan:
     try:
         root = store.find_project_root()
         general_notes_block, review_specific_block = notes.notes_for_prompt(root, "review")
-        arch_block = notes.architecture_section(root, "review", pr_id=pr_id)
+        arch_block = architecture_section(root, "review", pr_id=pr_id)
     except FileNotFoundError:
         pass
     arch_review_step = (

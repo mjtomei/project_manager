@@ -24,18 +24,26 @@ refactor PR depend on it).
   - `architecture_pointer(root) -> str`: how a session names the file:
     `pm/architecture.md` for an in-repo pm dir (`store.is_internal_pm_dir`),
     otherwise the absolute path `root/architecture.md`.
-  - `architecture_section(root, prompt_type, *, max_bytes=ARCHITECTURE_BUDGET)
-    -> str`: the prompt block (see R2). Returns `""` when there's no document.
+- The prompt block lives in a new `pm_core/architecture_prompts.py` (next to
+  `bug_fix_prompts` / `regression_prompts`), not in `notes.py`: the plan's
+  target table puts `notes` in DP2 ("notes primitives") and role prompt
+  modules in DP7, so rewording a role's guidance must not touch the state
+  module (review-loop 322e i1):
+  - `PROMPT_TYPES = ("plan", "impl", "review")`
+  - `architecture_section(root, prompt_type, *, pr_id=None,
+    max_bytes=ARCHITECTURE_BUDGET) -> str`: the prompt block (see R2).
+    Returns `""` when there's no document. `pr_id` fills the impl guidance's
+    `pm pr note add` command (placeholder `<pr-id>` when omitted).
 
 ### R2 — Bounded prompt-section helper (mirrors `notes.notes_section`)
 - `architecture_section` returns:
-  `## Project Architecture (pm/architecture.md)` → role-specific awareness
+  ``## Project Architecture (`<pointer>`)`` → role-specific awareness
   guidance (instruction text, never truncated) → the document excerpt →
   `## File Structural Debt, Don't Just Comment It` rule (instruction text,
   never truncated).
 - Only the **document excerpt** is bounded, via
   `prompt_bounds.bounded_text(text, max_bytes=ARCHITECTURE_BUDGET,
-  pointer=<architecture_pointer>, label="pm/architecture.md")`. That keeps the
+  pointer="`<architecture_pointer>`", label="architecture document")`. That keeps the
   head (provenance, FRs/DPs, matrix: 75%) and the tail (latest change-log
   entries: 25%) and inserts a marker naming the file.
 - `pm_core/prompt_bounds.py`: add `ARCHITECTURE_BUDGET = 16_000` and extend
@@ -69,10 +77,12 @@ another); note when a change legitimately introduces a new FR/DP.
 - **review** (`generate_review_prompt`, incl. review-loop mode): treat the
   document as the baseline; flag new upward coupling, lazy imports that
   sidestep a cycle, new cross-DP shared mutable state, modules that map to no
-  DP, and changes that blur two DPs together. A new upward edge or an orphan
-  workaround comment (no improvements PR id) → **NEEDS_WORK**. A contested
-  FR/DP boundary change that needs human judgment → **INPUT_REQUIRED**. Check
-  that a legitimately new FR/DP was noted.
+  DP, and changes that blur two DPs together. A new upward edge →
+  **NEEDS_WORK** (stated in the review guidance); an orphan workaround
+  comment (no improvements PR id) → **NEEDS_WORK** (stated once, in the
+  debt rule's review lead). A contested FR/DP boundary change that needs
+  human judgment → **INPUT_REQUIRED**. Check that a legitimately new FR/DP
+  was noted.
 
 ### R4 — "File Structural Debt, Don't Just Comment It" rule
 Reuses the `regression_prompts._filing_addendum` command pattern
@@ -96,12 +106,12 @@ follow it themselves when fixing in review-loop mode.
 
 ### R5 — Wiring
 - `pm_core/prompt_gen.py`
-  - `generate_prompt`: compute `arch_block = notes.architecture_section(root,
-    "impl")` once when `root` resolves, and insert it after the spec preamble,
+  - `generate_prompt`: compute `arch_block = architecture_section(root,
+    "impl", pr_id=pr_id)` once when `root` resolves, and insert it after the spec preamble,
     before the bug-fix block. Static for this build (outside `fit_prompt`'s
     shrinkable blocks, already self-bounded).
   - `generate_review_prompt`: `arch_block = architecture_section(root,
-    "review")` inserted after the plan context. When present, the
+    "review", pr_id=pr_id)` inserted after the plan context. When present, the
     "Architectural review" step gains a bullet pointing at it.
   - Pass `has_architecture=bool(arch_block)` to the bug-fix blocks.
 - `pm_core/bug_fix_prompts.py`
@@ -116,7 +126,7 @@ follow it themselves when fixing in review-loop mode.
     tests and callers are unaffected).
 - `pm_core/cli/plan.py`: `plan add`, `plan breakdown`, `plan review` (both
   prompt branches) and `plan import` (`_run_plan_import`) append
-  `notes.architecture_section(root, "plan")` just before the TUI/notes tail.
+  `architecture_section(root, "plan")` just before the TUI/notes tail.
   `plan deps` and `plan fix` are left alone (dependency-graph edits and
   review-finding fixes, not plan shaping).
 
@@ -140,8 +150,9 @@ monkeypatched to a tmp `pm/` dir; plan CLI driven with `-C <tmp root>` and
 - **No behaviour change without the doc.** Every new string is gated on a
   non-empty `pm/architecture.md`; absent → prompts are byte-identical to
   today. The existing bug-fix tests that call the blocks directly keep passing.
-- **No import cycles.** `notes` (DP2) imports `prompt_bounds` (DP2, stdlib
-  only) and `store` (DP1) — downward/same-layer only, all top-level.
+- **No import cycles.** `notes` (DP2) imports only `store` (DP1);
+  `architecture_prompts` (DP7) imports `notes` and `prompt_bounds` (DP2) —
+  downward only, all top-level.
 - `fit_prompt` re-renders several times, so the block is computed once,
   outside `_assemble`.
 - `generate_review_prompt` currently binds `root` only inside its `try`. The
@@ -202,6 +213,14 @@ monkeypatched to a tmp `pm/` dir; plan CLI driven with `-C <tmp root>` and
 - Existing non-hermetic tests that build prompts against the real repo's
   `pm/` will start seeing the block once the dogfood baseline lands (plan
   PR 4). No current test asserts its absence, and new tests are hermetic.
-- Conflict surface with in-flight `pr-30888b1` (folds `plan breakdown` into
-  `plan add`): plan.py changes are one-line insertions per prompt, so a
-  rebase stays trivial.
+- Conflict surface with in-flight `pr-30888b1` (#104, folds `plan breakdown`
+  into `plan add` and deletes `plan_breakdown`): plan.py changes are one-line
+  insertions per prompt, so a rebase stays trivial. Whichever PR merges
+  second must (1) drop this PR's `arch_block` lines from the deleted
+  `plan_breakdown` (a modify/delete conflict in plan.py), and (2) drop the
+  `"breakdown"` entry from `_PLAN_COMMANDS` in `tests/test_prompt_gen.py`.
+  That test file merges cleanly but then fails 2 `TestPlanPrompts::*[breakdown]`
+  cases with "No such command" (found by pr-30888b1 review 4efb i1's trial
+  merge). `plan add` already carries the block, so nothing else is needed.
+  The breakdown wiring stays here because master still has the command
+  (review-loop 322e i1).

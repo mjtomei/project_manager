@@ -9,6 +9,7 @@ from pathlib import Path
 import click
 
 from pm_core import store, notes
+from pm_core.architecture_prompts import architecture_section
 from pm_core.plans.parser import parse_plan_prs
 from pm_core.plans import review as review_mod
 from pm_core.claude_launcher import find_claude, launch_claude, clear_session
@@ -104,7 +105,7 @@ def plan_add(name: str, description: str, fresh: bool):
     trigger_tui_refresh()
 
     notes_block = notes.notes_section(root)
-    arch_block = notes.architecture_section(root, "plan")  # "" without pm/architecture.md
+    arch_block = architecture_section(root, "plan")  # "" without pm/architecture.md
     prompt = f"""\
 Your goal: Help me develop a plan called "{name}" and write it to {plan_path}.
 
@@ -221,7 +222,7 @@ def plan_breakdown(plan_id: str | None, initial_prs: str | None, fresh: bool):
         initial_context = f"\nInitial PR ideas from the user:\n{initial_prs}\n"
 
     notes_block = notes.notes_section(root)
-    arch_block = notes.architecture_section(root, "plan")  # "" without pm/architecture.md
+    arch_block = architecture_section(root, "plan")  # "" without pm/architecture.md
 
     prompt = f"""\
 Your goal: Break the plan into a list of PRs that the user is happy with, then
@@ -336,7 +337,7 @@ def plan_review(plan_id: str | None, fresh: bool):
             + "\n")
 
     notes_block = notes.notes_section(root)
-    arch_block = notes.architecture_section(root, "plan")  # "" without pm/architecture.md
+    arch_block = architecture_section(root, "plan")  # "" without pm/architecture.md
 
     if plan_prs:
         # Post-load: PRs exist in project.yaml — review with progress awareness
@@ -857,7 +858,7 @@ def _run_plan_import(name: str):
     trigger_tui_refresh()
 
     notes_block = notes.notes_section(root)
-    arch_block = notes.architecture_section(root, "plan")  # "" without pm/architecture.md
+    arch_block = architecture_section(root, "plan")  # "" without pm/architecture.md
 
     prompt = f"""\
 Your goal: Analyze this repository, discuss what you find with the user, and

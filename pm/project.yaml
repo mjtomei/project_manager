@@ -56407,11 +56407,30 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-11-26T15:03:37.862958+00:00'
-  updated_at: '2026-11-26T15:26:14.531258+00:00'
+  updated_at: '2026-11-26T15:59:52.642470+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-a7c886a
+    text: 'review-loop 322e i1: moved the prompt text (architecture_section, role
+      guidance, File Structural Debt rule) out of pm_core/notes.py into new pm_core/architecture_prompts.py
+      (DP7, next to bug_fix_prompts/regression_prompts); notes.py keeps only the state
+      plumbing (ARCHITECTURE_FILENAME, load_architecture, architecture_pointer), matching
+      the plan target table (notes = DP2 primitives). Callers: prompt_gen + cli/plan
+      import architecture_section from it; spec updated.'
+    created_at: '2026-11-26T15:44:09Z'
+    last_edited: '2026-11-26T15:44:09Z'
+  - id: note-fbff1c2
+    text: 'Merge-order handoff relayed from pr-30888b1 (#104, in_review; its note-e78ccd7
+      could not reach this PR): 30888b1 deletes `plan breakdown`. Whichever of the
+      two merges second: drop the arch_block lines in plan_breakdown (modify/delete
+      conflict in pm_core/cli/plan.py) AND drop "breakdown" from _PLAN_COMMANDS in
+      tests/test_prompt_gen.py — that file merges cleanly but 2 TestPlanPrompts::*[breakdown]
+      cases then fail "No such command". plan add already carries the architecture
+      block. Greenfield seeding in plan add is pr-27ba89e scope.'
+    created_at: '2026-11-26T15:59:52Z'
+    last_edited: '2026-11-26T15:59:52Z'
   model: provider:claude-main-xhigh-pm
   effort: xhigh
 - id: pr-27ba89e
@@ -56511,11 +56530,18 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-11-26T15:03:37.863094+00:00'
-  updated_at: '2026-11-26T15:04:02.585382+00:00'
+  updated_at: '2026-11-26T15:44:23.370543+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-4c9f187
+    text: 'From pr-6c0ee2d: to give sign-off its own architecture guidance, add a
+      "signoff" role to pm_core.architecture_prompts (PROMPT_TYPES, _role_guidance,
+      _STRUCTURAL_DEBT_LEAD) and call architecture_section(root, "signoff", pr_id=...)
+      from generate_signoff_prompt; an unknown role raises ValueError by design.'
+    created_at: '2026-11-26T15:44:23Z'
+    last_edited: '2026-11-26T15:44:23Z'
 - id: pr-75abaff
   plan: plan-axiomatic-design
   title: Seed pm/architecture.md baseline for project-manager
@@ -56543,11 +56569,17 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-11-26T15:03:37.863123+00:00'
-  updated_at: '2026-11-26T15:03:37.863123+00:00'
+  updated_at: '2026-11-26T15:44:18.315659+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-ea77acd
+    text: 'From pr-6c0ee2d review: the architecture prompt block lives in pm_core/architecture_prompts.py
+      (not notes.py). Map it to DP7 PlansPrompts in the baseline pm/architecture.md;
+      pm_core/notes.py keeps only load_architecture/architecture_pointer (DP2).'
+    created_at: '2026-11-26T15:44:18Z'
+    last_edited: '2026-11-26T15:44:18Z'
 - id: pr-53f00a9
   plan: plan-axiomatic-design
   title: Extract core session and IPC helpers out of pm_core/cli/helpers.py
