@@ -30,22 +30,21 @@ def _store(d: Path, driver: str = "vfs", size: int = 4096) -> Path:
 
 
 def _archive(f: Path, oci: bool = False, size: int = 2 << 20) -> Path:
+    """A docker-archive, or (*oci*) an oci-archive laid out as podman 3.4's
+    ``save --format oci-archive`` writes it: blobs, then ``index.json`` and
+    ``oci-layout`` — no ``manifest.json``."""
     f.parent.mkdir(parents=True, exist_ok=True)
     with tarfile.open(f, "w") as tf:
         data = b"\0" * size
-        ti = tarfile.TarInfo("abc/layer.tar")
+        ti = tarfile.TarInfo("blobs/sha256/abc" if oci else "abc/layer.tar")
         ti.size = len(data)
         tf.addfile(ti, io.BytesIO(data))
-        for name in (["oci-layout", "index.json"] if oci else
+        for name in (["index.json", "oci-layout"] if oci else
                      ["manifest.json", "repositories"]):
             raw = b"{}"
             ti = tarfile.TarInfo(name)
             ti.size = len(raw)
             tf.addfile(ti, io.BytesIO(raw))
-        if oci:
-            ti = tarfile.TarInfo("manifest.json")
-            ti.size = 2
-            tf.addfile(ti, io.BytesIO(b"{}"))
     return f
 
 
@@ -73,6 +72,7 @@ def rt(monkeypatch):
     fake = FakeRt()
     monkeypatch.setattr(sr, "_rt", fake)
     monkeypatch.setattr(sr, "_runtime", lambda: "docker")  # plain rmtree
+    monkeypatch.setattr(sr, "_process_cwds", lambda: [])
     return fake
 
 
@@ -96,6 +96,13 @@ class TestDetection:
         a2 = _archive(root / "export" / "img.oci", oci=True)
         (root / "notes.md").write_text("investigation notes")
         (root / "proj" / ".git").mkdir(parents=True)
+        lone = root / "layout-only.tar"   # an OCI index alone is no image
+        with tarfile.open(lone, "w") as tf:
+            data = b"z" * (2 << 20)
+            for name, raw in (("data.bin", data), ("index.json", b"{}")):
+                ti = tarfile.TarInfo(name)
+                ti.size = len(raw)
+                tf.addfile(ti, io.BytesIO(raw))
         plain = root / "plain.tar"
         with tarfile.open(plain, "w") as tf:
             data = b"y" * (2 << 20)
@@ -220,6 +227,50 @@ class TestPlan:
         s1, s2 = _store(legacy / "e"), _store(orphan / "e")
         sr.reclaim("pr-1")
         assert not s1.exists() and not s2.exists()
+
+    def test_process_working_in_scratch_or_run_dir_holds(
+            self, home, rt, monkeypatch):
+        """A host-mode session (a regression run writes no run record) or a
+        user investigating has no container mount: a process working in
+        the scratch dir or its run dir holds it."""
+        run, scratch = _run(home, "regression-t1-20261126T000000Z-ab12")
+        st = _store(scratch / "eng")
+        monkeypatch.setattr(sr, "_process_cwds",
+                            lambda: [str(home), str(run / "s-0" / "repo")])
+        out = sr.reclaim()
+        assert st.exists() and not out.removed
+        assert "process is working in" in out.plans[0].held
+        monkeypatch.setattr(sr, "_process_cwds",
+                            lambda: [str(scratch / "eng" / "vfs")])
+        assert "process is working in" in sr.plan().plans[0].held
+        monkeypatch.setattr(sr, "_process_cwds", lambda: [str(home)])
+        sr.reclaim()
+        assert not st.exists()
+
+    def test_process_cwds_reads_proc(self, tmp_path, monkeypatch):
+        proc = tmp_path / "proc"
+        for pid, cwd in (("10", "/a"), ("11", "/b c")):
+            (proc / pid).mkdir(parents=True)
+            os.symlink(cwd, proc / pid / "cwd")
+        (proc / "12").mkdir()            # exited / unreadable: skipped
+        (proc / "self").mkdir()
+        monkeypatch.setattr(sr, "_PROC", str(proc))
+        assert sorted(sr._process_cwds()) == ["/a", "/b c"]
+
+    def test_run_dir_in_the_old_workdirs_root_keeps_its_liveness_check(
+            self, home, rt, tmp_path):
+        """A run started before workdirs-dir moved stays in the old root;
+        found there, its live record still holds its scratch."""
+        from pm_core import paths
+        run, scratch = _run(home, "pr-1-moved")
+        (run / "qa_run.json").write_text(json.dumps(
+            {"pr_id": "pr-1", "loop_id": "moved", "owner_pid": os.getpid()}))
+        st = _store(scratch / "eng")
+        paths.set_global_setting_value("workdirs-dir", str(tmp_path / "nas"))
+        (out,) = sr.scenario_scratch_dirs("pr-1")
+        assert out == (run, scratch)
+        assert "still being driven" in sr.reclaim("pr-1").plans[0].held
+        assert st.exists()
 
     def test_active_mount_under_store_holds(self, home, rt, tmp_path,
                                             monkeypatch):

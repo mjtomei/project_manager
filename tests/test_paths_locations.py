@@ -1,6 +1,7 @@
 """Configurable locations: NAS-capable workdirs/evidence, local-only scratch
 and image cache (pm_core.paths) and their ``pm set`` surface."""
 
+import os
 from pathlib import Path
 
 import pytest
@@ -67,6 +68,34 @@ class TestConfigured:
         assert paths.workdirs_base() == nas / "wd"
         assert paths.workdir_locks_dir() == default
         assert not paths.is_network_filesystem(paths.workdir_locks_dir())
+
+    def test_workdir_provisioning_lock_stays_local(self, home, nas,
+                                                   monkeypatch):
+        """_ensure_workdir's per-PR lock sits beside the project's workdirs
+        by default and on local disk once workdirs-dir moves them."""
+        import fcntl
+        from pm_core.cli import helpers
+        locked = []
+        real_flock = fcntl.flock
+
+        def spy(fd, op):
+            if op == fcntl.LOCK_EX:
+                locked.append(os.readlink(f"/proc/self/fd/{fd}"))
+            return real_flock(fd, op)
+        monkeypatch.setattr(fcntl, "flock", spy)
+        monkeypatch.setattr(helpers, "_clone_workdir",
+                            lambda data, pr, root: "/cloned")
+        monkeypatch.setattr(helpers.store, "load", lambda root: {})
+        data = {"project": {"name": "proj", "repo_id": "1234abcd99"}}
+        assert helpers._ensure_workdir(data, {"id": "pr-1"}, home) == "/cloned"
+        paths.set_global_setting_value("workdirs-dir", str(nas / "wd"))
+        assert helpers._ensure_workdir(data, {"id": "pr-1"}, home) == "/cloned"
+        assert locked == [
+            str(home / ".pm" / "workdirs" / "proj-1234abcd" / ".workdir-pr-1.lock"),
+            str(home / ".pm" / "workdirs" / "proj-1234abcd" / ".workdir-pr-1.lock"),
+        ]
+        assert (nas / "wd" / "proj-1234abcd").is_dir()
+        assert not list((nas / "wd").rglob("*.lock"))
 
     def test_old_workdirs_root_stays_pm_created(self, home, nas):
         """Workdirs created before workdirs-dir moved are not migrated, so

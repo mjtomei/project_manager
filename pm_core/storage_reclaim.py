@@ -9,9 +9,11 @@ thing from scenario scratch, and only when nothing can still need them:
 * **container stores** — a directory holding ``storage.lock`` plus the
   containers/storage layout (``overlay-layers``, ``vfs-layers``,
   ``overlay-images``, ``vfs-images`` or ``libpod``);
-* **image archives** — an uncompressed tar whose members include
-  ``manifest.json`` plus ``repositories`` or ``oci-layout``/``index.json``
-  (headers only are read).
+* **image archives** — an uncompressed ``podman save`` / ``docker save``
+  tar: a docker-archive (``manifest.json`` plus ``repositories``,
+  ``oci-layout`` or ``index.json``) or an oci-archive (``oci-layout`` plus
+  ``index.json``; podman's has no ``manifest.json``).  Headers only are
+  read.
 
 Everything else in scratch — test projects, drafts, notes, recordings,
 investigation artifacts — is kept, as are the checkout and the captures
@@ -23,6 +25,10 @@ A scratch dir is **held**, and skipped whole, when:
   a parent or a child of it — that is the lifecycle's own ownership signal;
 * its QA run is live (run record without ``ended_at`` whose driver is
   alive) or resumable (a resume snapshot without ``ended_at``);
+* a process is working in it or in its run dir — the only liveness signal
+  for a host-mode session, which no container mount holds (regression
+  and debug runs write no run record), and for a user still investigating
+  there;
 * the runtime cannot list containers (fail safe);
 * a store has an active mount beneath it in any mount namespace pm can
   see (rootless engines mount their layers in their own namespace);
@@ -127,6 +133,13 @@ def is_container_store(d: Path) -> bool:
         return False
 
 
+def _is_image_layout(names: set[str]) -> bool:
+    """Top-level member names of a docker-archive or an oci-archive."""
+    if "manifest.json" in names:     # docker-archive (docker save ≥25: + OCI)
+        return bool({"repositories", "oci-layout", "index.json"} & names)
+    return "oci-layout" in names and "index.json" in names   # oci-archive
+
+
 def is_image_archive(f: Path) -> bool:
     """An uncompressed docker-archive / OCI-archive tar (headers only)."""
     try:
@@ -138,13 +151,9 @@ def is_image_archive(f: Path) -> bool:
                 if i >= _MAX_TAR_MEMBERS:
                     break
                 names.add(member.name.lstrip("./"))
-                if "manifest.json" in names and (
-                        "repositories" in names or "oci-layout" in names
-                        or "index.json" in names):
+                if _is_image_layout(names):
                     return True
-            return ("manifest.json" in names
-                    and bool({"repositories", "oci-layout", "index.json"}
-                             & names))
+            return False
     except (OSError, tarfile.TarError, EOFError, ValueError):
         return False
 
@@ -287,9 +296,30 @@ def _mount_points() -> list[str]:
     return points
 
 
-def _mounts_under(path: Path, mount_points: list[str]) -> bool:
+def _process_cwds() -> list[str]:
+    """Working directories of the visible processes (``/proc/<pid>/cwd``).
+
+    Unreadable entries (another user's process, one that just exited) are
+    skipped.
+    """
+    out: list[str] = []
+    try:
+        pids = [p for p in os.listdir(_PROC) if p.isdigit()]
+    except OSError:
+        return out
+    for pid in pids:
+        try:
+            out.append(os.readlink(f"{_PROC}/{pid}/cwd"))
+        except OSError:
+            continue
+    return out
+
+
+def _first_within(path: Path, candidates: list[str]) -> str | None:
+    """The first of *candidates* that is *path* or lies below it."""
     real = os.path.realpath(path)
-    return any(mp == real or mp.startswith(real + "/") for mp in mount_points)
+    return next((c for c in candidates
+                 if c == real or c.startswith(real + "/")), None)
 
 
 def scenario_scratch_dirs(pr_id: str | None = None,
@@ -299,31 +329,37 @@ def scenario_scratch_dirs(pr_id: str | None = None,
 
     Covers the legacy ``<run>/s-N/scratch`` and the local
     ``<scratch>/qa/<run>/s-N`` layouts, including scratch whose run dir is
-    already gone.  *exclude_run* is a run dir name (``<pr>-<loop>``).
+    already gone.  Run dirs are looked up under every workdirs root
+    (:func:`pm_core.paths.workdirs_roots`): runs started before
+    ``workdirs-dir`` moved stay in the old root, and a run dir that is not
+    found reads as gone, which would skip its liveness check.
+    *exclude_run* is a run dir name (``<pr>-<loop>``).
     """
-    from pm_core.paths import qa_scratch_root, qa_workdirs_root
+    from pm_core.paths import qa_scratch_root, workdirs_roots
     pattern = f"{pr_id}-*" if pr_id else "*"
-    qa_root = qa_workdirs_root()
+    qa_roots = [root / "qa" for root in workdirs_roots()]
     scratch_qa = qa_scratch_root()
     out: list[tuple[Path | None, Path]] = []
     seen: set[str] = set()
     run_names = set()
-    for base in (qa_root, scratch_qa):
+    for base in (*qa_roots, scratch_qa):
         if base.is_dir():
             run_names.update(p.name for p in base.glob(pattern) if p.is_dir())
     for run_name in sorted(run_names):
         if exclude_run and run_name == exclude_run:
             continue
-        run_dir = qa_root / run_name
-        candidates = list((run_dir.glob("s-*/scratch")) if run_dir.is_dir() else [])
+        run_dirs = [q / run_name for q in qa_roots if (q / run_name).is_dir()]
+        run_dir = run_dirs[0] if run_dirs else None
+        candidates = [(rd, sc) for rd in run_dirs
+                      for sc in rd.glob("s-*/scratch")]
         if (scratch_qa / run_name).is_dir():
-            candidates += [p for p in (scratch_qa / run_name).glob("s-*")
+            candidates += [(run_dir, p) for p in (scratch_qa / run_name).glob("s-*")
                            if p.is_dir()]
-        for sc in candidates:
+        for rd, sc in candidates:
             if str(sc) in seen:
                 continue
             seen.add(str(sc))
-            out.append((run_dir if run_dir.is_dir() else None, sc))
+            out.append((rd, sc))
     return out
 
 
@@ -334,7 +370,9 @@ def plan(pr_id: str | None = None, exclude_run: str | None = None) -> Outcome:
     if sources is None:
         out.problem = "the container runtime could not list containers"
         return out
-    mount_points: list[str] | None = None   # read once, on the first store
+    # Read once, on the first scratch dir with something to reclaim.
+    cwds: list[str] | None = None
+    mount_points: list[str] | None = None
     for run_dir, scratch in scenario_scratch_dirs(pr_id, exclude_run):
         p = ScratchPlan(scratch=scratch, run_dir=run_dir)
         held = next((s for s in sources if _related(s, str(scratch))), None)
@@ -349,14 +387,21 @@ def plan(pr_id: str | None = None, exclude_run: str | None = None) -> Outcome:
             p.held = _run_held(run_dir)
         if not p.held:
             p.items = find_disposables(scratch)
-            for d in p.items:
-                if d.kind != "store":
-                    continue
-                if mount_points is None:
-                    mount_points = _mount_points()
-                if _mounts_under(d.path, mount_points):
-                    p.held = f"{d.path} has an active mount"
-                    break
+        if p.items:
+            if cwds is None:
+                cwds = _process_cwds()
+            busy = (_first_within(scratch, cwds)
+                    or (run_dir and _first_within(run_dir, cwds)))
+            if busy:
+                p.held = f"a process is working in {busy}"
+        stores = [d.path for d in p.items if d.kind == "store"]
+        if stores and not p.held:
+            if mount_points is None:
+                mount_points = _mount_points()
+            mounted = next((s for s in stores
+                            if _first_within(s, mount_points)), None)
+            if mounted:
+                p.held = f"{mounted} has an active mount"
         out.plans.append(p)
     return out
 

@@ -228,9 +228,11 @@ the task and on the measurements above.
 
 * Disposables inside a scenario scratch dir: container stores (a dir with
   `storage.lock` plus `overlay-layers|vfs-layers|overlay-images|vfs-images|
-  libpod`) and uncompressed image archives (a tar whose members include
-  `manifest.json` plus `repositories` or `oci-layout`/`index.json`; headers
-  only are read).  Nothing else is touched: no checkout, captures,
+  libpod`) and uncompressed image archives (a docker-archive: members
+  include `manifest.json` plus `repositories` or `oci-layout`/`index.json`;
+  or an oci-archive: `oci-layout` plus `index.json` — podman's has no
+  `manifest.json`, review 62b4 i3; headers only are read).  Nothing else
+  is touched: no checkout, captures,
   transcripts, notes, drafts, recordings or other scratch files.
 * A scratch dir is **held** (skipped) when any existing container (running
   or stopped) mounts it or a parent/child of it, when its run is live (run
@@ -244,7 +246,13 @@ the task and on the measurements above.
   a retained container still exists and so already holds its scratch
   through its mounts.  A scratch dir that is itself a store (an engine run
   with `--root` on it) is held too: its store files cannot be told apart
-  from the scenario's other files there (review 62b4 i2).
+  from the scenario's other files there (review 62b4 i2).  A scratch dir
+  with something to reclaim is also held while any visible process has its
+  working directory in it or in its run dir (`/proc/<pid>/cwd`): a
+  host-mode session has no container mount to hold its scratch, and
+  regression/debug runs write no run record (review 62b4 i3).
+  Run dirs are looked up under every `paths.workdirs_roots()` root, so a
+  run started before `workdirs-dir` moved keeps its liveness check.
 * Deletion uses `podman unshare rm -rf` for stores (their files are owned by
   sub-UIDs) and `unlink` for archives; a `.pm-reclaim.json` record (paths,
   bytes, time, reason) is left in the scratch dir.
@@ -289,7 +297,9 @@ the task and on the measurements above.
   `~/.pm/workdirs` when it differs) is what workspace trust and PR-clone
   detection (`integration.py`) treat as pm-created.
 * Cross-process lock files that lived in the workdirs root (sign-off
-  launch/step, publish, merge) go through `paths.workdir_locks_dir()`:
+  launch/step, publish, merge; the per-PR workdir provisioning lock as
+  `<locks>/<project-dir>/.workdir-<pr>.lock`, review 62b4 i3) go through
+  `paths.workdir_locks_dir()`:
   the workdirs root when `workdirs-dir` is unset (unchanged), else the
   local default `~/.pm/workdirs` — flock on a NAS is emulated or
   unsupported and can hang while the share stalls.

@@ -467,9 +467,9 @@ def container_reclaim(pr_id: str | None, dry_run: bool):
     """Reclaim container stores and image archives left in QA scenario scratch.
 
     Removes only container-engine stores and image archives (podman save
-    output) under scenario scratch dirs that no existing container mounts
-    and whose QA run has ended.  Checkouts, captures, notes, drafts and
-    other scratch files are never touched.
+    output) under scenario scratch dirs that no existing container mounts,
+    no process is working in, and whose QA run has ended.  Checkouts,
+    captures, notes, drafts and other scratch files are never touched.
     """
     from pm_core import storage_reclaim
     out = storage_reclaim.reclaim(pr_id=pr_id, dry_run=dry_run,
