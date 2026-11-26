@@ -2425,8 +2425,20 @@ prs:
       Captures: /pm-captures/scenarios/6/.'
     created_at: '2026-11-26T18:21:35Z'
     last_edited: '2026-11-26T18:21:35Z'
+  - id: note-e241d4c
+    text: 'Review ea03 i1: no code changes. Code diff, tests and the QA S3 footer
+      fix (refresh(layout=True)) reviewed clean; 255 PR-affected tests pass. Spec
+      impl.md corrected: Implicit Requirements + Edge Cases no longer claim the background
+      plan-add check as a working recovery path (it never reports, pr-e2cd753), so
+      plan review (key c) is the only one; R3/R6 now list the footer fix and TestPlansPaneHeightTracksContent.
+      pr-6c0ee2d trial merge re-run at its new head 5c4914f5: same single plan.py
+      hunk (drop plan_breakdown) and same 2 [breakdown] test_prompt_gen failures (2
+      failed, 200 passed). No origin/pm/* branch updated since i3 adds new breakdown
+      references.'
+    created_at: '2026-11-26T18:36:38Z'
+    last_edited: '2026-11-26T18:36:38Z'
   created_at: '2026-03-01T17:51:46.490716+00:00'
-  updated_at: '2026-11-26T18:21:35.738233+00:00'
+  updated_at: '2026-11-26T18:36:38.707873+00:00'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-30888b1-fold-plan-breakdown-into-plan-add-st-ab512a43
 - id: pr-3116896
   plan: tui-ux
