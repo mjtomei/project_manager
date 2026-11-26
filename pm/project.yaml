@@ -31077,7 +31077,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/222
   gh_pr_number: 222
   created_at: '2026-05-21T04:06:05.061620+00:00'
-  updated_at: '2026-11-26T21:23:43.843281+00:00'
+  updated_at: '2026-11-26T21:47:39.410692+00:00'
   started_at: '2026-05-25T02:58:20.169677+00:00'
   reviewed_at: '2026-05-25T03:13:02.415469+00:00'
   merged_at: null
@@ -31543,6 +31543,20 @@ prs:
       57 passed.'
     created_at: '2026-11-26T21:23:43Z'
     last_edited: '2026-11-26T21:23:43Z'
+  - id: note-c0ad398
+    text: 'Review loop c6a2 i11 (ec68e34e): NEEDS_WORK, fixed + pushed. The i10 interrupt
+      fix only covered the first fast-forward (it checked HEAD only while merge_r
+      was None). On the stash path, an interrupt (Ctrl-C) after git finished the fast-forward
+      retried after the stash left merge_r holding the first attempt failure, so the
+      finally restored the pre-merge registry over the merged one and re-staged the
+      old blob with HEAD at the target (MM pm/project.yaml, a staged reversion of
+      the target registry changes; reproduced). landed is now "merge_r ok or HEAD
+      at the pinned target". test_interrupt_during_the_ff is parametrized over the
+      first and the retried fast-forward; the retried, landed case fails on 570453b3
+      for that reason. Spec R6/2c/5 updated. Evidence /pm-captures/review-c6a2-i11:
+      pre-fix-570453b3.txt (1 fail), full suite at ec68e34e 5743 passed / 1 skipped.'
+    created_at: '2026-11-26T21:47:39Z'
+    last_edited: '2026-11-26T21:47:39Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-ca6981c-bug-pm-merge-s-git-stash-pop-corrupt-ac115969
 - id: pr-c41f029
   plan: bugs
