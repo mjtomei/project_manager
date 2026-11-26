@@ -2327,8 +2327,20 @@ prs:
       add.'
     created_at: '2026-11-26T15:52:14Z'
     last_edited: '2026-11-26T15:52:14Z'
+  - id: note-d7f05c7
+    text: 'Review 4efb i1 (79a5a5b2): plan load "No PRs found" now points at `pm plan
+      review <id>` (key c) instead of re-running plan add, which would orphan the
+      draft; test added. pr-6c0ee2d relay, update to note-e78ccd7: its impl ee67fb0b
+      adds arch_block to plan_breakdown AND a `_PLAN_COMMANDS["breakdown"]` case in
+      tests/test_prompt_gen.py. Trial merge: plan.py conflicts only on the breakdown
+      block (drop it; plan add picks up arch_block cleanly); test_prompt_gen.py merges
+      cleanly but TestPlanPrompts::test_includes_architecture_when_present[breakdown]
+      and test_clean_when_absent[breakdown] fail with "No such command". Whichever
+      PR merges second must drop that case. Suite 5699/1s: /pm-captures/pr-30888b1-review-4efb-i1/.'
+    created_at: '2026-11-26T16:08:29Z'
+    last_edited: '2026-11-26T16:08:29Z'
   created_at: '2026-03-01T17:51:46.490716+00:00'
-  updated_at: '2026-11-26T15:52:15.048431+00:00'
+  updated_at: '2026-11-26T16:08:30.261106+00:00'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-30888b1-fold-plan-breakdown-into-plan-add-st-ab512a43
 - id: pr-3116896
   plan: tui-ux
