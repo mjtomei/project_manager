@@ -3335,13 +3335,16 @@ def _reapply_registry(py: dict) -> bool:
     return True
 
 
-def _stash_ref(cwd: Path, sha: str) -> str | None:
-    """The ``stash@{N}`` currently naming stash commit *sha*, if any."""
-    if sha.startswith("stash@{"):
-        return sha
+def _stash_top(cwd: Path) -> str:
+    """Commit of ``stash@{0}``, or "" when the stash list is empty."""
     top = git_ops.run_git("rev-parse", "-q", "--verify", "stash@{0}",
                           cwd=cwd, check=False)
-    if top.returncode == 0 and top.stdout.strip() == sha:
+    return top.stdout.strip() if top.returncode == 0 else ""
+
+
+def _stash_ref(cwd: Path, sha: str) -> str | None:
+    """The ``stash@{N}`` currently naming stash commit *sha*, if any."""
+    if _stash_top(cwd) == sha:
         return "stash@{0}"
     listing = git_ops.run_git("stash", "list", "--format=%gd%x09%H",
                               cwd=cwd, check=False)
@@ -3384,25 +3387,28 @@ def _stash_for_merge(cwd: Path, pr_display_id: str = "",
         if remaining:
             click.echo(f"Stashing {len(remaining)} dirty file(s) to proceed "
                        f"with merge...")
+            before = _stash_top(cwd)
             stash_r = git_ops.run_git(
                 "stash", "push", "--include-untracked", "-m", _AUTO_STASH_MSG,
                 "--", *(f":(literal){p}" for p in remaining),
                 cwd=cwd, check=False)
-            if stash_r.returncode != 0:
-                click.echo(f"Failed to stash: {stash_r.stderr.strip()}",
-                           err=True)
+            # Popped by commit later, not by position: anything else pushing
+            # a stash meanwhile would otherwise get popped instead.  An
+            # unchanged top means nothing was saved ("No local changes to
+            # save", rc 0): the top is then someone else's stash.
+            after = _stash_top(cwd)
+            if stash_r.returncode != 0 or not after or after == before:
+                click.echo(f"Failed to stash: "
+                           f"{git_ops.git_detail(stash_r)}", err=True)
             else:
-                sha = git_ops.run_git("rev-parse", "-q", "--verify",
-                                      "stash@{0}", cwd=cwd, check=False)
-                # Popped by commit later, not by position: anything else
-                # pushing a stash meanwhile would otherwise get popped instead.
-                info["stash"] = sha.stdout.strip() or "stash@{0}"
+                info["stash"] = after
                 info["count"] = len(remaining)
     except BaseException:
         _unstash_after_merge(cwd, info)
         raise
 
-    if remaining and info["stash"] is None or not (info["py"] or info["stash"]):
+    if (remaining and info["stash"] is None) \
+            or not (info["py"] or info["stash"]):
         _unstash_after_merge(cwd, info)
         return None
     return info

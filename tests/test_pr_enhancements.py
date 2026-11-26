@@ -475,9 +475,16 @@ class TestPullAfterMerge:
         launch.assert_not_called()
 
     def test_dirty_overlap_stashes_then_succeeds(self, tmp_path):
-        n = {"merge": 0}
+        n = {"merge": 0, "stashed": False}
 
         def rg(*args, **kw):
+            if args[:2] == ("stash", "push"):
+                n["stashed"] = True
+            if args[0] == "rev-parse" and "stash@{0}" in args:
+                # The stash pm pushed is popped by its commit.
+                return MagicMock(returncode=0 if n["stashed"] else 1,
+                                 stdout="abc123\n" if n["stashed"] else "",
+                                 stderr="")
             if args[0] == "rev-parse":
                 return MagicMock(returncode=0, stdout="master", stderr="")
             if args[0] == "status":

@@ -334,6 +334,37 @@ class TestRegistryAcrossFastForward:
         assert (pm / "project.yaml").read_bytes() == before
         assert _backups(repo) == []
 
+    def test_empty_stash_push_never_pops_someone_elses_stash(self, tmp_path):
+        """`stash push` can exit 0 having saved nothing; stash@{0} is then
+        the user's own stash and must not be popped as pm's."""
+        repo = _init_repo(tmp_path)
+        pm = _seed_project(repo)
+        (repo / "mine.txt").write_text("base\n")
+        _git("add", "mine.txt", cwd=repo)
+        _git("commit", "-q", "-m", "mine", cwd=repo)
+        (repo / "mine.txt").write_text("user work\n")
+        _git("stash", "push", "-m", "user stash", cwd=repo)
+        user = _git("rev-parse", "stash@{0}", cwd=repo).stdout
+        _incoming(repo, pm, _add_note("note-in", "x"))
+        _edit(pm, lambda d: _pr(d, "pr-001").update(updated_at="local"))
+        (repo / "loose.txt").write_text("x\n")
+        before = (pm / "project.yaml").read_bytes()
+        real = pr_mod.git_ops.run_git
+
+        def run_git(*args, **kw):
+            if args[:2] == ("stash", "push"):
+                return subprocess.CompletedProcess(
+                    args, 0, "No local changes to save\n", "")
+            return real(*args, **kw)
+
+        with mock.patch.object(pr_mod.git_ops, "run_git",
+                               side_effect=run_git):
+            r = pr_mod._ff_with_autostash(repo, "incoming")
+        assert r.returncode != 0
+        assert _git("rev-parse", "stash@{0}", cwd=repo).stdout == user
+        assert (repo / "mine.txt").read_text() == "base\n"
+        assert (pm / "project.yaml").read_bytes() == before
+
     def test_recovery_copy_exists_until_reapplied(self, tmp_path):
         """A crash between the revert and the re-apply loses nothing: the
         live registry is copied into the git dir first."""
