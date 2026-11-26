@@ -3243,8 +3243,8 @@ def _write_registry_text(root: Path, text: str) -> None:
 
 def _tree_entry(cwd: Path, rev: str, rel: str) -> tuple[str, str] | None:
     """``(mode, blob sha)`` of *rel* in *rev*, or None when absent."""
-    r = git_ops.run_git("ls-tree", "-z", rev, "--", f":(literal){rel}",
-                        cwd=cwd, check=False)
+    r = git_ops.run_git("ls-tree", "-z", rev, "--", rel, cwd=cwd,
+                        check=False)
     entry = r.stdout.split("\0", 1)[0] if r.returncode == 0 else ""
     meta, _, path = entry.partition("\t")
     parts = meta.split()
@@ -3274,8 +3274,8 @@ def _plan_registry(repo: Path, target: str) -> dict | None:
     incoming = _tree_entry(repo, target, _REGISTRY_REL)
     if head is None or incoming is None or head == incoming:
         return None
-    ls = git_ops.run_git("ls-files", "-s", "-z", "--",
-                         f":(literal){_REGISTRY_REL}", cwd=repo, check=False)
+    ls = git_ops.run_git("ls-files", "-s", "-z", "--", _REGISTRY_REL,
+                         cwd=repo, check=False)
     entries = [e for e in ls.stdout.split("\0") if e]
     if len(entries) != 1 or entries[0].split()[2] != "0":
         return None
