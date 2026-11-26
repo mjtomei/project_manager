@@ -3288,8 +3288,15 @@ def _plan_registry(repo: Path, target: str) -> dict | None:
         if r.returncode != 0:
             return None
         blobs.append(r.stdout)
-    plan = {"root": root, "base_text": blobs[0], "incoming_text": blobs[1],
-            "head": head, "incoming": incoming, "index": index}
+    # Parsed once, here: a re-merge under the lock (the live file changed
+    # meanwhile) then parses only the live text.  merge_3way never mutates
+    # its inputs, so the parsed values can be merged again.
+    parsed = [_parse_registry(t) for t in blobs]
+    if None in parsed:
+        return None
+    plan = {"root": root, "base": parsed[0], "incoming_data": parsed[1],
+            "incoming_text": blobs[1], "head": head, "incoming": incoming,
+            "index": index}
     try:
         live_text = (root / "project.yaml").read_text()
     except OSError:
@@ -3297,19 +3304,25 @@ def _plan_registry(repo: Path, target: str) -> dict | None:
     return plan if _merge_registry_plan(plan, live_text) else None
 
 
+def _parse_registry(text: str) -> dict | None:
+    """*text* parsed as a registry mapping, or None (markers, invalid YAML,
+    not a mapping)."""
+    if store.find_conflict_markers(text):
+        return None
+    try:
+        data = yaml.load(text, Loader=store._yaml_loader())
+    except yaml.YAMLError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
 def _merge_registry_plan(plan: dict, live_text: str) -> bool:
     """Fill *plan* with the merge of *live_text*; False if not mergeable."""
-    if store.find_conflict_markers(live_text):
+    live = _parse_registry(live_text)
+    if live is None:
         return False
-    loader = store._yaml_loader()
-    try:
-        base, incoming, live = (yaml.load(t, Loader=loader) for t in (
-            plan["base_text"], plan["incoming_text"], live_text))
-    except yaml.YAMLError:
-        return False
-    if not all(isinstance(d, dict) for d in (base, incoming, live)):
-        return False
-    merged = store.merge_3way(base, incoming, live)
+    incoming = plan["incoming_data"]
+    merged = store.merge_3way(plan["base"], incoming, live)
     if merged == live:
         new_text = live_text            # keep the exact local bytes
     elif merged == incoming:
@@ -3549,6 +3562,20 @@ def _unstash_after_merge(cwd: Path, info: dict) -> bool:
             trigger_tui_merge_unlock()
 
 
+def _no_autostash() -> tuple[str, ...]:
+    """``--no-autostash`` for ``git merge``, on a git that has it.
+
+    A user's ``merge.autoStash=true`` would otherwise make the fast-forward
+    text-stash the swapped-in registry, reset it and pop it back over the
+    incoming one (conflict markers + a leaked stash, rc 0).  git < 2.27 has
+    neither the option nor the config, and rejects the unknown option.  An
+    unknown version ((0, 0)) still gets the flag.
+    """
+    from pm_core import integration
+    return () if (0, 0) < integration._git_version() < (2, 27) \
+        else ("--no-autostash",)
+
+
 class _RegistryLockBusy(subprocess.CompletedProcess):
     """:func:`_ff_with_autostash` gave up waiting for the registry lock.
 
@@ -3583,11 +3610,8 @@ def _ff_with_autostash(repo_dir: str | Path, target: str,
     target = _ref(repo_dir, f"{target}^{{commit}}") or target
 
     def ff():
-        # --no-autostash: a user's ``merge.autoStash=true`` would otherwise
-        # text-stash the swapped-in registry, reset it and pop it back over
-        # the incoming one (conflict markers + a leaked stash, rc 0).
-        return git_ops.run_git("merge", "--ff-only", "--no-autostash", target,
-                               cwd=repo_dir, check=False)
+        return git_ops.run_git("merge", "--ff-only", *_no_autostash(),
+                               target, cwd=repo_dir, check=False)
 
     restored = True
     planned_head = _ref(repo_dir, "HEAD")
@@ -3647,21 +3671,18 @@ def _ff_with_autostash(repo_dir: str | Path, target: str,
 def _registry_change_applied(cwd: Path, sha: str, rel: str,
                              current: dict | None) -> bool:
     """True if stash *sha*'s registry changes are all in *current*."""
-    loader = store._yaml_loader()
-    texts = []
+    if current is None:
+        return False
+    parsed = []
     for rev in (f"{sha}^1", sha):
         r = git_ops.run_git("show", f"{rev}:{rel}", cwd=cwd, check=False)
-        if r.returncode != 0:
+        parsed.append(_parse_registry(r.stdout) if r.returncode == 0
+                      else None)
+        if parsed[-1] is None:
             return False
-        texts.append(r.stdout)
-    try:
-        base, stashed = (yaml.load(t, Loader=loader) or {} for t in texts)
-    except yaml.YAMLError:
-        return False
     # Live (current) wins conflicts, so the result differs from current only
     # where the stash changed something current still has at base value.
-    return current is not None and \
-        store.merge_3way(base, stashed, current) == current
+    return store.merge_3way(*parsed, current) == current
 
 
 def _worktree_has(cwd: Path, blob_rev: str, rel: str) -> bool:

@@ -447,6 +447,52 @@ class TestRegistryAcrossFastForward:
         assert [n["id"] for n in _pr(d, "pr-001")["notes"]] == ["note-in"]
         assert _stash_list(repo) == ""
 
+    @pytest.mark.parametrize("version, flag", [
+        ((2, 25), False), ((2, 27), True), ((2, 45), True), ((0, 0), True)])
+    def test_no_autostash_only_where_git_has_it(self, version, flag):
+        """git < 2.27 rejects the unknown option (every fast-forward would
+        fail) and has no autostash to turn off."""
+        from pm_core import integration
+        with mock.patch.object(integration, "_git_version",
+                               return_value=version):
+            assert pr_mod._no_autostash() == (
+                ("--no-autostash",) if flag else ())
+
+    def test_live_change_after_planning_is_merged_under_the_lock(
+            self, tmp_path):
+        """A writer saving between the plan and the lock: its change, the
+        local edit and the merged-in note all survive, and the re-merge
+        under the lock parses only the live text (HEAD's and the target's
+        registries were parsed while planning)."""
+        repo = _init_repo(tmp_path)
+        pm = _seed_project(repo)
+        _incoming(repo, pm, _add_note("note-in", "x", "2026-02-02T02:02:02"))
+        _edit(pm, lambda d: _pr(d, "pr-001").update(updated_at="local"))
+        real_plan, real_parse = pr_mod._plan_registry, pr_mod._parse_registry
+        parsed_after_plan = []
+
+        def plan_then_write(repo_, target):
+            p = real_plan(repo_, target)
+            _edit(pm, lambda d: _pr(d, "pr-002").update(title="writer"))
+            parsed_after_plan.clear()
+            return p
+
+        def parse(text):
+            parsed_after_plan.append(text)
+            return real_parse(text)
+
+        with mock.patch.object(pr_mod, "_plan_registry",
+                               side_effect=plan_then_write), \
+             mock.patch.object(pr_mod, "_parse_registry", side_effect=parse):
+            r = pr_mod._ff_with_autostash(repo, "incoming")
+        assert r.returncode == 0, r.stderr
+        d = store.load(pm)
+        assert _pr(d, "pr-002")["title"] == "writer"
+        assert _pr(d, "pr-001")["updated_at"] == "local"
+        assert [n["id"] for n in _pr(d, "pr-001")["notes"]] == ["note-in"]
+        assert len(parsed_after_plan) == 1
+        assert "writer" in parsed_after_plan[0]
+
     def test_clean_registry_updated_without_a_dirty_tree(self, tmp_path):
         repo = _init_repo(tmp_path)
         pm = _seed_project(repo)

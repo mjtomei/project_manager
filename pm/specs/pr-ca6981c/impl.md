@@ -220,7 +220,10 @@ different entry (e.g. the user's WIP).
 `--no-autostash` overrides a user's `merge.autoStash=true`, which would
 otherwise make git itself text-stash the swapped-in registry, reset it and
 pop it back over the incoming one: conflict markers and a leaked stash, with
-rc 0 (review c6a2 i1).
+rc 0 (review c6a2 i1). It is passed only on git >= 2.27 (or an unknown
+version): older git has neither the option nor `merge.autoStash`, and
+rejects the unknown option, which would fail every fast-forward
+(review c6a2 i4).
 
 `_plan_registry` runs only when the target changes `pm/project.yaml`,
 both HEAD and the target hold it, and the update is a real fast-forward
@@ -228,8 +231,10 @@ both HEAD and the target hold it, and the update is a real fast-forward
 or has diverged, git leaves the file alone, and merging toward the target's
 older blob would revert committed registry changes in the live state and
 stage that older blob (review c6a2 i3). It needs a single stage-0 index entry
-and a live file that is valid, free of markers and a mapping; otherwise it
-returns None and git treats the file like any other.
+and HEAD, target and live registries that are valid, free of markers and
+mappings (`_parse_registry`); otherwise it returns None and git treats the
+file like any other. HEAD's and the target's registries are parsed once,
+here, and kept in the plan (`merge_3way` never mutates its inputs).
 - It computes `merge_3way(base=HEAD blob, ours=target blob, theirs=live)`.
 - The new text is chosen as follows:
   - when the result equals the live dict: the live bytes;
@@ -239,6 +244,8 @@ returns None and git treats the file like any other.
 
 `_apply_registry` (lock held):
 1. Re-read the live text. If it changed since the plan, re-merge it.
+   Only the live text is parsed then, so the lock hold stays at one parse
+   (plus a dump when both sides changed), the same as any pm write.
 2. Replace the file with one atomic rename (`store.save_text`).
 3. `git update-index --cacheinfo <target mode>,<target blob>,pm/project.yaml`.
 
@@ -357,6 +364,10 @@ lock is a different one.
   - a writer that re-dirties the registry never enters the text stash;
   - an uncommitted `pm/` dir never stashes the registry;
   - a user's `merge.autoStash=true` never text-stashes the registry;
+    `--no-autostash` is passed only on git >= 2.27 (or an unknown version);
+  - a writer saving between the plan and the lock: its change, the local
+    edit and the merged-in note survive, and only the live text is parsed
+    under the lock;
   - the target ref moving while planning is ignored (pinned commit);
   - another update moving HEAD before the lock triggers a re-plan, and the
     stash still pops cleanly;
