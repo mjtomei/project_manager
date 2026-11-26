@@ -56508,3 +56508,30 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-95286f9
+  plan: bugs
+  title: 'Bug: plan review prompts render "(plan: None)" for cross-plan PRs with no
+    plan, and run the block into the next heading'
+  branch: pm/pr-95286f9-bug-plan-review-prompts-render-plan-none-for-cross
+  status: pending
+  depends_on: []
+  description: 'pm_core/cli/plan.py plan_review (_other_plan_line): pr.get("plan",
+    "?") prints the Python None when the key exists with a null value, so the "PRs
+    from other plans (for cross-plan reference):" block shows e.g. "pr-c896077: Existing
+    login PR [pending] (plan: None)". The block also ends with a single newline, so
+    it runs straight into "Check the following:" (pre-load) or "First, assess progress:"
+    (post-load) with no blank line. Repro: pm init --backend local --no-import; pm
+    pr add "X"; pm plan add "Y" (stand-in claude); write a plan body; pm plan review
+    <id>; inspect the recorded prompt. Same code on origin/master (pre-existing; seen
+    in QA S2 for pr-30888b1, /pm-captures/scenarios/2/story4-preload-review/preload-review-prompt.txt).
+    Fix: render a missing plan as "(no plan)" or omit it, and end the block with a
+    blank line.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-26T17:04:29.182095+00:00'
+  updated_at: '2026-11-26T17:04:29.182095+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
