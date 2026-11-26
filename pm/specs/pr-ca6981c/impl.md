@@ -143,10 +143,11 @@ R6. **No data loss on any failure path.** The live file always holds the
     full live state; it is never reverted. When the update fails, the exact
     live bytes and the original index entry (a staged hunk included) are
     restored. A crash mid-update leaves the merged live state in the
-    worktree. An interrupt (Ctrl-C) that lands after git finished the
-    fast-forward counts as a landed update (HEAD is at the target): the
-    merged registry stays, since restoring the pre-merge one would revert
-    the target's registry changes in the live state (review c6a2 i10).
+    worktree. An interrupt (Ctrl-C) that lands after git finished a
+    fast-forward, the first one or the one retried after the stash, counts
+    as a landed update (HEAD is at the target): the merged registry stays,
+    since restoring the pre-merge one would revert the target's registry
+    changes in the live state (review c6a2 i10, i11).
 
 R7. **Tests.** Real-git tests simulate concurrent registry edits across a
     fast-forward. They assert:
@@ -202,7 +203,7 @@ with store._lock(repo/pm, timeout=10):         # busy -> failed result, untouche
         if info:
             try:     r = git merge --ff-only --no-autostash target
             finally: restored = _unstash_after_merge(repo, info)
-    finally: if r failed: _restore_registry(repo, plan)
+    finally: unless r ok or HEAD == target: _restore_registry(repo, plan)
 if r ok and restored and root: _reap_auto_stashes(repo, root)  # lock released
 ```
 
@@ -438,8 +439,9 @@ lock is a different one.
     stash push/pop);
   - a clean registry is updated without leaving a dirty tree;
   - a staged registry hunk survives an update that fails after the swap;
-  - an interrupt during the fast-forward keeps the merged registry when
-    git had finished (HEAD at the target) and restores it otherwise;
+  - an interrupt during the first or the retried fast-forward keeps the
+    merged registry when git had finished (HEAD at the target) and
+    restores it otherwise;
   - a writer that re-dirties the registry never enters the text stash;
   - an uncommitted `pm/` dir never stashes the registry;
   - a user's `merge.autoStash=true` never text-stashes the registry;

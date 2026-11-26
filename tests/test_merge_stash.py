@@ -387,22 +387,39 @@ class TestRegistryAcrossFastForward:
         assert _stash_list(repo) == ""
         assert _git("diff", "--cached", "--name-only", cwd=repo).stdout == ""
 
+    @pytest.mark.parametrize("retry", [False, True],
+                             ids=["first-ff", "retried-ff"])
     @pytest.mark.parametrize("landed", [True, False])
-    def test_interrupt_during_the_ff(self, tmp_path, landed):
-        """Ctrl-C while git runs the fast-forward.  If git finished first
-        (HEAD at the target), the merged registry stays: restoring the
-        pre-merge one would revert the target's registry changes in the
-        live state and stage the old blob.  Otherwise it is restored."""
+    def test_interrupt_during_the_ff(self, tmp_path, landed, retry):
+        """Ctrl-C while git runs the fast-forward, the first one or the one
+        retried after the stash (merge_r then still holds the first one's
+        failure).  If git finished first (HEAD at the target), the merged
+        registry stays: restoring the pre-merge one would revert the
+        target's registry changes in the live state and stage the old blob.
+        Otherwise it is restored."""
         repo = _init_repo(tmp_path)
         pm = _seed_project(repo)
-        _incoming(repo, pm, _add_note("note-in", "x"))
+        files = None
+        if retry:
+            # code.txt blocks the first fast-forward; the pop is clean.
+            (repo / "code.txt").write_text("a\nb\nc\nd\ne\n")
+            _git("add", "code.txt", cwd=repo)
+            _git("commit", "-q", "-m", "code", cwd=repo)
+            files = {"code.txt": "A\nb\nc\nd\ne\n"}
+        _incoming(repo, pm, _add_note("note-in", "x"), files=files)
         _edit(pm, lambda d: _pr(d, "pr-002").update(title="local"))
+        if retry:
+            (repo / "code.txt").write_text("a\nb\nc\nd\nE\n")
         before = (pm / "project.yaml").read_bytes()
         head = _git("rev-parse", "HEAD", cwd=repo).stdout
         real = pr_mod.git_ops.run_git
+        merges = []
 
         def run_git(*args, **kw):
             if args[0] == "merge":
+                merges.append(args)
+                if retry and len(merges) == 1:
+                    return real(*args, **kw)    # fails on code.txt
                 if landed:
                     real(*args, **kw)
                 raise KeyboardInterrupt
@@ -412,6 +429,11 @@ class TestRegistryAcrossFastForward:
                                side_effect=run_git), \
                 pytest.raises(KeyboardInterrupt):
             pr_mod._ff_with_autostash(repo, "incoming")
+        assert len(merges) == (2 if retry else 1)
+        assert _stash_list(repo) == ""
+        if retry:       # the inner finally popped the stash
+            want = "A\nb\nc\nd\nE\n" if landed else "a\nb\nc\nd\nE\n"
+            assert (repo / "code.txt").read_text() == want
         assert _git("diff", "--cached", "--name-only", cwd=repo).stdout == ""
         if landed:
             assert _git("rev-parse", "HEAD", cwd=repo).stdout == \

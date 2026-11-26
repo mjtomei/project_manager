@@ -3712,12 +3712,13 @@ def _ff_with_autostash(repo_dir: str | Path, target: str,
                         restored = _unstash_after_merge(repo_path, info)
         finally:
             if plan is not None:
-                # An interrupt (Ctrl-C) can land after git finished the
-                # fast-forward: HEAD at the target means it landed, and
+                # An interrupt (Ctrl-C) can land after git finished either
+                # fast-forward, while merge_r is still None or the first
+                # attempt's failure: HEAD at the target means it landed, and
                 # restoring the pre-merge registry would revert the target's
                 # registry changes in the live state.
-                landed = (merge_r.returncode == 0 if merge_r is not None
-                          else _ref(repo_dir, "HEAD") == target)
+                landed = (merge_r is not None and merge_r.returncode == 0) \
+                    or _ref(repo_dir, "HEAD") == target
                 if landed:
                     if plan["combined"]:
                         click.echo(f"Merged {_REGISTRY_REL} (local pm state "
