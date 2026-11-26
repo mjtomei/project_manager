@@ -769,8 +769,8 @@ def handle_plan_add(app, result: tuple[str, str] | None) -> None:
     cmd = f"pm plan add {shlex.quote(name)}"
     # generate_plan_id is sha256(name + description) so the TUI and the
     # spawned `pm plan add` process produce the same id — the window we open
-    # here will be the same one the plan's later actions (edit, breakdown,
-    # review) target, instead of a one-shot 'plan-add-<uuid>' window.
+    # here will be the same one the plan's later actions (edit, review)
+    # target, instead of a one-shot 'plan-add-<uuid>' window.
     existing_ids = {p["id"] for p in (app._data.get("plans") or [])}
     plan_id = store.generate_plan_id(name, existing_ids)
     _launch_in_plans_window(app, plan_id, cmd, "plan-add")

@@ -3017,8 +3017,8 @@ for the human to say "yes" / "go ahead". Do **not** run write commands
 silently.
 
 Forbidden (must always be done via the TUI by the human):
-`pm pr start`, `pm pr done`, `pm plan add`, `pm plan breakdown`,
-`pm plan review` — anything that spawns a new Claude session.
+`pm pr start`, `pm pr done`, `pm plan add`, `pm plan review` —
+anything that spawns a new Claude session.
 
 ## Tone
 

@@ -26,7 +26,7 @@ STEP_ORDER = [
 STEP_DESCRIPTIONS = {
     "no_project": "Initialize the project",
     "initialized": "Create a plan",
-    "has_plan_draft": "Break plan into PRs",
+    "has_plan_draft": "Finish plan with PR breakdown",
     "has_plan_prs": "Load PRs from plan",
     "ready_to_work": "Start working on PRs",
     "all_in_progress": "All PRs are in progress",
@@ -288,16 +288,16 @@ Tell the user to press `p` in the TUI to open the plans view, then press `a`
 to add a new plan. A dialog will ask for a title or file path — if you wrote
 a notes file, tell them to enter that path; otherwise help them choose a good
 title based on what you learned about the codebase and their goals. The `a`
-action launches a session in a new pane. Once the plan session finishes,
-walk the user through the remaining steps below (repeat for each plan if
-creating multiple).
+action launches a session in a new pane that develops the plan with the user
+and breaks it into PRs, writing both the plan content and a `## PRs` section
+with individual PR entries. Once the plan session finishes, walk the user
+through the remaining steps below (repeat for each plan if creating multiple).
 
-### Breaking the plan into PRs
+### If the plan has no PRs yet
 
-Tell the user to press `w` in the plans view to break the plan into PRs. This
-launches a session that explores the codebase, writes the plan content,
-and adds a `## PRs` section with individual PR entries. Wait for it to finish,
-then continue to the next step.
+If the plan session ended before it wrote a `## PRs` section, tell the user to
+press `c` in the plans view. The review session proposes a PR breakdown for a
+plan that has none, settles it with the user, and writes it to the plan file.
 
 ### Reviewing the plan
 
@@ -313,9 +313,8 @@ shows progress and the tech tree updates when done.
 
 ### TUI plans view reference
 
-In the TUI, `p` toggles the plans view. The setup flow is `a` → `w` → `c` → `l`:
-- `a` — add a new plan (prompts for a title or file path)
-- `w` — break plan into PRs (launches a Claude session)
+In the TUI, `p` toggles the plans view. The setup flow is `a` → `c` → `l`:
+- `a` — add a new plan and break it into PRs (prompts for a title or file path)
 - `c` — review plan (launches a Claude session)
 - `l` — load PRs from plan into the project
 - `e` — edit plan file

@@ -70,7 +70,7 @@ def plan():
 @click.option("--description", default="", help="(Deprecated) Description — ignored, kept for backward compat")
 @click.option("--fresh", is_flag=True, default=False, help="Start a fresh session (don't resume)")
 def plan_add(name: str, description: str, fresh: bool):
-    """Create a new plan and launch Claude to develop it.
+    """Create a new plan and launch Claude to develop it and break it into PRs.
 
     NAME can be a short title (e.g. "auth-refactor") or a path to an
     existing file that describes the plan (e.g. "plans/auth.md" or
@@ -106,10 +106,16 @@ def plan_add(name: str, description: str, fresh: bool):
     existing_prs = data.get("prs") or []
     existing_context = ""
     if existing_prs:
-        existing_context = "\nExisting PRs in this project:\n" + "\n".join(
-            f"  {pr['id']}: {pr.get('title', '???')} [{pr.get('status', '?')}]"
-            + (f" (depends on: {', '.join(pr.get('depends_on') or [])})" if pr.get("depends_on") else "")
-            for pr in existing_prs
+        def _existing_line(pr: dict) -> str:
+            deps = pr.get("depends_on") or []
+            dep_str = f" (depends on: {', '.join(deps)})" if deps else ""
+            return (f"  {pr['id']}: {pr.get('title', '???')} "
+                    f"[{pr.get('status', '?')}]{dep_str}")
+        existing_context = "\nExisting PRs in this project:\n" + bounded_join(
+            existing_prs, _existing_line, max_items=_PLAN_LIST_MAX,
+            max_bytes=_PLAN_LIST_BUDGET,
+            omitted_note=lambda n: (
+                f"  ... (+{n} more; run `pm pr list` to see all PRs)"),
         ) + "\n"
 
     notes_block = notes.notes_section(root)
@@ -138,6 +144,7 @@ and complete. Then write the final plan to the file above as structured markdown
 The plan needs to include scope, goals, key design decisions, and any constraints.
 
 Once the plan is solid, break it down into a "## PRs" section with individual PRs.
+If the source document already proposes PRs, start from that list.
 Discuss the breakdown with the user — ask about anything ambiguous (scope of
 individual PRs, ordering preferences, what can be parallelized). Iterate until the
 user is comfortable with the list, then write the PRs to the plan file in this format:
@@ -337,6 +344,11 @@ Read the plan file at: {plan_path}
 
 The plan file should contain a "## PRs" section with proposed PRs. No PRs
 have been loaded into the project yet.
+
+If the plan file has no "## PRs" section yet (for example, the plan add
+session ended before writing one), start by proposing a PR breakdown for the
+plan. Discuss it with the user, and once they agree, write it to the plan file
+in the format shown under FORMAT below. Then run the checks.
 
 {other_prs_context}\
 Check the following:

@@ -1,0 +1,59 @@
+Your goal: Review the plan and its PRs for consistency, coverage, and
+self-containment before they are loaded. Identify gaps and fix them.
+
+This session is managed by `pm` (project manager for Claude Code). You have
+access to the `pm` CLI tool — run `pm help` to see available commands.
+
+Read the plan file at: ⟦pm_root⟧/plans/⟦plan_id⟧.md
+
+The plan file should contain a "## PRs" section with proposed PRs. No PRs
+have been loaded into the project yet.
+
+
+PRs from other plans (for cross-plan reference):
+⟦bounded listing — one line per PR: `  <pr-id>: <title> [<status>]…`; capped at 40 lines / 20 KB, then `  ... (+N more; run `pm pr list` to see all PRs)`⟧
+Check the following:
+
+1. COVERAGE — Does every feature, behavior, or capability described in the
+   plan have at least one PR responsible for it? List any gaps.
+
+2. SELF-CONTAINMENT — Can an agent pick up any single PR and understand what
+   to build without reading the entire plan? Each PR description should include:
+   - What the PR does and why (not just "implement X")
+   - Which files to modify or create
+   - What tests to write
+   - How it relates to its dependencies (what it receives from them)
+   - Reference to the plan file for broader context
+
+3. CONSISTENCY — Do PR descriptions match the plan? Are depends_on
+   references correct? Are file paths plausible? For each file path
+   mentioned in a PR's **files** field, check whether it already exists
+   in the repo (ls or find the file). If it exists, the PR should modify
+   it; if it doesn't, the PR should create it. Flag paths that look wrong
+   (typos, wrong directory, missing extension).
+
+4. MANUAL TESTING — For each PR, identify if human-guided testing will be needed during review (UI interactions, TUI keybindings, environment-specific behavior, hardware dependencies). Call this out explicitly in the PR description so the review loop can use INPUT_REQUIRED appropriately.
+
+5. FORMAT — Each PR entry must be parseable by the automated loader.
+   Required format:
+
+   ### PR: <title>
+   - **description**: What this PR does
+   - **tests**: Expected unit tests
+   - **files**: Expected file modifications
+   - **depends_on**: <comma-separated exact titles of dependency PRs, or empty>
+
+   Entries separated by --- lines. Check:
+   - Every PR has a ### PR: heading with a title
+   - Every PR has a **description** field (not empty)
+   - **depends_on** values match exact titles of other PRs in the list
+   - No duplicate PR titles
+
+For each issue found, propose a fix. When the user agrees, apply fixes
+by editing the plan file directly at ⟦pm_root⟧/plans/⟦plan_id⟧.md.
+
+After fixing, summarize what was changed. Then tell the user to run
+`pm plan load ⟦plan_id⟧` (key: l in the plans pane) to create the PRs.
+Let them know it is safe to close this pane — loading runs instantly without a session.
+⟦tui_section — the 'Interacting with the TUI' block, rendered in tui_section.txt; empty when no pm tmux session⟧
+⟦notes_block — notes.notes_section(root): the project's pm/notes.txt sections; empty when none⟧
