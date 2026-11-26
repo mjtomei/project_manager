@@ -119,12 +119,37 @@ class TestConfigured:
         proj.mkdir(parents=True)
         assert workspace_trust.approved_path(proj)
         paths.set_global_setting_value("scratch-dir", str(tmp_path / "fast"))
-        moved = paths.scenario_scratch_dir(run, 1) / "test-proj"
+        moved = paths.scenario_scratch_dir(run, 2) / "test-proj"
+        assert moved.parent.parent.parent.parent == tmp_path / "fast"
         moved.mkdir(parents=True)
         assert workspace_trust.approved_path(moved)
+        # Scenario 1 began before the move: still trusted where it is.
+        assert workspace_trust.approved_path(proj)
         other = tmp_path / "fast" / "not-qa"
         other.mkdir()
         assert not workspace_trust.approved_path(other)
+
+    def test_scratch_dir_move_keeps_existing_scenarios_scratch(
+            self, home, tmp_path, monkeypatch):
+        """Scenario scratch is recomputed, not recorded, so a scratch-dir
+        change mid-run must not move a running scenario's scratch: its
+        relaunched container would mount (and its prompt name) an empty or
+        missing dir.  New scenarios go to the new root; reclaim sees both."""
+        from pm_core import storage_reclaim as sr
+        run = paths.qa_workdirs_root() / "pr-1-abc"
+        old = paths.scenario_scratch_dir(run, 1)
+        old.mkdir(parents=True)
+        assert paths.qa_scratch_roots() == [home / ".pm" / "scratch" / "qa"]
+        paths.set_global_setting_value("scratch-dir", str(tmp_path / "fast"))
+        assert paths.qa_scratch_roots() == [tmp_path / "fast" / "qa",
+                                            home / ".pm" / "scratch" / "qa"]
+        assert paths.scenario_scratch_dir(run, 1) == old
+        new = paths.scenario_scratch_dir(run, 2)
+        assert new == tmp_path / "fast" / "qa" / "pr-1-abc" / "s-2"
+        new.mkdir(parents=True)
+        monkeypatch.setattr(sr, "container_mount_sources", lambda: [])
+        assert {str(sc) for _, sc in sr.scenario_scratch_dirs("pr-1")} == {
+            str(old), str(new)}
 
     def test_qa_runs_in_the_old_root_are_still_found(self, home, nas,
                                                      monkeypatch):

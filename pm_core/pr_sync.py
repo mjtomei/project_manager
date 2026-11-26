@@ -128,23 +128,21 @@ def find_workdir(data: dict) -> Optional[str]:
         if wd and Path(wd).exists() and git_ops.is_git_repo(wd):
             return wd
 
-    # Fall back to workdirs base directory
+    # Fall back to the project's workdirs directory in each workdirs root
+    # (a 'workdirs-dir' move leaves earlier clones in the old root).
     # Uses same naming convention as cli._workdirs_dir(): <name>-<repo_id[:8]>
     # The 8-char prefix of repo_id (root commit hash) ensures uniqueness
-    from pm_core.paths import workdirs_base as get_workdirs_base
+    from pm_core.paths import workdirs_roots
     project = data.get("project", {})
     name = project.get("name", "unknown")
     repo_id = project.get("repo_id")
-    base = get_workdirs_base()
-    if repo_id:
-        workdirs_base = base / f"{name}-{repo_id[:8]}"
-    else:
-        workdirs_base = base / name
+    project_dir = f"{name}-{repo_id[:8]}" if repo_id else name
 
-    if workdirs_base.exists():
-        for d in workdirs_base.iterdir():
-            if d.is_dir() and git_ops.is_git_repo(d):
-                return str(d)
+    for base in workdirs_roots():
+        if (base / project_dir).exists():
+            for d in (base / project_dir).iterdir():
+                if d.is_dir() and git_ops.is_git_repo(d):
+                    return str(d)
 
     return None
 

@@ -309,10 +309,19 @@ the task and on the measurements above.
   inside the workdir (review 62b4 i2).
 * `paths.scenario_scratch_dir(qa_workdir, index)` = the legacy
   `{qa_workdir}/s-N/scratch` if it already exists (in-flight runs keep their
-  mounts), else `scratch_base()/qa/<qa_workdir.name>/s-N`.  Used by
-  `create_scenario_workdir`, the tmux prompt and the relaunch path.
+  mounts), else `<root>/<qa_workdir.name>/s-N` in the first of
+  `paths.qa_scratch_roots()` where it exists, else
+  `scratch_base()/qa/<qa_workdir.name>/s-N`.  Used by
+  `create_scenario_workdir`, the tmux prompt and the relaunch path.  The
+  path is recomputed, not recorded, so without the lookup a `scratch-dir`
+  change mid-run would hand a relaunched scenario container (or host-mode
+  prompt) an empty or missing scratch (review 62b4 i13).
+  `paths.qa_scratch_roots()` is `<scratch>/qa` plus the default
+  `~/.pm/scratch/qa` when `scratch-dir` moved it and it exists — the same
+  configured-plus-default rule as `workdirs_roots()` / `captures_roots()`;
+  trust and reclaim scan all of them.
 * Workspace trust follows the move: `workspace_trust.approved_roots()`
-  includes `paths.qa_scratch_root()` (`<scratch>/qa`).  The legacy scratch
+  includes `paths.qa_scratch_roots()` (`<scratch>/qa`).  The legacy scratch
   sat inside the trusted QA workdir, so a host-mode scenario's throwaway
   test project there was auto-trusted; without this it would stall at the
   trust prompt.  Nothing else under the scratch root is trusted (review
@@ -321,8 +330,9 @@ the task and on the measurements above.
   new paths only (documented in `pm set` help).  So that existing
   workdirs keep working after `workdirs-dir` moves:
   `paths.workdirs_roots()` (the configured root plus the default
-  `~/.pm/workdirs` when it differs) is what workspace trust and PR-clone
-  detection (`integration.py`) treat as pm-created, and
+  `~/.pm/workdirs` when it differs) is what workspace trust, PR-clone
+  detection (`integration.py`) and sync's fallback search for a merge-check
+  clone (`pr_sync.find_workdir`, review 62b4 i13) treat as pm-created, and
   `paths.qa_workdirs_roots()` (`<root>/qa` of each) is what code looking
   for *existing* QA runs scans: the latest `qa_status.json` (sign-off /
   auto-sequence gate), the TUI resume scan, restart orphan ending, run

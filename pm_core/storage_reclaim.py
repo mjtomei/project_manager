@@ -337,17 +337,19 @@ def scenario_scratch_dirs(pr_id: str | None = None,
     already gone.  Run dirs are looked up under every QA root
     (:func:`pm_core.paths.qa_workdirs_roots`): runs started before
     ``workdirs-dir`` moved stay in the old root, and a run dir that is not
-    found reads as gone, which would skip its liveness check.
+    found reads as gone, which would skip its liveness check.  Likewise
+    every scratch root (:func:`pm_core.paths.qa_scratch_roots`): scratch
+    begun before ``scratch-dir`` moved stays in the old one.
     *exclude_run* is a run dir name (``<pr>-<loop>``).
     """
-    from pm_core.paths import qa_scratch_root, qa_workdirs_roots
+    from pm_core.paths import qa_scratch_roots, qa_workdirs_roots
     pattern = f"{pr_id}-*" if pr_id else "*"
     qa_roots = qa_workdirs_roots()
-    scratch_qa = qa_scratch_root()
+    scratch_qas = qa_scratch_roots()
     out: list[tuple[Path | None, Path]] = []
     seen: set[str] = set()
     run_names = set()
-    for base in (*qa_roots, scratch_qa):
+    for base in (*qa_roots, *scratch_qas):
         if base.is_dir():
             run_names.update(p.name for p in base.glob(pattern) if p.is_dir())
     for run_name in sorted(run_names):
@@ -357,9 +359,11 @@ def scenario_scratch_dirs(pr_id: str | None = None,
         run_dir = run_dirs[0] if run_dirs else None
         candidates = [(rd, sc) for rd in run_dirs
                       for sc in rd.glob("s-*/scratch")]
-        if (scratch_qa / run_name).is_dir():
-            candidates += [(run_dir, p) for p in (scratch_qa / run_name).glob("s-*")
-                           if p.is_dir()]
+        for scratch_qa in scratch_qas:
+            if (scratch_qa / run_name).is_dir():
+                candidates += [(run_dir, p)
+                               for p in (scratch_qa / run_name).glob("s-*")
+                               if p.is_dir()]
         for rd, sc in candidates:
             if str(sc) in seen:
                 continue

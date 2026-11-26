@@ -155,9 +155,9 @@ def approved_roots() -> list[str]:
     of the dirs pm creates are trusted — a host-mode scenario's throwaway
     test project there would otherwise stall at the prompt.
     """
-    from pm_core.paths import qa_scratch_root, workdirs_roots
+    from pm_core.paths import qa_scratch_roots, workdirs_roots
     return ([_real(r) for r in workdirs_roots()]
-            + [_real(qa_scratch_root())]
+            + [_real(r) for r in qa_scratch_roots()]
             + [_real(r) for r in authorized_roots()])
 
 

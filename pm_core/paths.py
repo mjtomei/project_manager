@@ -176,31 +176,54 @@ def qa_scratch_root() -> Path:
     """Return the root of QA runs' local scratch (``<scratch>/qa``).
 
     Holds one ``<run>/s-N`` dir per scenario, where ``<run>`` is the QA
-    run workdir's name.  Not created here.
+    run workdir's name.  New scenarios get their scratch below this root
+    (see :func:`qa_scratch_roots` for older ones).  Not created here.
     """
     return scratch_base() / "qa"
 
 
+def qa_scratch_roots() -> list[Path]:
+    """Every root that may hold QA scenario scratch, :func:`qa_scratch_root`
+    first.
+
+    The default ``~/.pm/scratch/qa`` follows when ``scratch-dir`` moved new
+    scratch elsewhere and it still exists: scenarios begun before the change
+    keep their scratch there (nothing is migrated) — for their relaunches,
+    workspace trust and reclaim.  Not created here.
+    """
+    root = qa_scratch_root()
+    default = pm_home() / "scratch" / "qa"
+    if default != root and default.is_dir():
+        return [root, default]
+    return [root]
+
+
 def run_scratch_dir(qa_workdir: Path) -> Path:
-    """Return the local scratch dir of the QA run at *qa_workdir*
+    """Return the local scratch dir of a *new* QA run at *qa_workdir*
     (``<scratch>/qa/<run>``); its scenarios' scratch dirs live below it.
-    Not created here."""
+    Existing scenarios are found with :func:`scenario_scratch_dir`.  Not
+    created here."""
     return qa_scratch_root() / Path(qa_workdir).name
 
 
 def scenario_scratch_dir(qa_workdir: Path, scenario_index: int) -> Path:
     """Return the scratch dir of scenario *scenario_index* of a QA run.
 
-    The legacy location ``{qa_workdir}/s-N/scratch`` is kept when it already
-    exists, so a run started before scratch moved keeps the directory its
-    container mounts.  New runs get ``<scratch>/qa/<run>/s-N`` on local disk.
+    An existing dir is kept wherever it is, so a scenario's relaunched
+    container mounts — and its prompt names — the scratch it started with:
+    the legacy ``{qa_workdir}/s-N/scratch`` (runs from before scratch moved
+    out of the workdir), else ``<root>/<run>/s-N`` in the first of
+    :func:`qa_scratch_roots` holding it (``scratch-dir`` changed during the
+    run).  A new scenario gets ``<scratch>/qa/<run>/s-N`` on local disk.
     Not created here.
     """
     qa_workdir = Path(qa_workdir)
     legacy = qa_workdir / f"s-{scenario_index}" / "scratch"
     if legacy.is_dir():
         return legacy
-    return run_scratch_dir(qa_workdir) / f"s-{scenario_index}"
+    dirs = [root / qa_workdir.name / f"s-{scenario_index}"
+            for root in qa_scratch_roots()]
+    return next((d for d in dirs if d.is_dir()), dirs[0])
 
 
 # Filesystem types that are network storage.  Container storage, runtime
