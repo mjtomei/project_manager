@@ -57071,3 +57071,33 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-c5f98ba
+  plan: bugs
+  title: 'Bug: impl/review prompts ignore -C / PM_PROJECT and silently drop session
+    notes and pm/architecture.md'
+  branch: pm/pr-c5f98ba-bug-impl-review-prompts-ignore-c-pm-project-and-si
+  status: pending
+  depends_on: []
+  description: 'prompt_gen.generate_prompt and generate_review_prompt resolve the
+    pm root with store.find_project_root() (cwd walk-up) instead of the CLI override
+    (helpers.state_root(), which honors -C / PM_PROJECT). When cwd is outside the
+    pm dir (e.g. a standalone pm dir driven with `pm -C <pm-dir>` or PM_PROJECT from
+    the code repo, or the popup picker which sets PM_PROJECT because its cwd may be
+    outside the repo), FileNotFoundError is swallowed and the impl/review prompt silently
+    omits session notes (notes.txt) and, after pr-6c0ee2d, the Project Architecture
+    block. Plan prompts (cli/plan.py) use state_root() and do include them, so behavior
+    is inconsistent. Repro: mkdir code && cd code && git init && git commit --allow-empty
+    -m i && pm init --backend local --no-import --dir ../code-pm && pm -C ../code-pm
+    pr add Thing && printf "## General\nNOTE-X\n" > ../code-pm/notes.txt && pm -C
+    ../code-pm prompt | grep -c NOTE-X  -> 0 (cd ../code-pm && pm prompt | grep -c
+    NOTE-X -> 1). Fix: have callers pass the resolved root into prompt_gen (cli/pr.py
+    already has root = state_root()) rather than prompt_gen re-resolving it from cwd.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-26T18:32:05.025122+00:00'
+  updated_at: '2026-11-26T18:32:05.025122+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
