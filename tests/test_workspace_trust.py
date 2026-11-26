@@ -493,6 +493,15 @@ class TestPromptWatch:
         assert "for the session workdir" in msg
         assert "`pm trust add <path>`" in msg
 
+    def test_blocked_message_names_no_fixed_root(self):
+        # The approved roots move with 'workdirs-dir' / 'scratch-dir' and
+        # include QA scratch, so the message points at `pm trust list`
+        # rather than naming the default ~/.pm/workdirs.
+        msg = wt.blocked_message("/w/x", 130)
+        assert "~/.pm/workdirs" not in msg
+        assert "QA scenario scratch" in msg
+        assert "`pm trust list`" in msg
+
 
 # ---------------------------------------------------------------------------
 # Bounded failure in the pollers

@@ -11,9 +11,11 @@ from pm_core.cli import cli
 def trust_group():
     """Manage workspace trust for unattended Claude sessions.
 
-    pm automatically trusts the workdirs it creates (~/.pm/workdirs) so
-    implementation, review, QA, sign-off and merge sessions never stall at
-    Claude's "Do you trust this folder?" prompt.  Any other directory keeps
+    pm automatically trusts the workdirs it creates (~/.pm/workdirs, or
+    the 'workdirs-dir' setting) and QA scenario scratch (~/.pm/scratch/qa,
+    or under 'scratch-dir') so implementation, review, QA, sign-off and
+    merge sessions never stall at Claude's "Do you trust this folder?"
+    prompt; 'pm trust list' shows the roots.  Any other directory keeps
     the prompt unless you authorize it here.  This is separate from
     --dangerously-skip-permissions.
     """

@@ -468,7 +468,8 @@ def blocked_message(path: str, waited: float) -> str:
     return (
         f"Claude is waiting at the workspace-trust prompt for {where} "
         f"(visible {waited:.0f}s). pm only auto-trusts pm-created workdirs "
-        f"(~/.pm/workdirs) and paths authorized with `pm trust add`. "
+        f"and QA scenario scratch (`pm trust list` shows where) and paths "
+        f"authorized with `pm trust add`. "
         f"To proceed: run `pm trust add {path or '<path>'}` (or accept the "
         f"prompt in the pane), then restart this step."
     )

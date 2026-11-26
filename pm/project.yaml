@@ -55730,11 +55730,26 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-11-01T22:52:52.821559+00:00'
-  updated_at: '2026-11-01T22:52:52.821559+00:00'
+  updated_at: '2026-11-26T22:21:26.203459+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-98bca7a
+    text: 'From pr-abc1124 (shared image cache, #298): QA scenario scratch no longer
+      lives inside the run workdir. New runs put it at paths.scenario_scratch_dir()
+      = <scratch-dir or ~/.pm/scratch>/qa/<run>/s-N (legacy <run>/s-N/scratch still
+      honoured), and QA runs may sit in any of paths.qa_workdirs_roots() when workdirs-dir
+      moved them. A reaper of <qa root>/<run> must therefore also remove the scratch
+      dir under each of paths.qa_scratch_roots()/<run> (paths.run_scratch_dir is the
+      new-run one), or it leaks scratch. Scratch can hold rootless engine stores owned
+      by sub-UIDs: delete with podman unshare rm -rf, as storage_reclaim._delete does.
+      storage_reclaim.plan() already reports whether a run scratch dir is held (a
+      container mounts it, run live/resumable, a process cwd in it, active mounts);
+      reuse that liveness check rather than adding a second one. No schedule dependency
+      either way.'
+    created_at: '2026-11-26T22:21:25Z'
+    last_edited: '2026-11-26T22:21:25Z'
 - id: pr-8984bc7
   plan: bugs
   title: 'Bug: read-only pm qa list and pm qa mocks list create empty pm/qa/regression/
