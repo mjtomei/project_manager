@@ -231,10 +231,21 @@ def _runtime() -> str:
     return _get_runtime()
 
 
-def _rt(*args: str, timeout: int = _STEP_TIMEOUT,
-        check: bool = False) -> subprocess.CompletedProcess:
+def _rt(*args: str, timeout: int = _STEP_TIMEOUT) -> subprocess.CompletedProcess:
+    """Run a runtime command, never raising for a runtime that is missing
+    (rc 127) or hung (rc 124): every caller's failure path then applies —
+    an actionable :class:`ImageCacheError` (which ``create_container``
+    turns into ``ContainerError``), or "cannot tell" in eviction."""
     from pm_core.container import _run_runtime
-    return _run_runtime(*args, check=check, timeout=timeout)
+    try:
+        return _run_runtime(*args, check=False, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(
+            args, 124, "", f"'{_runtime()} {args[0]}' did not finish "
+                           f"within {timeout}s")
+    except OSError as exc:
+        return subprocess.CompletedProcess(
+            args, 127, "", f"could not run {_runtime()}: {exc}")
 
 
 def resolve_image(image_ref: str) -> tuple[str, list[str]]:
@@ -290,6 +301,39 @@ def ensure_prepared(image_ref: str) -> CacheEntry:
         _log.warning("image cache: eviction after preparing %s failed",
                      key, exc_info=True)
     return entry
+
+
+def status_line(image_ref: str, runtime: str, nested_podman: bool) -> str:
+    """The ``Image cache:`` line of ``pm container status``.
+
+    The mode, plus whichever applies here: the mounted entry (inside a
+    consumer), why the cache is not used, or the entry for *image_ref*
+    on a provider (only looked up: this never prepares anything).
+    """
+    m = mode()
+    if m == "off":
+        return "off"
+    consumer = read_consumer_entry()
+    if consumer:
+        return (f"{m} (consumer of {consumer.get('key')}: "
+                f"{', '.join(consumer.get('names') or [])})")
+    if "podman" not in runtime or not nested_podman:
+        return f"{m} (not used: needs podman and a nested_podman project)"
+    if not provider_enabled(runtime, nested_podman):
+        return f"{m} (not provided from inside a container; 'on' forces it)"
+    try:
+        image_id, _ = resolve_image(image_ref)
+        entry = load_entry(entry_key(image_id))
+    except ImageCacheError as exc:
+        return f"{m} — {exc}"
+    if entry is None:
+        return (f"{m} — no entry for {image_ref} ({image_id[:19]}) yet; the "
+                f"next launch prepares it, or run 'pm container cache "
+                f"prepare'")
+    size = entry.meta.get("store_bytes")
+    size_s = f", {size / 1e9:.2f} GB" if isinstance(size, int) else ""
+    return (f"{m} — entry {entry.key} for {image_ref} (prepared "
+            f"{entry.meta.get('created_at') or '?'}{size_s})")
 
 
 def _prep_flags() -> list[str]:
@@ -796,16 +840,12 @@ def engine_config_problem(home: str | None = None) -> str | None:
 
 
 def _mount_options(mount_point: str) -> str | None:
-    from pm_core import paths
-    try:
-        lines = Path(paths._MOUNTINFO).read_text().splitlines()
-    except OSError:
-        return None
+    """Options of the topmost mount at *mount_point*, or None."""
+    from pm_core.paths import read_mountinfo
     opts = None
-    for line in lines:
-        parts = line.split()
-        if len(parts) > 5 and paths._unescape_mount_path(parts[4]) == mount_point:
-            opts = parts[5]
+    for m in read_mountinfo() or []:
+        if m.mount_point == mount_point:
+            opts = m.options
     return opts
 
 

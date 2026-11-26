@@ -194,8 +194,17 @@ def _runtime() -> str:
 
 
 def _rt(*args: str, timeout: int = 60) -> subprocess.CompletedProcess:
+    """Run a runtime command; a missing (rc 127) or hung (rc 124) runtime
+    comes back as a failed result, so listing fails safe ("could not list
+    containers": nothing is deleted) instead of raising."""
     from pm_core.container import _run_runtime
-    return _run_runtime(*args, check=False, timeout=timeout)
+    try:
+        return _run_runtime(*args, check=False, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(
+            args, 124, "", f"'{args[0]}' did not finish within {timeout}s")
+    except OSError as exc:
+        return subprocess.CompletedProcess(args, 127, "", str(exc))
 
 
 def container_mount_sources() -> list[str] | None:
@@ -262,21 +271,17 @@ def _mount_points() -> list[str]:
     such containers hold their scratch through their own bind mounts
     (:func:`container_mount_sources`).
     """
-    from pm_core import paths
+    from pm_core.paths import read_mountinfo
     points: list[str] = []
 
-    def read(table: str) -> bool:
-        try:
-            lines = Path(table).read_text().splitlines()
-        except OSError:
+    def read(table: str | None) -> bool:
+        entries = read_mountinfo(table)
+        if entries is None:
             return False
-        for line in lines:
-            parts = line.split()
-            if len(parts) > 4:
-                points.append(paths._unescape_mount_path(parts[4]))
+        points.extend(m.mount_point for m in entries)
         return True
 
-    read(paths._MOUNTINFO)
+    read(None)   # this process's own table
     seen: set[str] = set()
     try:
         seen.add(os.readlink(f"{_PROC}/self/ns/mnt"))
@@ -416,7 +421,11 @@ def _du(path: Path) -> int | None:
     if "podman" in _runtime():
         r = _rt("unshare", *cmd, timeout=300)
     else:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=300)
+        except (OSError, subprocess.TimeoutExpired):
+            return None
     try:
         return int(r.stdout.split()[0])
     except (ValueError, IndexError):

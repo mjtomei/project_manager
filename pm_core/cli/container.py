@@ -20,8 +20,10 @@ def container_group():
 @container_group.command("status")
 def container_status():
     """Show current container isolation settings."""
+    from pm_core import image_cache
     from pm_core.container import (
         is_container_mode_enabled, load_container_config, _runtime_available,
+        _nested_podman_enabled,
     )
 
     enabled = is_container_mode_enabled()
@@ -34,14 +36,12 @@ def container_status():
     click.echo(f"Image:           {cfg.image}")
     click.echo(f"Memory limit:    {cfg.memory_limit}")
     click.echo(f"CPU limit:       {cfg.cpu_limit}")
-    from pm_core import image_cache
-    consumer = image_cache.read_consumer_entry()
-    if consumer:
-        click.echo(f"Image cache:     {image_cache.mode()} (consumer of "
-                   f"{consumer.get('key')}: "
-                   f"{', '.join(consumer.get('names') or [])})")
+    if runtime_ok:
+        cache = image_cache.status_line(cfg.image, cfg.runtime,
+                                        _nested_podman_enabled())
     else:
-        click.echo(f"Image cache:     {image_cache.mode()}")
+        cache = image_cache.mode()
+    click.echo(f"Image cache:     {cache}")
 
     if enabled and not runtime_ok:
         click.echo(

@@ -186,6 +186,25 @@ class TestPlan:
         out = sr.reclaim("pr-1")
         assert st.exists() and "could not list" in out.problem
 
+    @pytest.mark.parametrize("exc", [
+        FileNotFoundError(2, "No such file or directory: 'docker'"),
+        __import__("subprocess").TimeoutExpired(["podman", "ps"], 30),
+    ])
+    def test_missing_or_hung_runtime_fails_safe(self, home, monkeypatch,
+                                                exc):
+        """No runtime installed (a host-only user: QA start still reclaims)
+        or a hung one: nothing deleted, a problem reported — no traceback
+        from QA start's background thread or `pm container reclaim`."""
+        _, scratch = _run(home, "pr-1-nort")
+        st = _store(scratch / "eng")
+
+        def boom(*a, **k):
+            raise exc
+        monkeypatch.setattr("pm_core.container._run_runtime", boom)
+        monkeypatch.setattr(sr, "_runtime", lambda: "docker")
+        out = sr.reclaim("pr-1")
+        assert st.exists() and "could not list" in out.problem
+
     def test_dry_run(self, home, rt):
         _, scratch = _run(home, "pr-1-ggg")
         st = _store(scratch / "eng")

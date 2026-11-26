@@ -21,6 +21,7 @@ from pm_core.image_cache import ImageCacheError
 
 IMAGE_ID = "sha256:" + "ab" * 32
 KEY = ("ab" * 32)[:20]
+_REAL_RT = image_cache._rt   # the `fake` fixture replaces it
 
 
 @pytest.fixture
@@ -307,6 +308,35 @@ class TestEnsurePrepared:
             image_cache.ensure_prepared("pm-dev:latest")
         assert "pm container build-base" in str(exc.value)
 
+    def test_hung_runtime_step_is_an_image_cache_error(self, fake, home,
+                                                       monkeypatch):
+        """A hung podman step comes back as an actionable ImageCacheError
+        (create_container turns it into ContainerError), not a raw
+        TimeoutExpired, and the partial entry is removed."""
+        import subprocess
+
+        def run_runtime(*args, check=False, timeout=None):
+            if args[0] == "run":
+                raise subprocess.TimeoutExpired(["podman", *args], timeout)
+            return fake(*args, timeout=timeout)
+        monkeypatch.setattr(image_cache, "_rt", _REAL_RT)
+        monkeypatch.setattr("pm_core.container._run_runtime", run_runtime)
+        with pytest.raises(ImageCacheError, match="did not finish within"):
+            image_cache.ensure_prepared("pm-dev:latest")
+        entries = home / ".pm" / "image-cache" / "entries"
+        assert list(entries.iterdir()) == []
+
+    def test_missing_runtime_is_an_image_cache_error(self, fake, home,
+                                                     monkeypatch):
+        def run_runtime(*args, check=False, timeout=None):
+            raise FileNotFoundError(2, "No such file or directory: 'podman'")
+        monkeypatch.setattr(image_cache, "_rt", _REAL_RT)
+        monkeypatch.setattr("pm_core.container._run_runtime", run_runtime)
+        with pytest.raises(ImageCacheError, match="could not run podman"):
+            image_cache.ensure_prepared("pm-dev:latest")
+        # Eviction cannot tell what is referenced: nothing selected.
+        assert image_cache.plan_gc()[1]
+
     def test_failed_load_cleans_up(self, fake, home):
         fake.fail["popen:exec"] = 125
         with pytest.raises(ImageCacheError) as exc:
@@ -574,6 +604,56 @@ class TestEnsureConsumerEngine:
         # The foreign config may be deliberate: the cache can be turned off.
         assert f"pm set {image_cache.MODE_SETTING} off" in str(exc.value)
         assert "storage.conf" in cfg.name and "overlay" in cfg.read_text()
+
+
+class TestStatusLine:
+    """``pm container status``'s cache line — a lookup, never a prepare."""
+
+    def test_provider_shows_the_configured_image_entry(self, fake, home,
+                                                      monkeypatch):
+        monkeypatch.setattr(image_cache, "in_container", lambda: False)
+        line = image_cache.status_line("pm-dev:latest", "podman", True)
+        assert line.startswith("auto — no entry for pm-dev:latest")
+        assert "pm container cache prepare" in line
+        _publish(image_cache.cache_root(), KEY, IMAGE_ID)
+        line = image_cache.status_line("pm-dev:latest", "podman", True)
+        assert line.startswith(f"auto — entry {KEY} for pm-dev:latest")
+        assert fake.count("run") == 0 and not fake.popens
+
+    def test_unavailable_image_is_reported(self, fake, home, monkeypatch):
+        monkeypatch.setattr(image_cache, "in_container", lambda: False)
+        fake.fail["image"] = "no such image"
+        line = image_cache.status_line("pm-dev:latest", "podman", True)
+        assert "not available" in line and "no such image" in line
+
+    @pytest.mark.parametrize("mode,runtime,nested,in_ctr,want", [
+        ("off", "podman", True, False, "off"),
+        ("auto", "docker", True, False, "needs podman"),
+        ("auto", "podman", False, False, "needs podman"),
+        ("auto", "podman", True, True, "from inside a container"),
+    ])
+    def test_why_it_is_not_used(self, home, monkeypatch, mode, runtime,
+                                nested, in_ctr, want):
+        monkeypatch.setenv(image_cache.MODE_ENV, mode)
+        monkeypatch.setattr(image_cache, "in_container", lambda: in_ctr)
+        assert want in image_cache.status_line("pm-dev:latest", runtime,
+                                               nested)
+
+    def test_consumer_names_the_mounted_entry(self, consumer):
+        line = image_cache.status_line("pm-dev:latest", "podman", True)
+        assert line == f"auto (consumer of {KEY}: localhost/pm-dev:latest)"
+
+
+def test_mount_options_reads_the_topmost_mount(consumer, tmp_path,
+                                               monkeypatch):
+    from pm_core import paths
+    mi = tmp_path / "mountinfo"
+    mi.write_text("1 0 0:1 / / rw - ext4 /dev/sda1 rw\n"
+                  f"2 1 0:2 / {consumer} rw,relatime - ext4 /dev/sda1 rw\n"
+                  f"3 2 0:2 / {consumer} ro,relatime - ext4 /dev/sda1 rw\n")
+    monkeypatch.setattr(paths, "_MOUNTINFO", str(mi))
+    assert image_cache._mount_options(str(consumer)) == "ro,relatime"
+    assert image_cache._mount_options("/elsewhere") is None
 
 
 def test_missing_in_consumer_message_names_the_cache(consumer):

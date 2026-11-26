@@ -19,6 +19,7 @@ import subprocess
 import tempfile
 import time
 from pathlib import Path
+from typing import NamedTuple
 
 # Cache for session tags to avoid repeated subprocess calls
 _session_tag_cache: dict[str, str | None] = {}
@@ -234,6 +235,36 @@ def _unescape_mount_path(field: str) -> str:
     return "".join(out)
 
 
+class MountEntry(NamedTuple):
+    """One line of a ``mountinfo`` table (the fields pm uses)."""
+    mount_point: str   # unescaped
+    options: str       # per-mount options, e.g. "ro,relatime"
+    fstype: str        # "" when the line has no "-" separator
+
+
+def read_mountinfo(table: str | None = None) -> list[MountEntry] | None:
+    """Parse a ``mountinfo`` table (default ``/proc/self/mountinfo``), in
+    file order — a later entry over-mounts an earlier one at the same
+    point.  Malformed lines are skipped; None when the table is
+    unreadable."""
+    try:
+        lines = Path(table or _MOUNTINFO).read_text().splitlines()
+    except OSError:
+        return None
+    out = []
+    for line in lines:
+        parts = line.split()
+        if len(parts) < 6:
+            continue
+        try:
+            fstype = parts[parts.index("-", 6) + 1]
+        except (ValueError, IndexError):
+            fstype = ""
+        out.append(MountEntry(_unescape_mount_path(parts[4]), parts[5],
+                              fstype))
+    return out
+
+
 def filesystem_type(path: Path | str) -> str | None:
     """Return the filesystem type the (possibly not yet existing) *path* is on.
 
@@ -248,25 +279,20 @@ def filesystem_type(path: Path | str) -> str | None:
         real = os.path.realpath(p)
     except OSError:
         real = str(p)
-    try:
-        lines = Path(_MOUNTINFO).read_text().splitlines()
-    except OSError:
+    entries = read_mountinfo()
+    if entries is None:
         return None
     best_len, best_type = -1, None
-    for line in lines:
-        parts = line.split()
-        try:
-            sep = parts.index("-")
-            mount_point = _unescape_mount_path(parts[4])
-            fstype = parts[sep + 1]
-        except (ValueError, IndexError):
+    for m in entries:
+        if not m.fstype:
             continue
-        if mount_point != "/" and not (real == mount_point
-                                       or real.startswith(mount_point + "/")):
+        if m.mount_point != "/" and not (
+                real == m.mount_point
+                or real.startswith(m.mount_point + "/")):
             continue
         # Later lines over-mount earlier ones at the same point.
-        if len(mount_point) >= best_len:
-            best_len, best_type = len(mount_point), fstype
+        if len(m.mount_point) >= best_len:
+            best_len, best_type = len(m.mount_point), m.fstype
     return best_type
 
 

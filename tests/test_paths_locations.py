@@ -318,6 +318,29 @@ class TestFilesystemType:
         assert paths.filesystem_type(tmp_path) is None
         paths.require_local_path(tmp_path, "x")  # no error
 
+    def test_read_mountinfo_fields(self, tmp_path, monkeypatch):
+        """The one mountinfo parser (filesystem type, the cache's read-only
+        check and reclaim's mount scan all use it): optional fields before
+        the separator, escapes, short or separator-less lines."""
+        odd = tmp_path / "odd"
+        odd.mkdir()
+        odd_real = os.path.realpath(odd)
+        mi = tmp_path / "mi"
+        mi.write_text(
+            "1 0 0:1 / / rw,relatime shared:1 master:2 - ext4 /dev/sda rw\n"
+            "2 1 0:2 / /var/lib/a\\040b ro,relatime - fuse.x f rw\n"
+            "garbage line\n"
+            f"3 1 0:3 / {odd_real} rw\n")
+        monkeypatch.setattr(paths, "_MOUNTINFO", str(mi))
+        M = paths.MountEntry
+        assert paths.read_mountinfo() == [
+            M("/", "rw,relatime", "ext4"),
+            M("/var/lib/a b", "ro,relatime", "fuse.x"),
+            M(odd_real, "rw", "")]
+        assert paths.read_mountinfo(str(tmp_path / "missing")) is None
+        # A line without a filesystem type never decides one.
+        assert paths.filesystem_type(odd / "x") == "ext4"
+
     def test_require_local_path_message(self, nas):
         with pytest.raises(paths.NonLocalPathError) as exc:
             paths.require_local_path(nas / "s", "QA scenario scratch",

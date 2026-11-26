@@ -202,7 +202,10 @@ the task and on the measurements above.
     current `HOME` is ensured first (a test pm with a private `HOME`).  The
     shared entry is **not** mounted into the next level (fact 6); see A3.
 * `pm container status` shows the cache mode and, when applicable, the
-  entry for the configured image.
+  entry for the configured image (`image_cache.status_line`): on a
+  provider the configured image's entry, or that none is prepared yet —
+  a lookup only, it never prepares (review 62b4 i7); inside a consumer
+  the mounted entry; otherwise why the cache is not used here.
 
 ### R3 — Engine configuration (`image_cache.engine_config`, `pm container engine-setup`)
 
@@ -467,8 +470,13 @@ the task and on the measurements above.
   reclaim until they are removed.
 * A scratch dir unreadable in places (sub-UID owned): walk errors are
   skipped, never fatal.
-* `pm container reclaim` with the runtime down: nothing is deleted; the
-  summary says the runtime could not be listed.
+* `pm container reclaim` with the runtime down, not installed or hung:
+  nothing is deleted; the summary says the runtime could not be listed.
+  Both modules' runtime wrappers return a missing (rc 127) or timed-out
+  (rc 124) command as a failed result instead of raising, so QA start's
+  background reclaim on a host without a runtime logs no traceback and a
+  hung prep step is an `ImageCacheError` → `ContainerError`, not a raw
+  `TimeoutExpired` (review 62b4 i7).
 * `podman save` → load is a full import exactly once per image version per
   cache root; a second user/cache root prepares its own.
 

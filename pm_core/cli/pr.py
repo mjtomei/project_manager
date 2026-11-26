@@ -3309,7 +3309,9 @@ def _cleanup_pr(pr_entry: dict, root: Path, force: bool) -> bool:
 @click.option("--prune", is_flag=True, default=False, help="Clear workdir references for paths that no longer exist")
 @click.option("--resources", is_flag=True, default=False,
               help="Tear down live resources (tmux windows, QA containers, "
-                   "pane registry, push-proxy sockets) instead of the workdir")
+                   "pane registry, push-proxy sockets) instead of the "
+                   "workdir, then reclaim the container stores and image "
+                   "exports its QA scenarios left in scratch")
 def pr_cleanup(pr_id: str | None, force: bool, cleanup_all: bool, prune: bool,
                resources: bool):
     """Remove work directory for a PR.
@@ -3319,7 +3321,9 @@ def pr_cleanup(pr_id: str | None, force: bool, cleanup_all: bool, prune: bool,
     still has a workdir — the explicit step `pm pr close` points at.
     Use --all to clean up all PR workdirs at once.
     Use --prune to clear stale workdir references from project.yaml.
-    Use --resources to kill live tmux/docker/registry resources for a PR.
+    Use --resources to kill live tmux/docker/registry resources for a PR
+    and reclaim its scenarios' container stores and image exports
+    (see 'pm container reclaim').
     """
     root = state_root()
     data = store.load(root)
