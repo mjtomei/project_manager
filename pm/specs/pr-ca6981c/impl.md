@@ -323,7 +323,7 @@ name is left alone.
 - Master's `tests/test_merge_publish.py` covers the full `pm pr merge` local
   flow, including `test_local_merge_keeps_live_state_and_branch_project_yaml_changes`.
 
-Pre-fix evidence: 9 of the 13 fast-forward/lock/reap tests fail on master's
+Pre-fix evidence: 9 of the 16 fast-forward/lock/reap tests fail on master's
 code (a shim drives master's inline sequence). The concurrent-writer test
 fails there with "Your local changes … would be overwritten by merge".
 
