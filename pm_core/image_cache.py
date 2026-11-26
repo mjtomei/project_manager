@@ -289,8 +289,6 @@ def ensure_prepared(image_ref: str) -> CacheEntry:
     if entry and entry.image_id == image_id:
         return entry
     lock = root / "locks" / f"{key}.lock"
-    _log.info("image cache: preparing %s (%s) — one-time per image version",
-              image_ref, key)
     try:
         with bounded_flock(lock, LOCK_TIMEOUT) as got:
             if not got:
@@ -302,7 +300,9 @@ def ensure_prepared(image_ref: str) -> CacheEntry:
                     f"-a), remove it and retry; " + _off_remedy())
             entry = load_entry(key, root)
             if entry and entry.image_id == image_id:
-                return entry
+                return entry   # another process prepared it while we waited
+            _log.info("image cache: preparing %s (%s) — one-time per image "
+                      "version", image_ref, key)
             entry = _prepare(root, image_ref, image_id, tags, key)
     except OSError as exc:
         # The lock file, the prep dir, entry.json or the publishing rename

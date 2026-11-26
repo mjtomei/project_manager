@@ -128,13 +128,11 @@ def workdirs_roots() -> list[Path]:
 def workdir_locks_dir() -> Path:
     """Return the directory for pm's cross-process workdir lock files.
 
-    The workdirs root by default, where these locks have always lived.
-    When ``workdirs-dir`` moves source workdirs elsewhere — possibly a NAS,
-    where flock is emulated or unsupported and can hang while the share
-    stalls — the locks stay local, at the default ``~/.pm/workdirs``.
+    Always the default workdirs root ``~/.pm/workdirs``, where these locks
+    have always lived — also when ``workdirs-dir`` moves source workdirs
+    elsewhere, possibly onto a NAS, where flock is emulated or unsupported
+    and can hang while the share stalls.
     """
-    if configured_dir(WORKDIRS_DIR_SETTING) is None:
-        return workdirs_base()
     d = pm_home() / "workdirs"
     d.mkdir(parents=True, exist_ok=True)
     return d
