@@ -31077,7 +31077,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/222
   gh_pr_number: 222
   created_at: '2026-05-21T04:06:05.061620+00:00'
-  updated_at: '2026-11-26T21:00:16.997682+00:00'
+  updated_at: '2026-11-26T21:23:43.843281+00:00'
   started_at: '2026-05-25T02:58:20.169677+00:00'
   reviewed_at: '2026-05-25T03:13:02.415469+00:00'
   merged_at: null
@@ -31523,6 +31523,26 @@ prs:
       full suite 5738 passed / 1 skipped; reap_lock_probe.py pre/post.'
     created_at: '2026-11-26T21:00:16Z'
     last_edited: '2026-11-26T21:00:16Z'
+  - id: note-0f3e589
+    text: 'Review loop c6a2 i10 (c4989ca7): NEEDS_WORK, fixed + pushed. (1) The leaked-stash
+      reaper listed an entry it only deferred as holding "changes not in the working
+      tree" (inspect/drop hint). That happens when its registry verdict went stale
+      because a pm write landed between the lock-free judging and the locked drop,
+      which is likely on every update while writers are active and old registry-carrying
+      stashes exist. Such an entry is now reported as left for the next update. A
+      failed `git stash drop` is no longer silent; it prints git''s error. (2) An
+      interrupt (Ctrl-C) that landed after git finished the fast-forward but before
+      run_git returned made _ff_with_autostash''s finally treat the update as failed.
+      It restored the pre-merge registry over the merged one and re-staged the old
+      blob, so with HEAD at the target the live state reverted the target''s registry
+      changes (a staged reversion). It now treats HEAD == pinned target as landed.
+      +3 test cases (deferred message, failed drop, interrupt landed/not landed);
+      3 fail on 05534b5e for the right reason (the interrupt case leaves pm/project.yaml
+      staged). Spec R6/2c/5 updated. Evidence /pm-captures/review-c6a2-i10: full suite
+      5741 passed / 1 skipped; pre-fix-05534b5e.txt (3 fail), post-fix test_merge_stash
+      57 passed.'
+    created_at: '2026-11-26T21:23:43Z'
+    last_edited: '2026-11-26T21:23:43Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-ca6981c-bug-pm-merge-s-git-stash-pop-corrupt-ac115969
 - id: pr-c41f029
   plan: bugs
