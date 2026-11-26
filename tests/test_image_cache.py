@@ -652,6 +652,27 @@ class TestEnsureConsumerEngine:
         assert any("could not run 'podman unshare'" in t
                    for t in res.problems())
 
+    def test_existing_config_on_a_fuse_graphroot_fails_the_launch(
+            self, consumer, tmp_path, monkeypatch):
+        """The default engine's config always exists (create_container
+        writes it), so the FUSE check must not depend on writing one: on a
+        consumer's fuse-overlayfs root filesystem a nested launch would
+        otherwise fail later with "executable file not found"."""
+        from pm_core import paths
+        calls = self._unshare(monkeypatch, ["0:0", "1:1"])
+        eng = str(tmp_path / "default-home")
+        (Path(eng) / ".config" / "containers").mkdir(parents=True)
+        for fname, text in image_cache.engine_config_text(eng).items():
+            (Path(eng) / ".config" / "containers" / fname).write_text(text)
+        mi = tmp_path / "mountinfo"
+        mi.write_text("1 0 0:1 / / rw - fuse.fuse-overlayfs fuse-overlayfs rw\n")
+        monkeypatch.setattr(paths, "_MOUNTINFO", str(mi))
+        with pytest.raises(ImageCacheError, match="FUSE filesystem .*/scratch"):
+            image_cache.ensure_consumer_engine(eng)
+        assert calls == [] and eng not in image_cache._checked_homes
+        res = image_cache.consumer_check(home=eng)
+        assert any("FUSE filesystem" in t for t in res.problems())
+
     def test_foreign_config_without_store_is_refused(self, consumer, tmp_path,
                                                      monkeypatch):
         self._unshare(monkeypatch, ["0:0", "1:1"])

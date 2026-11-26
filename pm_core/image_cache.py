@@ -695,6 +695,12 @@ def _engine_hash(home: str) -> str:
     return hashlib.sha256(home.encode()).hexdigest()[:8]
 
 
+def _graphroot(home: str) -> Path:
+    """The private writable graphroot of the engine at *home* (the one
+    :func:`engine_config_text` configures)."""
+    return Path(home) / ".local" / "share" / "containers" / "storage"
+
+
 def engine_config_text(home: str, *, isolated: bool = False,
                        store: str | None = None) -> dict[str, str]:
     """``{filename: text}`` of the containers config for an engine at *home*.
@@ -705,7 +711,7 @@ def engine_config_text(home: str, *, isolated: bool = False,
     """
     home = home.rstrip("/") or "/"
     store = store or CONSUMER_STORE
-    graphroot = f"{home}/.local/share/containers/storage"
+    graphroot = _graphroot(home)
     lines = [
         ENGINE_CONFIG_MARK,
         "# Written by pm. Image layers come read-only from the shared,",
@@ -762,10 +768,9 @@ def write_engine_config(home: str | None = None, *, force: bool = False,
     """Write the engine config for *home* (default ``$HOME``) in a consumer.
 
     *isolated* defaults to True for any home but the container user's own.
-    Refuses (``ImageCacheError``) outside a consumer, on a network
+    Refuses (``ImageCacheError``) outside a consumer, on a network or FUSE
     filesystem, or over an existing file pm did not write unless *force*.
     """
-    from pm_core.paths import NonLocalPathError, require_local_path
     if not is_consumer():
         raise ImageCacheError(
             f"no shared image cache is mounted here ({CONSUMER_MOUNT}/"
@@ -775,14 +780,9 @@ def write_engine_config(home: str | None = None, *, force: bool = False,
     if isolated is None:
         from pm_core.container import _CONTAINER_HOME
         isolated = home != _CONTAINER_HOME
-    graphroot = Path(home) / ".local" / "share" / "containers" / "storage"
-    try:
-        require_local_path(graphroot, "Container storage (graphroot)")
-    except NonLocalPathError as exc:
-        raise ImageCacheError(str(exc)) from exc
-    fuse = _fuse_graphroot_problem(graphroot)
-    if fuse:
-        raise ImageCacheError(fuse)
+    problem = _graphroot_problem(home)
+    if problem:
+        raise ImageCacheError(problem)
     cdir = _config_dir(home)
     files = engine_config_text(home, isolated=isolated)
     for fname in files:
@@ -854,6 +854,18 @@ def _fuse_graphroot_problem(graphroot: Path) -> str | None:
     return None
 
 
+def _graphroot_problem(home: str) -> str | None:
+    """Why the graphroot of the engine at *home* cannot hold its
+    containers — network storage, or a FUSE filesystem — or None."""
+    from pm_core.paths import NonLocalPathError, require_local_path
+    graphroot = _graphroot(home)
+    try:
+        require_local_path(graphroot, "Container storage (graphroot)")
+    except NonLocalPathError as exc:
+        return str(exc)
+    return _fuse_graphroot_problem(graphroot)
+
+
 def engine_config_problem(home: str | None = None) -> str | None:
     """Why *home*'s engine would not see the shared store, or None."""
     home = os.path.abspath(home or os.environ.get("HOME") or str(Path.home()))
@@ -907,7 +919,6 @@ def consumer_check(image_ref: str | None = None,
     fuse-overlayfs), the engine config, graphroot locality, the UID/GID
     mapping probes and that the image is visible read-only.
     """
-    from pm_core.paths import NonLocalPathError, require_local_path
     res = CheckResult(ok=True)
     entry = read_consumer_entry()
     if entry is None:
@@ -931,13 +942,9 @@ def consumer_check(image_ref: str | None = None,
     problem = engine_config_problem(home)
     res.add(problem is None, problem or f"engine config for HOME={home} "
                                         f"uses the shared store")
-    graphroot = Path(home) / ".local" / "share" / "containers" / "storage"
-    try:
-        require_local_path(graphroot, "Container storage (graphroot)")
-        fuse = _fuse_graphroot_problem(graphroot)
-        res.add(fuse is None, fuse or f"graphroot {graphroot} is on local disk")
-    except NonLocalPathError as exc:
-        res.add(False, str(exc))
+    problem = _graphroot_problem(home)
+    res.add(problem is None,
+            problem or f"graphroot {_graphroot(home)} is on local disk")
     env = {**os.environ, "HOME": home}
     try:
         bad = _probe_mismatches(home)
@@ -979,8 +986,8 @@ def ensure_consumer_engine(home: str | None = None) -> None:
     """Make the engine at *home* use the mounted cache (nested pm launches).
 
     Writes the config when it is missing (never over a foreign one) and
-    checks the mapping probes once per home per process.  Raises
-    :class:`ImageCacheError` with the fix.
+    checks the graphroot and the mapping probes once per home per process.
+    Raises :class:`ImageCacheError` with the fix.
     """
     home = os.path.abspath(home or os.environ.get("HOME") or str(Path.home()))
     if home in _checked_homes:
@@ -988,6 +995,13 @@ def ensure_consumer_engine(home: str | None = None) -> None:
     overlay = overlay_support_problem()
     if overlay:
         raise ImageCacheError(overlay)
+    # Also when the config already exists — the default engine's always
+    # does (create_container writes it): on a FUSE root filesystem (a
+    # consumer launched from inside a container) its launches would
+    # otherwise fail later with podman's "executable file not found".
+    graphroot = _graphroot_problem(home)
+    if graphroot:
+        raise ImageCacheError(graphroot)
     p = _config_dir(home) / "storage.conf"
     if not p.exists():
         write_engine_config(home)

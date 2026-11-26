@@ -129,8 +129,10 @@ fuse-overlayfs 1.7.1, kernel 7.0, rootless, keep-id):
    with `executable file not found`.  A graphroot on a bind-mounted
    directory (`/scratch`) works.  Host-launched containers have a native
    overlay rootfs, so their default graphroot is fine (as in this impl
-   container).  `engine-setup` and `cache check` refuse a FUSE graphroot
-   with the fix.
+   container).  `engine-setup`, `cache check` and a nested pm launch
+   (`ensure_consumer_engine`, also when the engine's config already
+   exists, as the default engine's always does) refuse a FUSE graphroot
+   with the fix (review 62b4 i14).
 
 The audit evidence paths named in the task
 (`/home/matt/.local/state/pm-pr-shepherd/disk-audit-20261105T040137Z`,
