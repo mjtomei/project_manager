@@ -2349,8 +2349,18 @@ prs:
       skipped: /pm-captures/pr-30888b1-review-4efb-i2/.'
     created_at: '2026-11-26T16:28:52Z'
     last_edited: '2026-11-26T16:28:52Z'
+  - id: note-9a98769
+    text: 'Review 4efb i3: no code changes. Scanned every origin/pm/* branch for added
+      breakdown references and trial-merged the live ones. pr-5cee3d5: its graph.deps_of
+      fix sits in the dropped plan_breakdown block and must move to plan_add._existing_line;
+      its malformed-fields test invokes `plan breakdown` (note-8d8d63a). pr-3526677:
+      test_completion asserts `plan breakdown ` completion (note-bd1376d). pr-fa9f172:
+      7 textual hunks in 4 files. pr-6c0ee2d at b81ba118: unchanged (1 hunk, 2 [breakdown]
+      failures). Spec Edge Cases updated; Appendix A re-render shows no drift.'
+    created_at: '2026-11-26T16:36:24Z'
+    last_edited: '2026-11-26T16:36:24Z'
   created_at: '2026-03-01T17:51:46.490716+00:00'
-  updated_at: '2026-11-26T16:28:53.246504+00:00'
+  updated_at: '2026-11-26T16:36:24.848094+00:00'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-30888b1-fold-plan-breakdown-into-plan-add-st-ab512a43
 - id: pr-3116896
   plan: tui-ux
@@ -22564,11 +22574,19 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/198
   gh_pr_number: 198
   created_at: '2026-05-04T16:52:29.746985+00:00'
-  updated_at: '2026-05-04T19:01:37.495672+00:00'
+  updated_at: '2026-11-26T16:36:14.558874+00:00'
   started_at: '2026-05-04T17:52:29.154111+00:00'
   reviewed_at: '2026-05-04T19:01:37.495672+00:00'
   merged_at: null
-  notes: []
+  notes:
+  - id: note-bd1376d
+    text: 'From pr-30888b1 review 4efb i3: pr-30888b1 removes the `pm plan breakdown`
+      command. tests/test_completion.py::test_real_cli_tree asserts `_words(c, "plan
+      breakdown ") == ["plan-001", "plan-abc"]`, which merges cleanly but fails once
+      both PRs are in. Use "plan review " instead: verified on a trial merge, 15 passed.
+      Whichever PR merges second makes the change.'
+    created_at: '2026-11-26T16:36:14Z'
+    last_edited: '2026-11-26T16:36:14Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-3526677-improvement-prefix-m-command-popup-b-1d7ca7a5
 - id: pr-438028c
   plan: improvements
@@ -47147,11 +47165,22 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-25T20:35:32.509320+00:00'
+  updated_at: '2026-11-26T16:36:10.044735+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-8d8d63a
+    text: 'From pr-30888b1 review 4efb i3: pr-30888b1 removes `pm plan breakdown`
+      and moves its existing-PR listing (`_existing_line`) into `plan add`. Trial
+      merge of this branch with pr-30888b1: cli/plan.py conflicts only on the plan_breakdown
+      block. Drop the block, but port your `graph.deps_of(pr)` fix onto `plan_add`''s
+      `_existing_line`, or `plan add` crashes with TypeError on `depends_on: 7`. tests/test_prompt_bounds.py::test_plan_deps_tolerates_malformed_pr_fields
+      merges cleanly but invokes `plan breakdown` (exit 2, No such command): change
+      that argv to ["plan", "add", "New plan"]. Both changes together: the test passes.
+      Whichever PR merges second does this.'
+    created_at: '2026-11-26T16:36:09Z'
+    last_edited: '2026-11-26T16:36:09Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
