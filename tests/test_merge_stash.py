@@ -80,10 +80,6 @@ def _stash_list(repo):
     return _git("stash", "list", cwd=repo).stdout
 
 
-def _backups(repo):
-    return list((repo / ".git").glob("pm-premerge-project-*.yaml"))
-
-
 def _add_note(note_id, text, ts="2026-05-05T05:05:05"):
     def fn(d):
         pr = _pr(d, "pr-001")
@@ -264,7 +260,6 @@ class TestRegistryAcrossFastForward:
         assert _stash_list(repo) == ""                        # no stash
         assert _git("rev-parse", "HEAD", cwd=repo).stdout == \
             _git("rev-parse", "incoming", cwd=repo).stdout
-        assert _backups(repo) == []                           # copy removed
         # The live delta is uncommitted again, not staged.
         assert _git("diff", "--cached", "--name-only",
                     cwd=repo).stdout == ""
@@ -327,14 +322,18 @@ class TestRegistryAcrossFastForward:
         assert (repo / "other.txt").read_text() == "m\nlocal\n"
         assert _git("rev-parse", "HEAD", cwd=repo).stdout == head
         assert _stash_list(repo) == ""
-        assert _backups(repo) == []
+        assert _git("diff", "--cached", "--name-only", cwd=repo).stdout == ""
 
     def test_stash_failure_restores_registry(self, tmp_path):
         repo = _init_repo(tmp_path)
         pm = _seed_project(repo)
-        _incoming(repo, pm, _add_note("note-in", "x"))
+        (repo / "code.txt").write_text("v1\n")
+        _git("add", "code.txt", cwd=repo)
+        _git("commit", "-q", "-m", "code", cwd=repo)
+        _incoming(repo, pm, _add_note("note-in", "x"),
+                  files={"code.txt": "v2\n"})
         _edit(pm, lambda d: _pr(d, "pr-001").update(updated_at="local"))
-        (repo / "loose.txt").write_text("x\n")
+        (repo / "code.txt").write_text("v1 local\n")   # blocks the ff
         before = (pm / "project.yaml").read_bytes()
         real = pr_mod.git_ops.run_git
 
@@ -348,7 +347,6 @@ class TestRegistryAcrossFastForward:
             r = pr_mod._ff_with_autostash(repo, "incoming")
         assert r.returncode != 0
         assert (pm / "project.yaml").read_bytes() == before
-        assert _backups(repo) == []
 
     def test_empty_stash_push_never_pops_someone_elses_stash(self, tmp_path):
         """`stash push` can exit 0 having saved nothing; stash@{0} is then
@@ -361,9 +359,10 @@ class TestRegistryAcrossFastForward:
         (repo / "mine.txt").write_text("user work\n")
         _git("stash", "push", "-m", "user stash", cwd=repo)
         user = _git("rev-parse", "stash@{0}", cwd=repo).stdout
-        _incoming(repo, pm, _add_note("note-in", "x"))
+        _incoming(repo, pm, _add_note("note-in", "x"),
+                  files={"mine.txt": "incoming\n"})
         _edit(pm, lambda d: _pr(d, "pr-001").update(updated_at="local"))
-        (repo / "loose.txt").write_text("x\n")
+        (repo / "mine.txt").write_text("local\n")       # blocks the ff
         before = (pm / "project.yaml").read_bytes()
         real = pr_mod.git_ops.run_git
 
@@ -378,59 +377,117 @@ class TestRegistryAcrossFastForward:
             r = pr_mod._ff_with_autostash(repo, "incoming")
         assert r.returncode != 0
         assert _git("rev-parse", "stash@{0}", cwd=repo).stdout == user
-        assert (repo / "mine.txt").read_text() == "base\n"
+        assert (repo / "mine.txt").read_text() == "local\n"
         assert (pm / "project.yaml").read_bytes() == before
 
-    def test_recovery_copy_exists_until_reapplied(self, tmp_path):
-        """A crash between the revert and the re-apply loses nothing: the
-        live registry is copied into the git dir first."""
+    def test_git_never_rewrites_the_live_registry(self, tmp_path):
+        """git's checkout unlinks and recreates a file, so lock-free readers
+        (a writer's pre-lock load, the TUI) could see it missing or partial.
+        pm swaps the merged registry in with one rename and stages the
+        incoming blob, so the fast-forward keeps the file as it is."""
         repo = _init_repo(tmp_path)
         pm = _seed_project(repo)
+        (repo / "code.txt").write_text("a\nb\nc\nd\ne\n")
+        _git("add", "code.txt", cwd=repo)
+        _git("commit", "-q", "-m", "code", cwd=repo)
+        _incoming(repo, pm, _add_note("note-in", "x"),
+                  files={"code.txt": "A\nb\nc\nd\ne\n"})
         _edit(pm, lambda d: _pr(d, "pr-001").update(updated_at="local"))
-        live = (pm / "project.yaml").read_text()
+        # Blocks the fast-forward (stash path), pops cleanly afterwards.
+        (repo / "code.txt").write_text("a\nb\nc\nd\nE\n")
+        inodes = []
+        real = pr_mod.git_ops.run_git
 
-        with store._lock(pm):
-            info = pr_mod._stash_for_merge(repo, lock_tui=False)
-            (backup,) = _backups(repo)
-            assert backup.read_text() == live
-            # The registry is reverted to HEAD meanwhile.
-            assert _git("status", "--porcelain", cwd=repo).stdout == ""
-            assert pr_mod._unstash_after_merge(repo, info) is True
-        assert _backups(repo) == []
-        assert (pm / "project.yaml").read_text() == live
+        def run_git(*args, **kw):
+            watch = args[0] == "merge" or args[:2] in (("stash", "push"),
+                                                       ("stash", "pop"))
+            if watch:
+                inodes.append((pm / "project.yaml").stat().st_ino)
+            r = real(*args, **kw)
+            if watch:
+                inodes.append((pm / "project.yaml").stat().st_ino)
+            return r
+
+        with mock.patch.object(pr_mod.git_ops, "run_git",
+                               side_effect=run_git):
+            assert pr_mod._ff_with_autostash(repo, "incoming").returncode == 0
+        assert len(inodes) >= 4 and len(set(inodes)) == 1, inodes
+        d = store.load(pm)
+        assert _pr(d, "pr-001")["updated_at"] == "local"
+        assert [n["id"] for n in _pr(d, "pr-001")["notes"]] == ["note-in"]
+        assert (repo / "code.txt").read_text() == "A\nb\nc\nd\nE\n"
+        assert _stash_list(repo) == ""
+
+    def test_clean_registry_updated_without_a_dirty_tree(self, tmp_path):
+        repo = _init_repo(tmp_path)
+        pm = _seed_project(repo)
+        _incoming(repo, pm, _add_note("note-in", "x"))
+        assert pr_mod._ff_with_autostash(repo, "incoming").returncode == 0
+        assert _git("status", "--porcelain", cwd=repo).stdout == ""
+        assert (pm / "project.yaml").read_text() == _git(
+            "show", "incoming:pm/project.yaml", cwd=repo).stdout
+
+    def test_failed_update_keeps_a_staged_registry_hunk(self, tmp_path):
+        repo = _init_repo(tmp_path)
+        pm = _seed_project(repo)
+        _incoming(repo, pm, _add_note("note-in", "x"))
+        (repo / "other.txt").write_text("m\n")            # diverge
+        _git("add", "other.txt", cwd=repo)
+        _git("commit", "-q", "-m", "diverge", cwd=repo)
+        _edit(pm, lambda d: _pr(d, "pr-002").update(title="staged"))
+        _git("add", "pm/project.yaml", cwd=repo)
+        _edit(pm, lambda d: _pr(d, "pr-001").update(updated_at="unstaged"))
+        staged = _git("ls-files", "-s", "pm/project.yaml", cwd=repo).stdout
+        before = (pm / "project.yaml").read_bytes()
+
+        r = pr_mod._ff_with_autostash(repo, "incoming")
+        assert r.returncode != 0
+        assert _git("ls-files", "-s", "pm/project.yaml",
+                    cwd=repo).stdout == staged
+        assert (pm / "project.yaml").read_bytes() == before
 
     def test_writer_redirty_never_enters_text_stash(self, tmp_path,
                                                      monkeypatch):
-        """Even a write that re-dirties the registry right after the revert
-        (the QA scenario 3 window) cannot reach the text stash: it is
-        excluded by explicit pathspec."""
+        """Even a write that re-dirties the registry after pm swapped the
+        merged one in cannot reach the text stash: the auto-stash names its
+        paths and leaves the registry out."""
         repo = _init_repo(tmp_path)
         pm = _seed_project(repo)
         (repo / "code.txt").write_text("base\n")
         _git("add", "code.txt", cwd=repo)
         _git("commit", "-q", "-m", "code", cwd=repo)
+        _incoming(repo, pm, _add_note("note-in", "x"),
+                  files={"code.txt": "base\nincoming\n"})
         _edit(pm, lambda d: _pr(d, "pr-001").update(updated_at="local"))
         (repo / "code.txt").write_text("local change\n")
-        real = pr_mod._capture_registry
+        real_apply = pr_mod._apply_registry
+        stashed = []
 
-        def racing(cwd, dirty):
-            result = real(cwd, dirty)
+        def racing(repo_, plan):
+            ok = real_apply(repo_, plan)
             py = pm / "project.yaml"
             py.chmod(0o644)
             py.write_text(py.read_text() + "# writer re-dirty\n")
-            return result
+            return ok
 
-        monkeypatch.setattr(pr_mod, "_capture_registry", racing)
-        info = pr_mod._stash_for_merge(repo, lock_tui=False)
-        assert info["stash"]
-        stashed = _git("stash", "show", "--include-untracked",
-                       "--name-only", cwd=repo).stdout
-        assert "code.txt" in stashed
-        assert "project.yaml" not in stashed
-        assert pr_mod._unstash_after_merge(repo, info) is True
+        real_git = pr_mod.git_ops.run_git
+
+        def run_git(*args, **kw):
+            r = real_git(*args, **kw)
+            if args[:2] == ("stash", "push"):
+                stashed.append(real_git(
+                    "stash", "show", "--include-untracked", "--name-only",
+                    cwd=repo).stdout)
+            return r
+
+        monkeypatch.setattr(pr_mod, "_apply_registry", racing)
+        with mock.patch.object(pr_mod.git_ops, "run_git",
+                               side_effect=run_git):
+            pr_mod._ff_with_autostash(repo, "incoming")
+        assert stashed and "code.txt" in stashed[0]
+        assert "project.yaml" not in stashed[0]
         assert store.find_conflict_markers(
             (pm / "project.yaml").read_text()) == []
-        assert _stash_list(repo) == ""
 
 
 # ---------------------------------------------------------------------------
@@ -452,8 +509,8 @@ class TestRegistryLock:
         def run_git(*args, **kw):
             # Every step that rewrites files; the read-only reaping of leaked
             # stashes runs after the lock is released.
-            if args[0] in ("merge", "checkout") or args[:2] in (
-                    ("stash", "push"), ("stash", "pop")):
+            if args[0] in ("merge", "checkout", "update-index") or \
+                    args[:2] in (("stash", "push"), ("stash", "pop")):
                 try:
                     with store._lock(pm, timeout=0):
                         probes.append((args[:2], "free"))

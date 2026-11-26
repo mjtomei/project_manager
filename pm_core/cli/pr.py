@@ -3241,98 +3241,128 @@ def _write_registry_text(root: Path, text: str) -> None:
     path.chmod(0o444)
 
 
-def _capture_registry(cwd: Path, dirty: list[str]) -> dict | None:
-    """Take the dirty registry out of the merge's way, for structured re-apply.
-
-    Captures the local (live) content and its committed ancestor, saves a
-    recovery copy in the git dir (so a crash before the re-apply loses
-    nothing), then reverts the file and its index entry to HEAD so the merge
-    can replace it.  The caller holds the registry lock.
-
-    Returns ``{"root", "text", "base", "overlay", "backup"}``, or None when
-    the registry is not dirty or cannot be merged structurally (unreadable,
-    invalid, conflict markers, not in HEAD) — it is then left untouched and
-    the merge fails on it like any other overlapping file.
-    """
-    if _REGISTRY_REL not in dirty:
+def _tree_entry(cwd: Path, rev: str, rel: str) -> tuple[str, str] | None:
+    """``(mode, blob sha)`` of *rel* in *rev*, or None when absent."""
+    r = git_ops.run_git("ls-tree", "-z", rev, "--", f":(literal){rel}",
+                        cwd=cwd, check=False)
+    entry = r.stdout.split("\0", 1)[0] if r.returncode == 0 else ""
+    meta, _, path = entry.partition("\t")
+    parts = meta.split()
+    if path != rel or len(parts) != 3 or parts[1] != "blob":
         return None
-    root = cwd / "pm"
+    return parts[0], parts[2]
+
+
+def _plan_registry(repo: Path, target: str) -> dict | None:
+    """Pre-merge the live registry with *target*'s, for :func:`_apply_registry`.
+
+    ``store.merge_3way(base=HEAD, ours=target, theirs=live)``: the live state
+    wins true conflicts and the incoming committed changes are kept wherever
+    the live state still has the ancestor's value — the same roles as
+    :func:`_resolve_project_yaml_pop`.  Runs before the registry lock is taken
+    (parsing and dumping a large registry is the slow part); the apply step
+    re-checks the live text under the lock.
+
+    None when the target does not change the registry, or it cannot be merged
+    structurally (unreadable, invalid, conflict markers, untracked, an
+    unmerged index entry) — git then handles it like any other file.
+    """
+    root = _registry_root(repo)
+    if root is None:
+        return None
+    head = _tree_entry(repo, "HEAD", _REGISTRY_REL)
+    incoming = _tree_entry(repo, target, _REGISTRY_REL)
+    if head is None or incoming is None or head == incoming:
+        return None
+    ls = git_ops.run_git("ls-files", "-s", "-z", "--",
+                         f":(literal){_REGISTRY_REL}", cwd=repo, check=False)
+    entries = [e for e in ls.stdout.split("\0") if e]
+    if len(entries) != 1 or entries[0].split()[2] != "0":
+        return None
+    index = tuple(entries[0].split()[:2])
+    blobs = []
+    for _mode, sha in (head, incoming):
+        r = git_ops.run_git("cat-file", "blob", sha, cwd=repo, check=False)
+        if r.returncode != 0:
+            return None
+        blobs.append(r.stdout)
+    plan = {"root": root, "base_text": blobs[0], "incoming_text": blobs[1],
+            "head": head, "incoming": incoming, "index": index}
     try:
-        text = (root / "project.yaml").read_text()
+        live_text = (root / "project.yaml").read_text()
     except OSError:
         return None
-    if store.find_conflict_markers(text):
-        return None
-    show = git_ops.run_git("show", f"HEAD:{_REGISTRY_REL}", cwd=cwd,
-                           check=False)
-    if show.returncode != 0:
-        return None
+    return plan if _merge_registry_plan(plan, live_text) else None
+
+
+def _merge_registry_plan(plan: dict, live_text: str) -> bool:
+    """Fill *plan* with the merge of *live_text*; False if not mergeable."""
+    if store.find_conflict_markers(live_text):
+        return False
     loader = store._yaml_loader()
     try:
-        overlay = yaml.load(text, Loader=loader)
-        base = yaml.load(show.stdout, Loader=loader)
+        base, incoming, live = (yaml.load(t, Loader=loader) for t in (
+            plan["base_text"], plan["incoming_text"], live_text))
     except yaml.YAMLError:
-        return None
-    if not isinstance(overlay, dict) or not isinstance(base, dict):
-        return None
-    git_dir_r = git_ops.run_git("rev-parse", "--absolute-git-dir", cwd=cwd,
-                                check=False)
-    git_dir = Path(git_dir_r.stdout.strip())
-    if git_dir_r.returncode != 0 or not git_dir.is_absolute() \
-            or not git_dir.is_dir():
-        return None
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    backup = git_dir / f"pm-premerge-project-{stamp}-{os.getpid()}.yaml"
-    try:
-        backup.write_text(text)
-    except OSError:
-        return None
-    # HEAD, not the index: a staged registry hunk would otherwise survive the
-    # revert and still block the merge.  Re-applied content ends up unstaged.
-    co = git_ops.run_git("checkout", "HEAD", "--", _REGISTRY_REL, cwd=cwd,
-                         check=False)
-    if co.returncode != 0:
-        backup.unlink(missing_ok=True)
-        return None
-    return {"root": root, "text": text, "base": base, "overlay": overlay,
-            "backup": backup}
-
-
-def _reapply_registry(py: dict) -> bool:
-    """Re-apply the captured live registry over what the merge left on disk.
-
-    ``store.merge_3way(base, ours=merged-in, theirs=live)``: the live state
-    wins true conflicts and the merged-in committed changes are kept wherever
-    the live state still had the ancestor's value — the same roles as
-    :func:`_resolve_project_yaml_pop`.  The caller holds the registry lock, so
-    nothing else writes the file meanwhile.  Returns True on success; on
-    failure the recovery copy is kept and reported.
-    """
-    root, backup = py["root"], py["backup"]
-    try:
-        if not (root / "project.yaml").exists():
-            merged_in = None
-        else:
-            merged_in = store.load(root, validate=False)
-        if merged_in is None:
-            _write_registry_text(root, py["text"])
-        else:
-            merged = store.merge_3way(py["base"], merged_in, py["overlay"])
-            if merged == py["overlay"]:
-                # Nothing came in: put back the exact local bytes rather than
-                # re-dumping (which can rewrap a registry written elsewhere).
-                _write_registry_text(root, py["text"])
-            elif merged != merged_in:
-                store.save(merged, root)
-                click.echo(f"Merged {_REGISTRY_REL} (local pm state + merged "
-                           f"changes).")
-    except (OSError, store.ProjectYamlParseError, yaml.YAMLError) as e:
-        click.echo(f"Warning: could not re-apply the local {_REGISTRY_REL} "
-                   f"after the merge: {e}\n  The local version is saved in "
-                   f"{backup}; restore it from there.", err=True)
         return False
-    backup.unlink(missing_ok=True)
+    if not all(isinstance(d, dict) for d in (base, incoming, live)):
+        return False
+    merged = store.merge_3way(base, incoming, live)
+    if merged == live:
+        new_text = live_text            # keep the exact local bytes
+    elif merged == incoming:
+        new_text = plan["incoming_text"]
+    else:
+        new_text = store.dump_text(merged)
+    plan.update(live_text=live_text, new_text=new_text,
+                combined=merged != live and merged != incoming)
     return True
+
+
+def _apply_registry(repo: Path, plan: dict) -> bool:
+    """Swap the pre-merged registry in and stage the incoming blob.
+
+    The caller holds the registry lock.  The live file is replaced in one
+    atomic rename, and its index entry is set to *target*'s blob, so the
+    fast-forward keeps that entry without rewriting the file (two-way merge:
+    index == target).  Lock-free readers (a writer's pre-lock load, the TUI)
+    therefore never see it missing, half-written or reverted.  Returns False
+    (nothing changed) if the registry can no longer be merged.
+    """
+    root = plan["root"]
+    try:
+        live_text = (root / "project.yaml").read_text()
+    except OSError:
+        return False
+    if live_text != plan["live_text"] and \
+            not _merge_registry_plan(plan, live_text):
+        return False
+    if plan["new_text"] != live_text:
+        _write_registry_text(root, plan["new_text"])
+    if not _stage_registry(repo, plan["incoming"]):
+        _restore_registry(repo, plan)
+        return False
+    return True
+
+
+def _stage_registry(repo: Path, entry: tuple[str, str]) -> bool:
+    """Set the registry's index entry to ``(mode, sha)`` (worktree untouched)."""
+    mode, sha = entry
+    return git_ops.run_git("update-index", "--cacheinfo",
+                           f"{mode},{sha},{_REGISTRY_REL}", cwd=repo,
+                           check=False).returncode == 0
+
+
+def _restore_registry(repo: Path, plan: dict) -> None:
+    """Undo :func:`_apply_registry` after a failed update (exact bytes)."""
+    path = plan["root"] / "project.yaml"
+    try:
+        current = path.read_text()
+    except OSError:
+        current = None
+    if current != plan["live_text"]:
+        _write_registry_text(plan["root"], plan["live_text"])
+    _stage_registry(repo, plan["index"])
 
 
 def _stash_top(cwd: Path) -> str:
@@ -3379,60 +3409,39 @@ def _stashable_paths(cwd: Path, dirty: list[str]) -> list[str]:
 
 def _stash_for_merge(cwd: Path, pr_display_id: str = "",
                      lock_tui: bool = True) -> dict | None:
-    """Get dirty files out of the way so a merge can proceed.
+    """Stash the dirty files (never the registry) so a merge can proceed.
 
-    The registry (``pm/project.yaml``) is captured and reverted for a
-    structured re-apply (:func:`_capture_registry`), never text-stashed; the
-    other dirty files are stashed with explicit pathspecs that exclude the
-    registry, its lock and its temp file.  If pm/ files are dirty and
-    *lock_tui* is True, the TUI shows its merge-lock overlay meanwhile.
-
-    The caller holds the registry lock (see :func:`_ff_with_autostash`) and
-    must call :func:`_unstash_after_merge` with the returned dict.  Returns
-    None when there was nothing to move aside or stashing failed (the
-    registry is then already restored).
+    Explicit pathspecs leave out :data:`_NEVER_STASH_RELS` — the registry is
+    reconciled structurally by :func:`_ff_with_autostash` instead.  If pm/
+    files get stashed and *lock_tui* is True, the TUI shows its merge-lock
+    overlay meanwhile.  Returns the stash info for
+    :func:`_unstash_after_merge`, or None when nothing was stashed.
     """
-    dirty = _dirty_file_paths(cwd)
-    if not dirty:
+    remaining = _stashable_paths(cwd, _dirty_file_paths(cwd))
+    if not remaining:
         return None
-
-    has_pm = any(p.startswith("pm/") for p in dirty)
+    has_pm = any(p.startswith("pm/") for p in remaining)
     if has_pm and lock_tui:
         trigger_tui_merge_lock(pr_display_id)
-
-    info: dict = {"has_pm": has_pm, "lock_tui": lock_tui, "py": None,
-                  "stash": None, "count": 0}
-    try:
-        info["py"] = _capture_registry(cwd, dirty)
-        remaining = _stashable_paths(cwd, _dirty_file_paths(cwd))
-        if remaining:
-            click.echo(f"Stashing {len(remaining)} dirty file(s) to proceed "
-                       f"with merge...")
-            before = _stash_top(cwd)
-            stash_r = git_ops.run_git(
-                "stash", "push", "--include-untracked", "-m", _AUTO_STASH_MSG,
-                "--", *(f":(literal){p}" for p in remaining),
-                cwd=cwd, check=False)
-            # Popped by commit later, not by position: anything else pushing
-            # a stash meanwhile would otherwise get popped instead.  An
-            # unchanged top means nothing was saved ("No local changes to
-            # save", rc 0): the top is then someone else's stash.
-            after = _stash_top(cwd)
-            if stash_r.returncode != 0 or not after or after == before:
-                click.echo(f"Failed to stash: "
-                           f"{git_ops.git_detail(stash_r)}", err=True)
-            else:
-                info["stash"] = after
-                info["count"] = len(remaining)
-    except BaseException:
-        _unstash_after_merge(cwd, info)
-        raise
-
-    if (remaining and info["stash"] is None) \
-            or not (info["py"] or info["stash"]):
-        _unstash_after_merge(cwd, info)
+    click.echo(f"Stashing {len(remaining)} dirty file(s) to proceed with "
+               f"merge...")
+    before = _stash_top(cwd)
+    stash_r = git_ops.run_git(
+        "stash", "push", "--include-untracked", "-m", _AUTO_STASH_MSG,
+        "--", *(f":(literal){p}" for p in remaining), cwd=cwd, check=False)
+    # Popped by commit later, not by position: anything else pushing a stash
+    # meanwhile would otherwise get popped instead.  An unchanged top means
+    # nothing was saved ("No local changes to save", rc 0): the top is then
+    # someone else's stash.
+    after = _stash_top(cwd)
+    if stash_r.returncode != 0 or not after or after == before:
+        click.echo(f"Failed to stash: {git_ops.git_detail(stash_r)}",
+                   err=True)
+        if has_pm and lock_tui:
+            trigger_tui_merge_unlock()
         return None
-    return info
+    return {"has_pm": has_pm, "lock_tui": lock_tui, "stash": after,
+            "count": len(remaining)}
 
 
 def _resolve_project_yaml_pop(cwd: Path, ref: str = "stash@{0}") -> bool:
@@ -3522,36 +3531,33 @@ def _restore_merge_stash(cwd: Path, sha: str, count: int) -> bool:
 
 
 def _unstash_after_merge(cwd: Path, info: dict) -> bool:
-    """Undo :func:`_stash_for_merge`: re-apply the registry, pop the stash.
+    """Pop the auto-stash by its commit; keep it with instructions on failure.
 
-    The registry is re-applied structurally (no text conflict is possible);
-    the stash is popped by its commit, and kept with instructions when the
-    pop conflicts or is refused.  Returns True if everything was restored.
+    Returns True if it was restored.
     """
-    clean = True
     try:
-        if info.get("py"):
-            clean = _reapply_registry(info["py"]) and clean
-        if info.get("stash"):
-            clean = _restore_merge_stash(cwd, info["stash"],
-                                         info.get("count", 0)) and clean
+        return _restore_merge_stash(cwd, info["stash"], info.get("count", 0))
     finally:
         if info.get("has_pm") and info.get("lock_tui"):
             trigger_tui_merge_unlock()
-    return clean
 
 
 def _ff_with_autostash(repo_dir: str | Path, target: str,
                        pr_display_id: str = "") -> subprocess.CompletedProcess:
-    """``git merge --ff-only target`` in *repo_dir*, stashing around overlap.
+    """``git merge --ff-only target`` in *repo_dir*, keeping local state.
 
-    The registry lock of *repo_dir* (``pm/project.yaml``) is held across the
-    fast-forward and any stash -> retry -> re-apply, so a concurrent pm write
-    can neither land between the revert and the re-apply nor save a registry
-    it loaded before the fast-forward over the merged one (#253 S74).  If
-    the lock stays busy the checkout is left untouched and a failed result
-    is returned.  After a successful fast-forward with everything restored,
-    leaked auto-stashes are reaped (:func:`_reap_auto_stashes`).
+    - pm's live registry (``pm/project.yaml``), when *target* changes it, is
+      merged structurally (:func:`_plan_registry`) and swapped in atomically
+      before the fast-forward, which then leaves the file alone.  It is
+      restored byte-for-byte if the update fails.
+    - Other dirty files that block the fast-forward are auto-stashed and
+      restored (:func:`_stash_for_merge`).
+
+    The registry lock is held across all of it, so a concurrent pm write can
+    neither interleave with the update nor save a registry it read before
+    over the merged one (#253 S74).  If the lock stays busy the checkout is
+    left untouched and a failed result is returned.  After a successful
+    update with everything restored, leaked auto-stashes are reaped.
     """
     repo_path = Path(repo_dir)
 
@@ -3560,6 +3566,7 @@ def _ff_with_autostash(repo_dir: str | Path, target: str,
                                check=False)
 
     restored = True
+    plan = _plan_registry(repo_path, target)
     reg_root = _registry_root(repo_path)
     with contextlib.ExitStack() as held:
         if reg_root is not None:
@@ -3570,14 +3577,33 @@ def _ff_with_autostash(repo_dir: str | Path, target: str,
                 return subprocess.CompletedProcess(
                     ["git", "merge", "--ff-only", target], 1, "",
                     f"{e}\npm did not touch {repo_dir}.")
-        merge_r = ff()
-        if merge_r.returncode != 0 and _is_dirty_overlap_error(merge_r):
-            info = _stash_for_merge(repo_path, pr_display_id)
-            if info:
-                try:
-                    merge_r = ff()
-                finally:
-                    restored = _unstash_after_merge(repo_path, info)
+        if plan is not None and not _apply_registry(repo_path, plan):
+            plan = None
+        merge_r = None
+        try:
+            merge_r = ff()
+            if merge_r.returncode != 0 and _is_dirty_overlap_error(merge_r):
+                # A stash records the whole index.  Stash against HEAD's
+                # registry entry, so the stash never carries a registry
+                # change that a later manual pop would text-merge.
+                if plan is not None:
+                    _stage_registry(repo_path, plan["head"])
+                info = _stash_for_merge(repo_path, pr_display_id)
+                if plan is not None:
+                    _stage_registry(repo_path, plan["incoming"])
+                if info:
+                    try:
+                        merge_r = ff()
+                    finally:
+                        restored = _unstash_after_merge(repo_path, info)
+        finally:
+            if plan is not None:
+                if merge_r is not None and merge_r.returncode == 0:
+                    if plan["combined"]:
+                        click.echo(f"Merged {_REGISTRY_REL} (local pm state "
+                                   f"+ merged changes).")
+                else:
+                    _restore_registry(repo_path, plan)
     if merge_r.returncode == 0 and restored:
         _reap_auto_stashes(repo_path)
     return merge_r

@@ -253,6 +253,14 @@ def _validate_plans(data: dict) -> None:
             current = parent_map.get(current)
 
 
+def dump_text(data: dict) -> str:
+    """The exact text :func:`save` writes for *data*."""
+    return _YAML_HEADER + yaml.dump(
+        data, Dumper=_yaml_dumper(data),
+        default_flow_style=False, sort_keys=False, allow_unicode=True,
+    )
+
+
 def save(data: dict, root: Optional[Path] = None) -> None:
     """Write project.yaml to root directory.
 
@@ -271,11 +279,7 @@ def save(data: dict, root: Optional[Path] = None) -> None:
     # Atomic write: write to temp file, then rename
     tmp = path.with_suffix(".yaml.tmp")
     with open(tmp, "w") as f:
-        f.write(_YAML_HEADER)
-        yaml.dump(
-            data, f, Dumper=_yaml_dumper(data),
-            default_flow_style=False, sort_keys=False, allow_unicode=True,
-        )
+        f.write(dump_text(data))
         f.flush()
         os.fsync(f.fileno())
     tmp.rename(path)
