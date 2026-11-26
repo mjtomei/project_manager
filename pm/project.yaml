@@ -2369,8 +2369,18 @@ prs:
       add duplicates plan entries (pre-existing).'
     created_at: '2026-11-26T16:50:43Z'
     last_edited: '2026-11-26T16:50:43Z'
+  - id: note-62c6dbf
+    text: 'QA S3 refiner (plans view w/o breakdown, TUI): all 7 stories held live
+      at 92d4732f. Container lacks less and vi, so the plans-view Enter (less) and
+      e ($EDITOR, default vi) panes die at once with ''tmux: can''t find pane: %N''.
+      Fix: sudo apt-get update && sudo apt-get install -y less vim-tiny, and export
+      EDITOR=vi before pm session. ''plan breakdown'' in the command bar logs ''Error:
+      Error: No such command ...'': the double prefix is the TUI''s generic stderr
+      echo, not this PR.'
+    created_at: '2026-11-26T17:15:24Z'
+    last_edited: '2026-11-26T17:15:24Z'
   created_at: '2026-03-01T17:51:46.490716+00:00'
-  updated_at: '2026-11-26T16:50:43.921018+00:00'
+  updated_at: '2026-11-26T17:15:24.732092+00:00'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-30888b1-fold-plan-breakdown-into-plan-add-st-ab512a43
 - id: pr-3116896
   plan: tui-ux
