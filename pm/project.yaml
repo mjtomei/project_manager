@@ -31077,7 +31077,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/222
   gh_pr_number: 222
   created_at: '2026-05-21T04:06:05.061620+00:00'
-  updated_at: '2026-11-26T18:20:04.681109+00:00'
+  updated_at: '2026-11-26T18:50:32.887929+00:00'
   started_at: '2026-05-25T02:58:20.169677+00:00'
   reviewed_at: '2026-05-25T03:13:02.415469+00:00'
   merged_at: null
@@ -31435,6 +31435,26 @@ prs:
       section; mocked tests patch pm_core.cli.pr.git_ops).'
     created_at: '2026-11-26T18:20:04Z'
     last_edited: '2026-11-26T18:20:04Z'
+  - id: note-5a9970b
+    text: 'Review loop c6a2 i5 (8ace9106): NEEDS_WORK, fixed + pushed. (1) The leaked-stash
+      reaper relies on the registry lock that serializes every pm auto-stash push
+      and pop. The target repo of a standalone pm dir has no pm/project.yaml, so _ff_with_autostash
+      took no lock there and the reaper ran unserialized: it could drop another update''s
+      in-flight auto-stash. It now reaps only while the lock is held. The pre-existing
+      lack of any serialization in such repos is filed as pr-7a1516e. (2) _restore_registry
+      ignored a failed re-stage of the original index entry (e.g. another git process
+      holding index.lock, which also fails the ff). The incoming registry blob then
+      stayed staged on the old HEAD, so a later commit would commit it. It now prints
+      the `git update-index --cacheinfo` command that restores the entry. (3) test_failed_ff_restores_exact_local_registry
+      and test_failed_update_keeps_a_staged_registry_hunk had become vacuous after
+      i3: a diverged base plans nothing, so _restore_registry never ran. They now
+      fail the retried ff after the swap and assert that the restore ran. +2 tests,
+      both fail on 8d4907e6. Spec R2/2c/5 updated. Also filed pr-c904cd3 for the spec
+      section 7 follow-ups (create-before-record ordering; sync-github cannot backfill
+      an orphan). Evidence /pm-captures/review-c6a2-i5: full suite 5724 passed / 1
+      skipped; S74 harness at 8ace9106 PASS 4/4 + dirty 3/3.'
+    created_at: '2026-11-26T18:50:32Z'
+    last_edited: '2026-11-26T18:50:32Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-ca6981c-bug-pm-merge-s-git-stash-pop-corrupt-ac115969
 - id: pr-c41f029
   plan: bugs
@@ -56656,6 +56676,67 @@ prs:
   gh_pr_number: null
   created_at: '2026-11-02T08:57:36.104793+00:00'
   updated_at: '2026-11-02T08:57:36.104793+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-7a1516e
+  plan: bugs
+  title: 'Bug: pm merge main-repo update is unserialized when the pm dir is standalone'
+  branch: pm/pr-7a1516e-bug-pm-merge-main-repo-update-is-unserialized-when
+  status: pending
+  depends_on: []
+  description: 'pm_core/cli/pr.py _ff_with_autostash serializes a main-repo update
+    (fast-forward, auto-stash push/pop, leaked-stash reaping) with the registry lock
+    <repo>/pm/project.yaml.lock. With a standalone pm dir (pm init --dir) the target
+    repo holds no pm/project.yaml, so _registry_root() is None and no lock is taken.
+    The post-publish pull (_pull_after_merge, github/vanilla backends) runs outside
+    _publish_lock, so two PRs merged close together can update the same checkout at
+    once. Two concurrent ''git merge --ff-only'' calls contend for index.lock: one
+    fails and _pull_after_merge opens a needless recovery window. An update pushing
+    its auto-stash between the other''s _stash_ref() and its ''stash pop stash@{N}''
+    makes that pop take the wrong stash. Since pr-ca6981c review c6a2 i5 the leaked-stash
+    reaper is skipped in such repos for this reason, so leaked pm auto-stashes are
+    not reaped there. Fix direction: take a lock for the no-registry case too, e.g.
+    the project''s own registry lock (state_root()/project.yaml.lock, passed in by
+    the callers) or a lock file in the target repo''s git common dir, then reap there
+    as well. Repro shape: standalone pm dir + github backend, two PRs auto-merged
+    back to back while the main checkout has dirty files that overlap the incoming
+    change.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-26T18:50:03.919860+00:00'
+  updated_at: '2026-11-26T18:50:03.919860+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-c904cd3
+  plan: bugs
+  title: 'Bug: pr start can still orphan a created GitHub PR (created before the record;
+    sync-github cannot backfill)'
+  branch: pm/pr-c904cd3-bug-pr-start-can-still-orphan-a-created-github-pr-
+  status: pending
+  depends_on: []
+  description: 'pr_start (pm_core/cli/pr.py) runs ''gh pr create'', an irreversible
+    external side effect, before the PR record holds gh_pr_number. pr-ca6981c added
+    _persist_with_backoff, so a transient project.yaml.lock timeout no longer orphans
+    the created PR. A persist that still fails (every attempt times out), or a crash
+    or kill between the create and the persist, still leaves the GitHub PR created
+    with gh_pr_number=None. ''pm pr sync-github'' matches records by gh_pr_number,
+    not by head branch, so it cannot backfill such an orphan; only re-running ''pm
+    pr start'' recovers it (create_draft_pr detects ''already exists'' and reads the
+    PR with ''gh pr view''). Fix direction: record the intent before creating, so
+    the next run (or sync) reconciles; and have sync-github backfill gh_pr_number
+    by head branch for records that lack it. Context: the pr-d887f4c / gh #210 incident,
+    see the pr-ca6981c PR notes and pm/specs/pr-ca6981c/impl.md section 7 (left out
+    of that PR''s scope).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-26T18:50:15.279071+00:00'
+  updated_at: '2026-11-26T18:50:15.279071+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
