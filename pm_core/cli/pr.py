@@ -3712,7 +3712,13 @@ def _ff_with_autostash(repo_dir: str | Path, target: str,
                         restored = _unstash_after_merge(repo_path, info)
         finally:
             if plan is not None:
-                if merge_r is not None and merge_r.returncode == 0:
+                # An interrupt (Ctrl-C) can land after git finished the
+                # fast-forward: HEAD at the target means it landed, and
+                # restoring the pre-merge registry would revert the target's
+                # registry changes in the live state.
+                landed = (merge_r.returncode == 0 if merge_r is not None
+                          else _ref(repo_dir, "HEAD") == target)
+                if landed:
                     if plan["combined"]:
                         click.echo(f"Merged {_REGISTRY_REL} (local pm state "
                                    f"+ merged changes).")
@@ -3838,7 +3844,7 @@ def _reap_auto_stashes(cwd: Path, root: Path) -> int:
     applied = [sha for sha in candidates
                if _stash_already_applied(cwd, sha, registry_applied)]
     kept = [sha for sha in candidates if sha not in applied]
-    dropped = 0
+    dropped = deferred = 0
     if applied:
         try:
             with store._lock(root, timeout=_REAP_LOCK_TIMEOUT):
@@ -3850,16 +3856,30 @@ def _reap_auto_stashes(cwd: Path, root: Path) -> int:
                     ref = _stash_ref(cwd, sha)
                     if ref is None:
                         continue        # gone meanwhile (popped and dropped)
-                    if not _stash_already_applied(
-                            cwd, sha, lambda s: same and s in registry_ok):
+                    # Every applied entry that changed the registry is in
+                    # registry_ok, so this re-checks only its files.
+                    if not _stash_already_applied(cwd, sha, lambda _s: True):
                         kept.append(sha)
-                    elif git_ops.run_git("stash", "drop", "-q", ref, cwd=cwd,
-                                         check=False).returncode == 0:
+                        continue
+                    if sha in registry_ok and not same:
+                        deferred += 1   # judged against an older registry
+                        continue
+                    drop = git_ops.run_git("stash", "drop", "-q", ref,
+                                           cwd=cwd, check=False)
+                    if drop.returncode == 0:
                         dropped += 1
+                    else:
+                        click.echo(f"Warning: could not drop the leaked pm "
+                                   f"auto-stash {ref}: "
+                                   f"{git_ops.git_detail(drop)}", err=True)
         except store.StoreLockTimeout:
             click.echo(f"Note: the registry lock is busy, so {len(applied)} "
                        f"leaked pm auto-stash(es) already in the working tree "
                        f"are left for the next update to drop.", err=True)
+    if deferred:
+        click.echo(f"Note: pm's registry changed while {deferred} leaked pm "
+                   f"auto-stash(es) were checked, so they are left for the "
+                   f"next update to drop.", err=True)
     if dropped:
         click.echo(f"Dropped {dropped} leaked pm auto-stash(es) whose changes "
                    f"are already in the working tree.")

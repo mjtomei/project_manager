@@ -143,7 +143,10 @@ R6. **No data loss on any failure path.** The live file always holds the
     full live state; it is never reverted. When the update fails, the exact
     live bytes and the original index entry (a staged hunk included) are
     restored. A crash mid-update leaves the merged live state in the
-    worktree.
+    worktree. An interrupt (Ctrl-C) that lands after git finished the
+    fast-forward counts as a landed update (HEAD is at the target): the
+    merged registry stays, since restoring the pre-merge one would revert
+    the target's registry changes in the live state (review c6a2 i10).
 
 R7. **Tests.** Real-git tests simulate concurrent registry edits across a
     fast-forward. They assert:
@@ -237,6 +240,11 @@ retries) each entry judged applied is re-checked before its drop:
 - its files against the working tree (a few git calls);
 - its registry verdict, which stands only if the live registry text is
   still the one it was made against (compared as text, never re-parsed).
+
+An entry whose files changed meanwhile is listed with the kept ones. One
+whose registry verdict went stale, or whose drop failed, is reported as
+left for the next update instead: its changes are in the working tree, so
+"holds changes not in the working tree" would be wrong (review c6a2 i10).
 
 `--no-autostash` overrides a user's `merge.autoStash=true`, which would
 otherwise make git itself text-stash the swapped-in registry, reset it and
@@ -430,6 +438,8 @@ lock is a different one.
     stash push/pop);
   - a clean registry is updated without leaving a dirty tree;
   - a staged registry hunk survives an update that fails after the swap;
+  - an interrupt during the fast-forward keeps the merged registry when
+    git had finished (HEAD at the target) and restores it otherwise;
   - a writer that re-dirties the registry never enters the text stash;
   - an uncommitted `pm/` dir never stashes the registry;
   - a user's `merge.autoStash=true` never text-stashes the registry;
@@ -448,8 +458,9 @@ lock is a different one.
   - reaping drops under the lock and parses the stashes' registries
     without it, and does not run at all in a repo without pm's registry;
   - an entry judged applied is kept if its file changed before the locked
-    drop, or if the live registry changed (dropped on the next update);
-    a busy lock drops nothing;
+    drop (listed as holding changes), or if the live registry changed
+    (reported as left for, and dropped on, the next update); a failed drop
+    is reported with git's error; a busy lock drops nothing;
   - a busy lock leaves the checkout untouched, and the post-publish pull
     then exits 1 without a recovery window (`test_pr_enhancements.py`);
   - a concurrent writer thread loses no notes (3 runs);

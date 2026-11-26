@@ -387,6 +387,42 @@ class TestRegistryAcrossFastForward:
         assert _stash_list(repo) == ""
         assert _git("diff", "--cached", "--name-only", cwd=repo).stdout == ""
 
+    @pytest.mark.parametrize("landed", [True, False])
+    def test_interrupt_during_the_ff(self, tmp_path, landed):
+        """Ctrl-C while git runs the fast-forward.  If git finished first
+        (HEAD at the target), the merged registry stays: restoring the
+        pre-merge one would revert the target's registry changes in the
+        live state and stage the old blob.  Otherwise it is restored."""
+        repo = _init_repo(tmp_path)
+        pm = _seed_project(repo)
+        _incoming(repo, pm, _add_note("note-in", "x"))
+        _edit(pm, lambda d: _pr(d, "pr-002").update(title="local"))
+        before = (pm / "project.yaml").read_bytes()
+        head = _git("rev-parse", "HEAD", cwd=repo).stdout
+        real = pr_mod.git_ops.run_git
+
+        def run_git(*args, **kw):
+            if args[0] == "merge":
+                if landed:
+                    real(*args, **kw)
+                raise KeyboardInterrupt
+            return real(*args, **kw)
+
+        with mock.patch.object(pr_mod.git_ops, "run_git",
+                               side_effect=run_git), \
+                pytest.raises(KeyboardInterrupt):
+            pr_mod._ff_with_autostash(repo, "incoming")
+        assert _git("diff", "--cached", "--name-only", cwd=repo).stdout == ""
+        if landed:
+            assert _git("rev-parse", "HEAD", cwd=repo).stdout == \
+                _git("rev-parse", "incoming", cwd=repo).stdout
+            d = store.load(pm)
+            assert [n["id"] for n in _pr(d, "pr-001")["notes"]] == ["note-in"]
+            assert _pr(d, "pr-002")["title"] == "local"
+        else:
+            assert _git("rev-parse", "HEAD", cwd=repo).stdout == head
+            assert (pm / "project.yaml").read_bytes() == before
+
     def test_unrestorable_index_entry_is_reported(self, tmp_path, capsys):
         """Another git process holding index.lock fails the fast-forward and
         the index restore alike.  The incoming blob then stays staged on the
@@ -980,7 +1016,8 @@ class TestRegistryLock:
                 yield fd
         return mock.patch.object(pr_mod.store, "_lock", lock)
 
-    def test_reap_rechecks_the_worktree_under_the_lock(self, tmp_path):
+    def test_reap_rechecks_the_worktree_under_the_lock(self, tmp_path,
+                                                       capsys):
         """Judged applied without the lock, but the file changed before the
         drop (e.g. another update reverted it for its own auto-stash): kept."""
         repo, pm = self._leaked_applied_stash(tmp_path)
@@ -988,13 +1025,16 @@ class TestRegistryLock:
                 lambda: (repo / "a.txt").write_text("changed\n")):
             assert pr_mod._reap_auto_stashes(repo, pm) == 0
         assert "pm: auto-stash for merge" in _stash_list(repo)
+        assert "hold changes not in the working tree: stash@{0}" in \
+            capsys.readouterr().err
 
     def test_reap_registry_verdict_needs_the_same_live_registry(
-            self, tmp_path):
+            self, tmp_path, capsys):
         """The structural verdict on a stash's registry change is made
         against the live registry read without the lock.  A pm write landing
         before the drop invalidates it (never re-parsed under the lock): the
-        stash is kept, and the next update drops it."""
+        stash is kept, and the next update drops it.  It is reported as left
+        for the next update, not as holding changes the working tree lacks."""
         repo = _init_repo(tmp_path)
         pm = _seed_project(repo)
         _edit(pm, _add_note("note-old", "x"))
@@ -1004,8 +1044,29 @@ class TestRegistryLock:
                 pm, lambda d: _pr(d, "pr-002").update(title="writer"))):
             assert pr_mod._reap_auto_stashes(repo, pm) == 0
         assert "pm: auto-stash for merge" in _stash_list(repo)
+        err = capsys.readouterr().err
+        assert "registry changed while 1 leaked pm auto-stash(es) were " \
+            "checked" in err, err
+        assert "not in the working tree" not in err, err
         assert pr_mod._reap_auto_stashes(repo, pm) == 1
         assert _stash_list(repo) == ""
+
+    def test_reap_reports_a_failed_drop(self, tmp_path, capsys):
+        repo, pm = self._leaked_applied_stash(tmp_path)
+        real = pr_mod.git_ops.run_git
+
+        def run_git(*args, **kw):
+            if args[:2] == ("stash", "drop"):
+                return subprocess.CompletedProcess(args, 1, "", "boom")
+            return real(*args, **kw)
+
+        with mock.patch.object(pr_mod.git_ops, "run_git",
+                               side_effect=run_git):
+            assert pr_mod._reap_auto_stashes(repo, pm) == 0
+        err = capsys.readouterr().err
+        assert "could not drop the leaked pm auto-stash stash@{0}" in err
+        assert "boom" in err
+        assert "not in the working tree" not in err, err
 
     def test_reap_with_a_busy_lock_drops_nothing(self, tmp_path, capsys):
         repo, pm = self._leaked_applied_stash(tmp_path)
