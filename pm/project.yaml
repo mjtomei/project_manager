@@ -31077,7 +31077,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/222
   gh_pr_number: 222
   created_at: '2026-05-21T04:06:05.061620+00:00'
-  updated_at: '2026-11-26T19:52:23.903260+00:00'
+  updated_at: '2026-11-26T20:25:03.729968+00:00'
   started_at: '2026-05-25T02:58:20.169677+00:00'
   reviewed_at: '2026-05-25T03:13:02.415469+00:00'
   merged_at: null
@@ -31489,6 +31489,24 @@ prs:
       full suite 5730 passed / 1 skipped.'
     created_at: '2026-11-26T19:52:23Z'
     last_edited: '2026-11-26T19:52:23Z'
+  - id: note-380fb04
+    text: 'Review loop c6a2 i8 (85a2eab5): NEEDS_WORK, fixed + pushed. The pathspec
+      auto-stash mishandled two kinds of staged change in the main repo when another
+      dirty file blocked the fast-forward (both regressions vs master unrestricted
+      stash, git 2.34): (1) a staged deletion: `git stash push --include-untracked
+      -- <path>` saved the stash, then its internal `git add` died ("did not match
+      any files"), so the update failed and a pm auto-stash leaked; (2) a staged rename:
+      stashing only the destination made the pop a rename/delete conflict (UA new.txt,
+      stash kept). _dirty_file_paths now never names a staged deletion or either path
+      of a staged rename (status with -c status.renames=true, so a rename is one entry
+      under status.renames=false); they stay staged in place, the stash records the
+      whole index anyway. A stash push that fails after saving is dropped when it
+      reverted nothing (_stash_already_applied), popped after the update when it did.
+      +5 test cases, 1 updated; all 6 fail on 9b72be22. Mocked test_dirty_overlap_stashes_then_succeeds
+      matches status after the -c option. Spec 2c/4/5 updated. Evidence /pm-captures/review-c6a2-i8
+      (probe pre/post-fix): full suite 5735 passed / 1 skipped.'
+    created_at: '2026-11-26T20:25:03Z'
+    last_edited: '2026-11-26T20:25:03Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-ca6981c-bug-pm-merge-s-git-stash-pop-corrupt-ac115969
 - id: pr-c41f029
   plan: bugs
