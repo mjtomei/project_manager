@@ -349,6 +349,16 @@ class TestReviewPrompt:
         _assert_clean(r)
         assert "**Project Architecture** above" not in r
 
+    def test_clean_without_project_root(self, monkeypatch):
+        # The lookup shares the notes' FileNotFoundError guard, so a review
+        # prompt (bug-fix checklist included) still builds without a root.
+        def _missing(*a, **k):
+            raise FileNotFoundError("no project.yaml")
+        monkeypatch.setattr(store, "find_project_root", _missing)
+        r = prompt_gen.generate_review_prompt(_data(dict(_BUG)), "pr-b")
+        assert "Bug Fix Review Checklist" in r
+        _assert_clean(r)
+
     def test_review_loop_inherits_architecture(self, pm_root):
         _write_arch(pm_root)
         r = prompt_gen.generate_review_prompt(

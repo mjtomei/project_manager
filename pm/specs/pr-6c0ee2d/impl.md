@@ -161,6 +161,8 @@ later tests — review-loop 322e i3):
   add/breakdown/review/import include the architecture header, the debt
   rule and its `pm pr list --plan improvements` command when present, and
   contain none of them when absent.
+- Impl and review prompts with no project root (`FileNotFoundError`)
+  still build and carry no architecture text.
 
 ## 2. Implicit requirements
 - **No behaviour change without the doc.** Every new string is gated on a
@@ -225,13 +227,22 @@ later tests — review-loop 322e i3):
   it. Undecodable bytes are read with `errors="replace"`.
 - A doc far over budget, or with multi-byte UTF-8 → `bounded_text` measures
   bytes and cuts on character boundaries.
-- No project root (`FileNotFoundError`) → no block, as with notes.
+- No project root (`FileNotFoundError`) → no block, as with notes; impl
+  and review prompts (bug-fix blocks included) still build. Both have a
+  test (review-loop 322e i5).
 - Review of a PR that itself edits `pm/architecture.md`: the inlined copy is
   the base pm root's (pre-PR) version, which is the right baseline. The diff
   shows the PR's edits.
 - Impl session resuming on a branch that already edited the doc: the inlined
   copy is the base root's. The guidance tells the agent to read the file
   (its workdir copy) for the full or latest text.
+- Standalone pm dir + containerized impl/review session: the pointer is the
+  host's absolute path, and containers mount only the workdir (not a
+  standalone pm dir), so it doesn't resolve inside one. The session still
+  gets the inlined excerpt (whole up to `ARCHITECTURE_BUDGET`), so it
+  misses only the middle the excerpt cuts from an over-budget doc. Other
+  standalone-pm paths in prompts (e.g. spec paths) have the same
+  limitation; not fixed here.
 - Existing non-hermetic tests that build prompts against the real repo's
   `pm/` will start seeing the block once the dogfood baseline lands (plan
   PR 4). No current test asserts its absence, and new tests are hermetic.
