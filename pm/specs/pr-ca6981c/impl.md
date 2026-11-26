@@ -57,16 +57,17 @@ This spec was rescoped to match (PR note "Rescope after pr-ac10f03"):
 - `pm_core/cli/pr.py`. The stash helpers are in the "Stash-retry helpers for
   merge operations" section.
   - `_ff_with_autostash(repo_dir, target, pr_display_id)` is the single entry
-    point. It runs `git merge --ff-only`, stashes on dirty overlap, retries,
-    restores, and then reaps. Both fast-forward sites use it:
+    point. It pre-merges the registry, runs `git merge --ff-only`, stashes
+    other files on dirty overlap, retries, restores, and then reaps. Both
+    fast-forward sites use it:
     1. `_publish_local` (local backend). It fast-forwards the main repo's
        checked-out base to the approved merge commit.
     2. `_pull_after_merge` (github/vanilla, post-publish). It fast-forwards
        the main repo to `origin/<base>`. The fetch stays outside the lock.
-  - `_stash_for_merge` / `_unstash_after_merge` do the move-aside and the
-    restore.
-  - `_capture_registry` / `_reapply_registry` handle the registry,
-    structurally.
+  - `_stash_for_merge` / `_unstash_after_merge` stash and restore ordinary
+    files (never the registry).
+  - `_plan_registry` / `_apply_registry` / `_restore_registry` /
+    `_stage_registry` handle the registry, structurally.
   - `_restore_merge_stash` pops by commit. `_reap_auto_stashes`,
     `_stash_already_applied` and `_registry_change_applied` handle
     leaked-stash reaping.
@@ -110,20 +111,28 @@ R4. **Merged PR ends `status="merged"` with `merged_at` set.** With R1 in
 R5. **Concurrent pm writers serialize against the update (#253 S74).** The
     registry lock is held across the whole fast-forward, not only around the
     stash path. This means a writer cannot:
-    - land between the revert and the re-apply;
-    - save, after git rewrote the file, a registry it loaded before the
-      rewrite (a lost update of the merged-in records and notes);
+    - interleave with the update;
+    - save, after the update, a registry it loaded before it (a lost
+      update of the merged-in records and notes);
     - have its `project.yaml.tmp` swept into a stash (`[Errno 2]` on its
       rename).
 
+    Writers also find and pre-load the registry *before* taking the lock
+    (`state_root()` + `store.load()`), so the live file must never be
+    missing, half-written or reverted, even with the lock held. git's
+    checkout unlinks and recreates files, so git must never rewrite it: the
+    file is replaced only by atomic renames.
+
     If the lock stays busy (10 s), the checkout is left untouched and the
     update fails with the lock message. The lock is never held across a
-    network call.
+    network call. The slow part (parsing and dumping a large registry) runs
+    before the lock is taken.
 
-R6. **No data loss on any failure path.** The live registry is copied into
-    the git dir before it is reverted. It is restored byte-for-byte when the
-    fast-forward or the stash fails. If the re-apply itself fails, the
-    recovery copy is kept and its path printed.
+R6. **No data loss on any failure path.** The live file always holds the
+    full live state; it is never reverted. When the update fails, the exact
+    live bytes and the original index entry (a staged hunk included) are
+    restored. A crash mid-update leaves the merged live state in the
+    worktree.
 
 R7. **Tests.** Real-git tests simulate concurrent registry edits across a
     fast-forward. They assert:
@@ -133,7 +142,8 @@ R7. **Tests.** Real-git tests simulate concurrent registry edits across a
     - (d) the PR is finalized as merged with `merged_at` set.
 
     Further tests cover a concurrent writer thread, lock scope, busy lock,
-    conflicted and refused pops, reaping, and the recovery copy.
+    conflicted and refused pops, and reaping. They also check that git never
+    rewrites the live file (same inode across every git step).
 
 ## 2. Design
 
@@ -164,54 +174,63 @@ removed.
 ### 2c. `pr.py`: `_ff_with_autostash` (R1, R2, R5, R6)
 
 ```
-reg_root = repo/pm if repo/pm/project.yaml exists
-with store._lock(reg_root, timeout=10):       # busy -> failed result, untouched
-    r = git merge --ff-only target
+plan = _plan_registry(repo, target)            # before the lock (slow part)
+with store._lock(repo/pm, timeout=10):         # busy -> failed result, untouched
+    _apply_registry(repo, plan)                # atomic rename + stage target blob
+    r = git merge --ff-only target             # keeps the registry entry
     if r failed with "would be overwritten":
-        info = _stash_for_merge(repo)
+        stage HEAD's registry entry            # stash must not carry it
+        info = _stash_for_merge(repo)          # other files only
+        stage the target's entry again
         if info:
             try:     r = git merge --ff-only target
             finally: restored = _unstash_after_merge(repo, info)
-if r ok and restored: _reap_auto_stashes(repo)  # read-only checks, after unlock
+    finally: if r failed: _restore_registry(repo, plan)
+if r ok and restored: _reap_auto_stashes(repo) # read-only checks, after unlock
 ```
 
-`_stash_for_merge`. The caller holds the lock.
+`_plan_registry` runs only when the target changes `pm/project.yaml` and
+both HEAD and the target hold it. It needs a single stage-0 index entry
+and a live file that is valid, free of markers and a mapping; otherwise it
+returns None and git treats the file like any other.
+- It computes `merge_3way(base=HEAD blob, ours=target blob, theirs=live)`.
+- The new text is chosen as follows:
+  - when the result equals the live dict: the live bytes;
+  - when it equals the incoming dict: the target blob's bytes;
+  - otherwise: `store.dump_text(merged)`, the exact text `store.save`
+    writes.
 
-1. Compute the dirty paths (`-z`). Raise the TUI merge-lock overlay if any
-   `pm/` path is dirty.
-2. Call `_capture_registry`. If `pm/project.yaml` is dirty, valid, free of
-   markers and present in HEAD:
-   - capture the live text and dict, plus `HEAD:pm/project.yaml` as the
-     base;
-   - write the recovery copy `<git-dir>/pm-premerge-project-<ts>-<pid>.yaml`;
-   - run `git checkout HEAD -- pm/project.yaml`. Using HEAD (not the index)
-     means a staged registry hunk cannot keep blocking; re-applied content
-     ends up unstaged.
+`_apply_registry` (lock held):
+1. Re-read the live text. If it changed since the plan, re-merge it.
+2. Replace the file with one atomic rename (`_write_registry_text`).
+3. `git update-index --cacheinfo <target mode>,<target blob>,pm/project.yaml`.
 
-   Otherwise leave the registry alone, so the merge fails on it cleanly.
-3. Stash the remaining dirty paths with `git stash push --include-untracked
-   -m "pm: auto-stash for merge" -- :(literal)<p>...`. These are explicit
-   pathspecs that exclude `pm/project.yaml`, `.lock` and `.tmp`
-   (`_NEVER_STASH_RELS`). Record the stash's commit sha.
-4. If the stash fails, restore the registry's exact bytes and return None.
+In git's two-way merge, an index entry that already equals the target is
+kept, even with a dirty worktree (read-tree case 19). So the fast-forward
+never unlinks or recreates the file. After it, HEAD and the index hold the
+target and the worktree holds target + live state, uncommitted as before.
+`_restore_registry` puts back the exact live bytes and the original index
+entry.
 
-`_unstash_after_merge`:
-1. Re-apply the registry. Load the on-disk merged-in state under the held
-   lock (it goes through the marker guard), then compute
-   `merge_3way(base, merged_in, live)`.
-   - If the result equals the live dict (nothing came in, e.g. the
-     fast-forward failed), write the original bytes back. This avoids a
-     re-dump that rewraps the file.
-   - Otherwise `store.save` it and print `Merged pm/project.yaml (local pm
-     state + merged changes).`
-   - Delete the recovery copy on success.
-2. Pop the stash by its commit (`_stash_ref`), not by position.
-   - On a clean pop, print "Restored N stashed file(s)".
-   - If the pop conflicts, try master's `_resolve_project_yaml_pop(cwd, ref)`
-     first; it only merges real pm registries. Otherwise keep the stash with
-     instructions.
-   - If git refuses the pop, keep the stash ("Nothing was lost").
-3. Remove the TUI overlay.
+`_stash_for_merge` (lock held) stashes only ordinary files:
+1. Take the dirty paths (`-z`) and apply `_stashable_paths`. That drops
+   `_NEVER_STASH_RELS` (the registry, `.lock`, `.tmp`) and expands a
+   collapsed untracked `pm/`.
+2. `git stash push --include-untracked -m "pm: auto-stash for merge" --
+   :(literal)<p>...`.
+3. Record the new `stash@{0}` commit. If the top did not change ("No local
+   changes to save", rc 0), it is someone else's stash: treat that as a
+   failed stash.
+4. Raise the TUI overlay only when pm/ files are stashed.
+
+`_unstash_after_merge` pops the stash by its commit (`_stash_ref`), not by
+position:
+- A clean pop prints "Restored N stashed file(s)".
+- If the pop conflicts, it first tries master's
+  `_resolve_project_yaml_pop(cwd, ref)`, which merges only real pm
+  registries. A lock failure there counts as unresolved. Otherwise the
+  stash is kept with a "resolve, then `git stash drop <ref>`" instruction.
+- If git refuses the pop, the stash is kept ("Nothing was lost").
 
 `_reap_auto_stashes` drops an entry whose message is exactly `pm: auto-stash
 for merge` when its changes are already applied:
@@ -233,7 +252,8 @@ name is left alone.
 
 - **No self-deadlock.** Nothing inside the held region calls
   `locked_update` / `_lock` on the same root. `trigger_tui_merge_lock` only
-  writes a marker file. The re-apply uses `load` + `save` directly.
+  writes a marker file. The registry is written with an atomic rename, not
+  through `locked_update`.
 - **Master's mocked tests keep passing.** The mocked `run_git` returns
   `"master"` for every `rev-parse`, and `stash pop` is still called as
   `("stash", "pop", ref)`. `test_fetches_and_fast_forwards_in_repo_dir` now
@@ -245,9 +265,14 @@ name is left alone.
 ## 4. Edge cases
 
 - **The registry is the only dirty file** (the original incident): no git
-  stash is created at all. The overlap is resolved structurally.
-- **A writer races the revert** (QA S3) or the fast-forward (S74):
-  serialized by the lock. The pathspec exclusion is a second guard.
+  stash is created at all. The overlap is resolved structurally, and the
+  first fast-forward succeeds.
+- **The registry is clean but the target changes it:** it is still swapped
+  in atomically (the target's bytes), so lock-free readers never see git
+  rewrite it.
+- **A writer races the update** (QA S3, S74): serialized by the lock. Its
+  pre-lock read only ever sees a complete registry. The pathspec exclusion
+  is a second guard.
 - **A writer hammers the lock:** the merge's polling acquire can starve.
   After 10 s it fails safe and touches nothing.
 - **Stash-pop conflict in ordinary files:** the update has landed and the
@@ -270,13 +295,18 @@ name is left alone.
 - `_persist_with_backoff`: retry-then-succeed; exhaustion.
 - `_ff_with_autostash` on real git:
   - overlapping edits reconcile (live wins, merged-in note and field kept,
-    no markers, no stash, HEAD == target, no recovery copy, nothing staged);
+    no markers, no stash, HEAD == target, nothing staged);
   - finalize gives merged + `merged_at`;
   - other dirty and untracked files are stashed and restored;
-  - a failed fast-forward restores the exact registry bytes;
-  - a stash failure restores the registry;
-  - the recovery copy exists until the re-apply;
-  - a writer that re-dirties the registry never enters the text stash.
+  - a failed fast-forward restores the exact registry bytes and the index;
+  - a stash failure, or an empty stash push, restores the registry and
+    never pops the user's own stash;
+  - git never rewrites the live registry (same inode across merge and
+    stash push/pop);
+  - a clean registry is updated without leaving a dirty tree;
+  - a staged registry hunk survives a failed update;
+  - a writer that re-dirties the registry never enters the text stash;
+  - an uncommitted `pm/` dir never stashes the registry.
 - Locking:
   - the lock is held during every rewriting git step (first fast-forward
     included) and released afterwards;
@@ -296,6 +326,14 @@ name is left alone.
 Pre-fix evidence: 9 of the 13 fast-forward/lock/reap tests fail on master's
 code (a shim drives master's inline sequence). The concurrent-writer test
 fails there with "Your local changes … would be overwritten by merge".
+
+CLI race evidence (#253 S74 story 1, disposable fixture; harness and
+results in `$CAP/impl/s74-harness`, `$CAP/impl/s74-summary.md`):
+
+| code | registry only | + dirty user files |
+|---|---|---|
+| master | 0/8 | 0/6 |
+| fix | 12/12 | 8/8 |
 
 ## 6. Ambiguities (resolved)
 
