@@ -520,22 +520,38 @@ def referenced_keys() -> set[str] | None:
     return users | preps
 
 
-def _image_present(image_id: str) -> bool | None:
+def _image_state(image_id: str) -> str | None:
+    """How the host runtime holds *image_id*: ``"absent"``, ``"untagged"``
+    (still stored, but no tag or digest names it — what a rebuild of its
+    tag leaves behind until the host's images are pruned), ``"named"``, or
+    None when the runtime cannot tell."""
     r = _rt("image", "exists", image_id, timeout=30)
-    if r.returncode == 0:
-        return True
     if r.returncode == 1:
-        return False
-    return None
+        return "absent"
+    if r.returncode != 0:
+        return None
+    r = _rt("image", "inspect", image_id, timeout=30)
+    if r.returncode != 0:
+        return None
+    try:
+        info = json.loads(r.stdout)[0]
+    except (ValueError, LookupError, TypeError):
+        return None
+    if not isinstance(info, dict):
+        return None
+    return "named" if (info.get("RepoTags") or info.get("RepoDigests")) \
+        else "untagged"
 
 
 def plan_gc(all_unreferenced: bool = False,
             protect: set[str] | None = None) -> tuple[list[tuple[Path, str]], str]:
     """Return ([(path, reason)], problem) for entries safe to delete.
 
-    Never selects an entry a container (any state) references, the
-    configured image's entry, or anything when the runtime cannot be
-    listed (*problem* then says why).
+    Selects unreferenced entries whose image is gone from the host or
+    superseded (untagged: its tag was rebuilt), all unreferenced ones with
+    *all_unreferenced*, and abandoned preparations.  Never selects an entry
+    a container (any state) references, the configured image's entry, or
+    anything when the runtime cannot be listed (*problem* then says why).
     """
     root = cache_root()
     refs = referenced_keys()
@@ -566,10 +582,17 @@ def plan_gc(all_unreferenced: bool = False,
         if entry is None:
             out.append((d, "incomplete entry"))
             continue
-        present = _image_present(entry.image_id)
-        if present is False:
+        state = _image_state(entry.image_id)
+        if state == "absent":
             out.append((d, "image no longer on the host, no consumers"))
-        elif present and all_unreferenced:
+        elif state == "untagged":
+            # Superseded: its tag now names a rebuilt image, so no launch
+            # by tag can select it again.  The host keeps the old image
+            # until its images are pruned, which pm never does; without
+            # this, every rebuild of pm-dev left a full entry behind.
+            out.append((d, "image superseded (untagged on the host), "
+                           "no consumers"))
+        elif state == "named" and all_unreferenced:
             out.append((d, "no consumers (--all-unreferenced)"))
     return out, ""
 
@@ -894,7 +917,9 @@ def ensure_consumer_engine(home: str | None = None) -> None:
         write_engine_config(home)
     problem = engine_config_problem(home)
     if problem:
-        raise ImageCacheError(problem)
+        # The foreign config may be deliberate (a storage-driver test's own
+        # engine): then the cache, not the config, is what to turn off.
+        raise ImageCacheError(f"{problem}; " + _off_remedy())
     bad = _probe_mismatches(home)
     if bad:
         raise ImageCacheError(

@@ -43,9 +43,10 @@ def trust_status(path):
 def trust_list():
     """List roots pm may trust automatically."""
     from pm_core import workspace_trust as wt
-    from pm_core.paths import workdirs_roots
+    from pm_core.paths import qa_scratch_root, workdirs_roots
     for root in workdirs_roots():
         click.echo(f"{root}  (pm-created workdirs)")
+    click.echo(f"{qa_scratch_root()}  (pm-created QA scenario scratch)")
     for root in wt.authorized_roots():
         click.echo(f"{root}  (authorized)")
 

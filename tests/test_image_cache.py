@@ -12,7 +12,7 @@ import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -48,6 +48,10 @@ class FakeRuntime:
         self.loaded_id = loaded_id or image_id
         self.refs = set(refs)
         self.present = present
+        # Image IDs `image inspect` reports with no tags (superseded by a
+        # rebuild of their tag); those in `digested` keep a RepoDigest.
+        self.untagged: set[str] = set()
+        self.digested: set[str] = set()
         self.fail = fail or {}
         self.calls: list[tuple] = []
         self.volumes: dict[str, str] = {}   # container path -> host path
@@ -61,6 +65,11 @@ class FakeRuntime:
         if head in self.fail:
             return _cp(1, err=self.fail[head])
         if args[:2] == ("image", "inspect"):
+            if args[2] in self.untagged:
+                digests = ([f"docker.io/x@{args[2]}"]
+                           if args[2] in self.digested else [])
+                return _cp(out=json.dumps([{"Id": args[2], "RepoTags": [],
+                                            "RepoDigests": digests}]))
             return _cp(out=json.dumps([{"Id": self.image_id,
                                         "RepoTags": self.tags}]))
         if args[:2] == ("image", "exists"):
@@ -377,6 +386,31 @@ class TestGc:
         image_cache.gc(all_unreferenced=True)
         assert not other.exists()
 
+    def test_superseded_image_is_evicted_unless_referenced(self, fake, home):
+        """A rebuild of pm-dev:latest leaves the old image on the host,
+        untagged, until the host's images are pruned (verified with podman
+        3.4: `image exists` rc 0, RepoTags/RepoDigests empty).  Its entry
+        goes once no container uses it; a referenced one stays."""
+        root = image_cache.cache_root()
+        old_id, used_id = "sha256:" + "7" * 64, "sha256:" + "8" * 64
+        old = _publish(root, "7" * 20, old_id)
+        used = _publish(root, "8" * 20, used_id)
+        fake.untagged = {old_id, used_id}
+        fake.refs = {"8" * 20}
+        out = image_cache.gc()
+        assert not old.exists() and used.exists()
+        assert [r for _, r in out["removed"]] == [
+            "image superseded (untagged on the host), no consumers"]
+
+    def test_image_named_only_by_digest_is_kept(self, fake, home):
+        """Pulled by digest: no tag, but a RepoDigest still selects it."""
+        root = image_cache.cache_root()
+        pinned_id = "sha256:" + "9" * 64
+        pinned = _publish(root, "9" * 20, pinned_id)
+        fake.untagged = fake.digested = {pinned_id}
+        image_cache.gc()
+        assert pinned.exists()
+
     def test_dry_run_and_runtime_failure_remove_nothing(self, fake, home):
         root = image_cache.cache_root()
         gone = _publish(root, "4" * 20, "sha256:" + "4" * 64)
@@ -535,8 +569,11 @@ class TestEnsureConsumerEngine:
         cfg = eng / ".config" / "containers" / "storage.conf"
         cfg.parent.mkdir(parents=True)
         cfg.write_text('[storage]\ndriver = "overlay"\n')
-        with pytest.raises(ImageCacheError, match="additionalimagestores"):
+        with pytest.raises(ImageCacheError, match="additionalimagestores") as exc:
             image_cache.ensure_consumer_engine(str(eng))
+        # The foreign config may be deliberate: the cache can be turned off.
+        assert f"pm set {image_cache.MODE_SETTING} off" in str(exc.value)
+        assert "storage.conf" in cfg.name and "overlay" in cfg.read_text()
 
 
 def test_missing_in_consumer_message_names_the_cache(consumer):

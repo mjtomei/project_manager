@@ -2,7 +2,6 @@
 and image cache (pm_core.paths) and their ``pm set`` surface."""
 
 import os
-from pathlib import Path
 
 import pytest
 from click.testing import CliRunner
@@ -108,6 +107,24 @@ class TestConfigured:
         old_clone.mkdir(parents=True)
         assert workspace_trust.approved_path(old_clone)
         assert workspace_trust.approved_path(nas / "wd" / "proj-1234")
+
+    def test_scenario_scratch_stays_trusted(self, home, tmp_path):
+        """Scratch used to live inside the QA workdir, which is pm-created
+        and trusted; moving it out must not drop that trust (a host-mode
+        scenario's test project there would stall at the prompt).  Its
+        siblings under the scratch root stay untrusted."""
+        from pm_core import workspace_trust
+        run = paths.qa_workdirs_root() / "pr-1-abc"
+        proj = paths.scenario_scratch_dir(run, 1) / "test-proj"
+        proj.mkdir(parents=True)
+        assert workspace_trust.approved_path(proj)
+        paths.set_global_setting_value("scratch-dir", str(tmp_path / "fast"))
+        moved = paths.scenario_scratch_dir(run, 1) / "test-proj"
+        moved.mkdir(parents=True)
+        assert workspace_trust.approved_path(moved)
+        other = tmp_path / "fast" / "not-qa"
+        other.mkdir()
+        assert not workspace_trust.approved_path(other)
 
     def test_qa_runs_in_the_old_root_are_still_found(self, home, nas,
                                                      monkeypatch):
@@ -286,7 +303,7 @@ class TestFilesystemType:
 
     def test_fuse_network_types(self, tmp_path, monkeypatch):
         mi = tmp_path / "mi"
-        mi.write_text(f"1 0 0:1 / / rw - fuse.sshfs host:/ rw\n")
+        mi.write_text("1 0 0:1 / / rw - fuse.sshfs host:/ rw\n")
         monkeypatch.setattr(paths, "_MOUNTINFO", str(mi))
         assert paths.is_network_filesystem(tmp_path)
 

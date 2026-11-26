@@ -408,7 +408,8 @@ def cache_check(image: str | None, home: str | None):
               help="Also remove unused entries whose image still exists "
                    "(never the configured image's)")
 def cache_gc(dry_run: bool, all_unreferenced: bool):
-    """Remove cache entries no container uses and whose image is gone."""
+    """Remove cache entries no container uses whose image is gone or
+    superseded (untagged on the host after a rebuild of its tag)."""
     from pm_core import image_cache
     try:
         summary = image_cache.gc(dry_run=dry_run,

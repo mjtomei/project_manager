@@ -11,7 +11,8 @@ interface so the launcher (``claude_launcher``) stays the only place
 that knows which runtime is in use:
 
 * :func:`approved_path` — the narrow policy: only PM-created workdirs
-  (under ``~/.pm/workdirs``) and paths the user explicitly authorized
+  (under ``~/.pm/workdirs``, plus QA scenario scratch under
+  ``~/.pm/scratch/qa``) and paths the user explicitly authorized
   with ``pm trust add`` may be trusted automatically.  Nothing else is
   ever written; unknown workspaces keep their explicit prompt.
 * :class:`TrustRuntime` — per-runtime mechanics: ``bootstrap`` records
@@ -146,9 +147,17 @@ def remove_authorized_root(root: str) -> bool:
 
 
 def approved_roots() -> list[str]:
-    """Roots under which pm may establish workspace trust automatically."""
-    from pm_core.paths import workdirs_roots
+    """Roots under which pm may establish workspace trust automatically.
+
+    pm's workdirs, and the QA scenarios' scratch: scratch used to live
+    inside the QA workdir (``<workdirs>/qa/<run>/s-N/scratch``), and moving
+    it onto local disk (``<scratch>/qa/<run>/s-N``) must not change which
+    of the dirs pm creates are trusted — a host-mode scenario's throwaway
+    test project there would otherwise stall at the prompt.
+    """
+    from pm_core.paths import qa_scratch_root, workdirs_roots
     return ([_real(r) for r in workdirs_roots()]
+            + [_real(qa_scratch_root())]
             + [_real(r) for r in authorized_roots()])
 
 

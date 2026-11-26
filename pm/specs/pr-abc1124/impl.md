@@ -36,7 +36,8 @@ directly from it.
   and QA-run-start hooks (plus a previewable manual command) only when no
   container still mounts that scratch, the run is not live and the
   container is not retained.  Cache entries are evicted only when no
-  container references them and their image is gone from the host.
+  container references them and their image is gone from the host or
+  superseded (left untagged by a rebuild of its tag).
 
 ## 1. Grounding — what the code and runtime do today
 
@@ -291,6 +292,12 @@ the task and on the measurements above.
   `{qa_workdir}/s-N/scratch` if it already exists (in-flight runs keep their
   mounts), else `scratch_base()/qa/<qa_workdir.name>/s-N`.  Used by
   `create_scenario_workdir`, the tmux prompt and the relaunch path.
+* Workspace trust follows the move: `workspace_trust.approved_roots()`
+  includes `paths.qa_scratch_root()` (`<scratch>/qa`).  The legacy scratch
+  sat inside the trusted QA workdir, so a host-mode scenario's throwaway
+  test project there was auto-trusted; without this it would stall at the
+  trust prompt.  Nothing else under the scratch root is trusted (review
+  62b4 i6).
 * No migration of existing workdirs/captures; changing a setting affects
   new paths only (documented in `pm set` help).  So that existing
   workdirs keep working after `workdirs-dir` moves:
@@ -347,10 +354,16 @@ the task and on the measurements above.
   `pm.image-cache-prep=<key>`.
 * Automatic eviction after a new entry is published, and
   `pm container cache gc [--dry-run] [--all-unreferenced]`: remove
-  unreferenced entries whose image ID no longer exists on the host
-  (`--all-unreferenced` also removes unreferenced entries whose image still
-  exists, except the configured image's), and abandoned `.prep-*` dirs with
-  no live prep container.  Removal uses `podman unshare rm -rf`.
+  unreferenced entries whose image ID no longer exists on the host, or
+  still exists but is **superseded** — no RepoTag or RepoDigest names it
+  (review 62b4 i6: a rebuild of `pm-dev:latest` leaves the old image on the
+  host, untagged, until its images are pruned, which pm never does —
+  verified with podman 3.4, `image exists` rc 0 — so without this every
+  rebuild left a full ~2 GB entry behind for good); `--all-unreferenced`
+  also removes unreferenced entries whose image is still named, except the
+  configured image's; and abandoned `.prep-*` dirs with no live prep
+  container.  An image pulled by digest keeps its RepoDigest and its
+  entry.  Removal uses `podman unshare rm -rf`.
 
 ## 3. Implicit requirements
 

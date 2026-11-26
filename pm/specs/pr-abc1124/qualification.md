@@ -155,7 +155,10 @@ The same function runs from `pr_cleanup.cleanup_pr_resources` (merged /
 closed PRs, `pm pr cleanup --resources`) and in the background at QA run
 start for earlier runs of the PR (unit-tested).  Cache entries are evicted
 only when no container (any state) carries their label and their image is
-gone from the host (unit-tested; `pm container cache gc`).
+gone from the host or superseded — left untagged by a rebuild of its tag
+(unit-tested; `pm container cache gc`; that podman 3.4 keeps the old image
+untagged after a same-tag rebuild was checked with a small `FROM scratch`
+build, review 62b4 i6).
 
 **Source / evidence vs local paths** — scenario scratch now lives under
 `~/.pm/scratch/qa/<run>/s-N` while the checkout stays under the workdir
