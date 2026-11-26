@@ -56407,7 +56407,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-11-26T15:03:37.862958+00:00'
-  updated_at: '2026-11-26T15:59:52.642470+00:00'
+  updated_at: '2026-11-26T18:32:37.946147+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -56431,6 +56431,17 @@ prs:
       block. Greenfield seeding in plan add is pr-27ba89e scope.'
     created_at: '2026-11-26T15:59:52Z'
     last_edited: '2026-11-26T15:59:52Z'
+  - id: note-b45a729
+    text: 'QA planning 2026-11-26 (spec pm/specs/pr-6c0ee2d/qa.md @dc6eed1f): verified
+      by hand that pm prompt / pm plan add|breakdown|review|import carry the block
+      with the right pointer form, and that oversized, non-UTF-8, directory and whitespace-only
+      docs degrade gracefully. Pre-existing gap filed as pr-c5f98ba: impl/review prompts
+      resolve the root from cwd, not -C/PM_PROJECT, so `pm -C <pm-dir> prompt` from
+      outside the pm dir drops both session notes and the architecture block (plan
+      prompts are fine). fake-claude never receives the prompt; QA scenarios record
+      launched prompts with a stand-in claude on PATH.'
+    created_at: '2026-11-26T18:32:37Z'
+    last_edited: '2026-11-26T18:32:37Z'
   model: provider:claude-main-xhigh-pm
   effort: xhigh
 - id: pr-27ba89e
