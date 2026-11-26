@@ -159,6 +159,22 @@ class TestDirtyFilePaths:
         _edit(pm, lambda d: d["project"].update(x=1))
         assert pr_mod._dirty_file_paths(repo) == ["pm/project.yaml"]
 
+    def test_untracked_pm_dir_never_stashes_the_registry(self, tmp_path):
+        """An uncommitted pm/ shows as one `?? pm/` entry; the stashable
+        paths expand it and leave the registry and its lock out."""
+        repo = _init_repo(tmp_path)
+        (repo / "a.txt").write_text("a\n")
+        _git("add", "-A", cwd=repo)
+        _git("commit", "-q", "-m", "a", cwd=repo)
+        pm = repo / "pm"
+        pm.mkdir()
+        store.save({"project": {}, "prs": [], "plans": []}, pm)
+        (pm / "project.yaml.lock").write_text("")
+        (pm / "notes.txt").write_text("n\n")
+        dirty = pr_mod._dirty_file_paths(repo)
+        assert dirty == ["pm/"]
+        assert pr_mod._stashable_paths(repo, dirty) == ["pm/notes.txt"]
+
     def test_raw_paths_and_renames(self, tmp_path):
         repo = _init_repo(tmp_path)
         _seed_project(repo)

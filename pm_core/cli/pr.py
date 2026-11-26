@@ -3355,6 +3355,28 @@ def _stash_ref(cwd: Path, sha: str) -> str | None:
     return None
 
 
+def _stashable_paths(cwd: Path, dirty: list[str]) -> list[str]:
+    """*dirty* minus :data:`_NEVER_STASH_RELS`.
+
+    Porcelain collapses an untracked directory to one ``dir/`` entry; one
+    that contains the registry (an uncommitted ``pm/``) is expanded to its
+    files so the registry and its lock still stay out of the stash.
+    """
+    out = []
+    for p in dirty:
+        if p in _NEVER_STASH_RELS:
+            continue
+        if p.endswith("/") and any(r.startswith(p) for r in _NEVER_STASH_RELS):
+            ls = git_ops.run_git("ls-files", "-z", "--others",
+                                 "--exclude-standard", "--", f":(literal){p}",
+                                 cwd=cwd, check=False)
+            out.extend(f for f in ls.stdout.split("\0")
+                       if f and f not in _NEVER_STASH_RELS)
+            continue
+        out.append(p)
+    return out
+
+
 def _stash_for_merge(cwd: Path, pr_display_id: str = "",
                      lock_tui: bool = True) -> dict | None:
     """Get dirty files out of the way so a merge can proceed.
@@ -3382,8 +3404,7 @@ def _stash_for_merge(cwd: Path, pr_display_id: str = "",
                   "stash": None, "count": 0}
     try:
         info["py"] = _capture_registry(cwd, dirty)
-        remaining = [p for p in _dirty_file_paths(cwd)
-                     if p not in _NEVER_STASH_RELS]
+        remaining = _stashable_paths(cwd, _dirty_file_paths(cwd))
         if remaining:
             click.echo(f"Stashing {len(remaining)} dirty file(s) to proceed "
                        f"with merge...")
@@ -3478,7 +3499,11 @@ def _restore_merge_stash(cwd: Path, sha: str, count: int) -> bool:
         return True
     unmerged = git_ops.run_git("diff", "--name-only", "--diff-filter=U",
                                cwd=cwd, check=False).stdout.split()
-    if unmerged and _resolve_project_yaml_pop(cwd, ref):
+    try:
+        resolved = bool(unmerged) and _resolve_project_yaml_pop(cwd, ref)
+    except (store.StoreLockTimeout, OSError):
+        resolved = False
+    if resolved:
         click.echo(f"Restored {count} stashed file(s).")
         return True
     if unmerged:
