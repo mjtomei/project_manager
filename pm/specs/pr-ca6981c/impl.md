@@ -124,9 +124,12 @@ R5. **Concurrent pm writers serialize against the update (#253 S74).** The
     file is replaced only by atomic renames.
 
     If the lock stays busy (10 s), the checkout is left untouched and the
-    update fails with the lock message. The lock is never held across a
-    network call. The slow part (parsing and dumping a large registry) runs
-    before the lock is taken.
+    update fails with the lock message (`_RegistryLockBusy`). The post-publish
+    pull then exits 1 with a `--propagation-only` re-run hint and opens no
+    recovery window: there is nothing to recover, and a session told to
+    "stash and pull" would text-stash the registry. The lock is never
+    held across a network call. The slow part (parsing and dumping a large
+    registry) runs before the lock is taken.
 
 R6. **No data loss on any failure path.** The live file always holds the
     full live state; it is never reverted. When the update fails, the exact
@@ -177,17 +180,22 @@ removed.
 plan = _plan_registry(repo, target)            # before the lock (slow part)
 with store._lock(repo/pm, timeout=10):         # busy -> failed result, untouched
     _apply_registry(repo, plan)                # atomic rename + stage target blob
-    r = git merge --ff-only target             # keeps the registry entry
+    r = git merge --ff-only --no-autostash target  # keeps the registry entry
     if r failed with "would be overwritten":
         stage HEAD's registry entry            # stash must not carry it
         info = _stash_for_merge(repo)          # other files only
         stage the target's entry again
         if info:
-            try:     r = git merge --ff-only target
+            try:     r = git merge --ff-only --no-autostash target
             finally: restored = _unstash_after_merge(repo, info)
     finally: if r failed: _restore_registry(repo, plan)
 if r ok and restored: _reap_auto_stashes(repo) # read-only checks, after unlock
 ```
+
+`--no-autostash` overrides a user's `merge.autoStash=true`, which would
+otherwise make git itself text-stash the swapped-in registry, reset it and
+pop it back over the incoming one: conflict markers and a leaked stash, with
+rc 0 (review c6a2 i1).
 
 `_plan_registry` runs only when the target changes `pm/project.yaml` and
 both HEAD and the target hold it. It needs a single stage-0 index entry
@@ -202,7 +210,7 @@ returns None and git treats the file like any other.
 
 `_apply_registry` (lock held):
 1. Re-read the live text. If it changed since the plan, re-merge it.
-2. Replace the file with one atomic rename (`_write_registry_text`).
+2. Replace the file with one atomic rename (`store.save_text`).
 3. `git update-index --cacheinfo <target mode>,<target blob>,pm/project.yaml`.
 
 In git's two-way merge, an index entry that already equals the target is
@@ -306,11 +314,13 @@ name is left alone.
   - a clean registry is updated without leaving a dirty tree;
   - a staged registry hunk survives a failed update;
   - a writer that re-dirties the registry never enters the text stash;
-  - an uncommitted `pm/` dir never stashes the registry.
+  - an uncommitted `pm/` dir never stashes the registry;
+  - a user's `merge.autoStash=true` never text-stashes the registry.
 - Locking:
   - the lock is held during every rewriting git step (first fast-forward
     included) and released afterwards;
-  - a busy lock leaves the checkout untouched;
+  - a busy lock leaves the checkout untouched, and the post-publish pull
+    then exits 1 without a recovery window (`test_pr_enhancements.py`);
   - a concurrent writer thread loses no notes (3 runs).
 - Restore and reap:
   - a conflicted pop keeps the stash, leaves the registry valid and opens no

@@ -470,7 +470,8 @@ class TestPullAfterMerge:
         ok, calls, cwds, launch = self._pull(tmp_path, rg)
         assert ok
         assert ("fetch", "origin") in calls
-        assert ("merge", "--ff-only", "origin/master") in calls
+        assert ("merge", "--ff-only", "--no-autostash",
+                "origin/master") in calls
         assert {str(c) for c in cwds} == {str(tmp_path)}
         launch.assert_not_called()
 
@@ -514,6 +515,27 @@ class TestPullAfterMerge:
         assert ok is False
         launch.assert_called_once()
         assert launch.call_args.kwargs["cwd"] == str(tmp_path)
+
+    def test_busy_registry_lock_exits_without_recovery_window(self, tmp_path):
+        """A busy registry lock touched nothing: no recovery session (told to
+        "stash and pull", it would text-stash the registry), just exit 1 with
+        the re-run hint."""
+        data = {"project": {"name": "p", "base_branch": "master"},
+                "prs": [{"id": "pr-001", "title": "T", "status": "sign_off"}]}
+        busy = pr_mod._RegistryLockBusy(
+            ["git", "merge"], 1, "", "Could not acquire lock on x")
+        with mock.patch("pm_core.cli.pr.git_ops") as g, \
+             mock.patch.object(pr_mod, "_ff_with_autostash",
+                               return_value=busy), \
+             mock.patch.object(pr_mod, "_launch_merge_window") as launch, \
+             pytest.raises(SystemExit) as exc:
+            g.run_git.return_value = MagicMock(returncode=0, stdout="master",
+                                               stderr="")
+            pr_mod._pull_after_merge(data, data["prs"][0], str(tmp_path),
+                                     "master", resolve_window=True,
+                                     background=False, transcript=None)
+        assert exc.value.code == 1
+        launch.assert_not_called()
 
     def test_skips_when_repo_not_on_base_branch(self, tmp_path):
         def rg(*args, **kw):

@@ -272,6 +272,15 @@ def save(data: dict, root: Optional[Path] = None) -> None:
     """
     if root is None:
         root = find_project_root()
+    save_text(dump_text(data), root)
+
+
+def save_text(text: str, root: Path) -> None:
+    """Write *text* as ``root/project.yaml`` the way :func:`save` does.
+
+    For a caller that already holds the exact bytes (e.g. a merge swapping
+    in a pre-merged registry).  The caller is responsible for the lock.
+    """
     path = root / "project.yaml"
     # Make writable if it exists and is read-only
     if path.exists():
@@ -279,7 +288,7 @@ def save(data: dict, root: Optional[Path] = None) -> None:
     # Atomic write: write to temp file, then rename
     tmp = path.with_suffix(".yaml.tmp")
     with open(tmp, "w") as f:
-        f.write(dump_text(data))
+        f.write(text)
         f.flush()
         os.fsync(f.fileno())
     tmp.rename(path)

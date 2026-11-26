@@ -2217,12 +2217,13 @@ def _pull_after_merge(data: dict, pr_entry: dict, repo_dir: str,
     If on a different branch (implying local work in progress), the pull
     is skipped to avoid disrupting the user's working state.
 
-    Dirty files are tolerated — git merge succeeds when they don't overlap
-    with incoming changes.  If they do overlap, the dirty files are stashed,
-    the merge is retried, and the stash is popped afterward.
+    Dirty files are tolerated (:func:`_ff_with_autostash`): pm's registry is
+    merged structurally, other overlapping files are stashed and restored.
 
-    Returns True if the pull completed (or was skipped), False if a merge
-    window was launched (caller should skip ``_finalize_merge``).
+    Returns True if the pull completed (or was skipped), False if it failed
+    (a merge window was launched when *resolve_window*; caller should skip
+    ``_finalize_merge``).  Exits 1 without a window when the registry lock
+    stayed busy: nothing was touched, re-running is the whole fix.
     """
     # Detect current branch — skip pull if not already on base branch
     head_result = git_ops.run_git("rev-parse", "--abbrev-ref", "HEAD",
@@ -2245,6 +2246,13 @@ def _pull_after_merge(data: dict, pr_entry: dict, repo_dir: str,
                         + merge_result.stderr.strip()).strip()
         error_msg = (f"Pull failed in {repo_dir}:\n{error_detail}")
         click.echo(error_msg, err=True)
+        if isinstance(merge_result, _RegistryLockBusy):
+            # Nothing to resolve, and a recovery session told to "stash and
+            # pull" would push the registry through git's text stash.
+            click.echo("Once that pm process is done, run 'pm pr merge "
+                       f"--propagation-only {pr_entry['id']}' to finish.",
+                       err=True)
+            raise SystemExit(1)
         if resolve_window:
             _launch_merge_window(data, pr_entry, error_msg,
                                  background=background, transcript=transcript,
@@ -3227,20 +3235,6 @@ def _registry_root(cwd: Path) -> Path | None:
     return root if (root / "project.yaml").is_file() else None
 
 
-def _write_registry_text(root: Path, text: str) -> None:
-    """Atomically write *text* as ``root/project.yaml`` (like store.save)."""
-    path = root / "project.yaml"
-    if path.exists():
-        path.chmod(path.stat().st_mode | 0o200)
-    tmp = path.with_suffix(".yaml.tmp")
-    with open(tmp, "w") as f:
-        f.write(text)
-        f.flush()
-        os.fsync(f.fileno())
-    tmp.rename(path)
-    path.chmod(0o444)
-
-
 def _tree_entry(cwd: Path, rev: str, rel: str) -> tuple[str, str] | None:
     """``(mode, blob sha)`` of *rel* in *rev*, or None when absent."""
     r = git_ops.run_git("ls-tree", "-z", rev, "--", rel, cwd=cwd,
@@ -3338,7 +3332,7 @@ def _apply_registry(repo: Path, plan: dict) -> bool:
             not _merge_registry_plan(plan, live_text):
         return False
     if plan["new_text"] != live_text:
-        _write_registry_text(root, plan["new_text"])
+        store.save_text(plan["new_text"], root)
     if not _stage_registry(repo, plan["incoming"]):
         _restore_registry(repo, plan)
         return False
@@ -3361,7 +3355,7 @@ def _restore_registry(repo: Path, plan: dict) -> None:
     except OSError:
         current = None
     if current != plan["live_text"]:
-        _write_registry_text(plan["root"], plan["live_text"])
+        store.save_text(plan["live_text"], plan["root"])
     _stage_registry(repo, plan["index"])
 
 
@@ -3542,6 +3536,15 @@ def _unstash_after_merge(cwd: Path, info: dict) -> bool:
             trigger_tui_merge_unlock()
 
 
+class _RegistryLockBusy(subprocess.CompletedProcess):
+    """:func:`_ff_with_autostash` gave up waiting for the registry lock.
+
+    Nothing was touched, so there is nothing to recover: the update just
+    needs re-running once the other pm process (e.g. an open ``pm edit``)
+    lets go.
+    """
+
+
 def _ff_with_autostash(repo_dir: str | Path, target: str,
                        pr_display_id: str = "") -> subprocess.CompletedProcess:
     """``git merge --ff-only target`` in *repo_dir*, keeping local state.
@@ -3556,14 +3559,18 @@ def _ff_with_autostash(repo_dir: str | Path, target: str,
     The registry lock is held across all of it, so a concurrent pm write can
     neither interleave with the update nor save a registry it read before
     over the merged one (#253 S74).  If the lock stays busy the checkout is
-    left untouched and a failed result is returned.  After a successful
-    update with everything restored, leaked auto-stashes are reaped.
+    left untouched and a :class:`_RegistryLockBusy` result is returned.
+    After a successful update with everything restored, leaked auto-stashes
+    are reaped.
     """
     repo_path = Path(repo_dir)
 
     def ff():
-        return git_ops.run_git("merge", "--ff-only", target, cwd=repo_dir,
-                               check=False)
+        # --no-autostash: a user's ``merge.autoStash=true`` would otherwise
+        # text-stash the swapped-in registry, reset it and pop it back over
+        # the incoming one (conflict markers + a leaked stash, rc 0).
+        return git_ops.run_git("merge", "--ff-only", "--no-autostash", target,
+                               cwd=repo_dir, check=False)
 
     restored = True
     plan = _plan_registry(repo_path, target)
@@ -3574,7 +3581,7 @@ def _ff_with_autostash(repo_dir: str | Path, target: str,
                 held.enter_context(store._lock(
                     reg_root, timeout=_MERGE_STASH_LOCK_TIMEOUT))
             except store.StoreLockTimeout as e:
-                return subprocess.CompletedProcess(
+                return _RegistryLockBusy(
                     ["git", "merge", "--ff-only", target], 1, "",
                     f"{e}\npm did not touch {repo_dir}.")
         if plan is not None and not _apply_registry(repo_path, plan):

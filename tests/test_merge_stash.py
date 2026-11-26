@@ -3,9 +3,10 @@
 Using git's *text* stash/pop to carry pm's live registry (``pm/project.yaml``)
 across a fast-forward of the main repo wrote conflict markers into it, leaked
 ``pm: auto-stash for merge`` entries, and raced concurrent pm writers (#253
-S74).  The fix keeps the registry out of the text stash (captured, reverted,
-re-applied structurally with ``store.merge_3way``) and holds the registry lock
-across the whole fast-forward.
+S74).  The fix keeps the registry out of every text stash: it is pre-merged
+with ``store.merge_3way`` and swapped in atomically, its index entry is set to
+the incoming blob so the fast-forward leaves the file alone, and the registry
+lock is held across the whole fast-forward.
 
 Real-git tests drive :func:`pr_mod._ff_with_autostash`, the helper both
 production call sites (``_publish_local`` and ``_pull_after_merge``) use.
@@ -421,6 +422,28 @@ class TestRegistryAcrossFastForward:
         assert (repo / "code.txt").read_text() == "A\nb\nc\nd\nE\n"
         assert _stash_list(repo) == ""
 
+    def test_user_merge_autostash_config_never_text_stashes_registry(
+            self, tmp_path):
+        """A user's ``merge.autoStash=true`` made the fast-forward itself
+        text-stash the swapped-in registry and pop it back over the incoming
+        one: conflict markers and a leaked ``autostash`` entry, rc 0."""
+        repo = _init_repo(tmp_path)
+        pm = _seed_project(repo)
+        _git("config", "merge.autoStash", "true", cwd=repo)
+        _incoming(repo, pm, _add_note("note-in", "x", "2026-02-02T02:02:02"))
+        _edit(pm, lambda d: _pr(d, "pr-001").update(
+            updated_at="2026-03-03T03:03:03"))
+
+        r = pr_mod._ff_with_autostash(repo, "incoming")
+        assert r.returncode == 0, r.stderr
+        assert "autostash" not in r.stdout + r.stderr
+        assert store.find_conflict_markers(
+            (pm / "project.yaml").read_text()) == []
+        d = store.load(pm)
+        assert _pr(d, "pr-001")["updated_at"] == "2026-03-03T03:03:03"
+        assert [n["id"] for n in _pr(d, "pr-001")["notes"]] == ["note-in"]
+        assert _stash_list(repo) == ""
+
     def test_clean_registry_updated_without_a_dirty_tree(self, tmp_path):
         repo = _init_repo(tmp_path)
         pm = _seed_project(repo)
@@ -540,6 +563,7 @@ class TestRegistryLock:
              mock.patch.object(pr_mod, "_MERGE_STASH_LOCK_TIMEOUT", 0.2):
             r = pr_mod._ff_with_autostash(repo, "incoming")
         assert r.returncode != 0
+        assert isinstance(r, pr_mod._RegistryLockBusy)
         assert "Could not acquire lock" in r.stderr
         assert (pm / "project.yaml").read_bytes() == before
         assert _git("rev-parse", "HEAD", cwd=repo).stdout == head
