@@ -99,7 +99,10 @@ R2. **No leaked stash.**
     - Leaked `pm: auto-stash for merge` entries from earlier runs are reaped
       after a successful update, but only those whose changes are already in
       the working tree. Others are listed, never silently dropped. Other
-      stashes (WIP, the user's own) are never touched.
+      stashes (WIP, the user's own) are never touched. Reaping happens only
+      in a repo that holds pm's registry, whose lock serializes every pm
+      auto-stash push and pop. A standalone pm dir's target repo has no such
+      lock, so its leaked stashes are left to the user (review c6a2 i5).
 
 R3. **`store.load` conflict-marker guard.** A registry that contains markers
     raises `ProjectYamlParseError`. The message names the file, the first
@@ -192,7 +195,7 @@ with store._lock(repo/pm, timeout=10):         # busy -> failed result, untouche
             try:     r = git merge --ff-only --no-autostash target
             finally: restored = _unstash_after_merge(repo, info)
     finally: if r failed: _restore_registry(repo, plan)
-    if r ok and restored: _reap_auto_stashes(repo)   # still under the lock
+    if r ok and restored and locked: _reap_auto_stashes(repo)  # under it
 ```
 
 The plan runs before the lock and can take seconds on a large registry
@@ -215,7 +218,9 @@ in-flight auto-stash as an applied leftover. Two windows allow that: after
 the stash is stored but before its files are reverted, and after the pop's
 apply but before its drop. Dropping it there either loses that stash, or
 shifts the positions so the pop's own `stash drop stash@{N}` removes a
-different entry (e.g. the user's WIP).
+different entry (e.g. the user's WIP). A repo without pm's registry (the
+target repo of a standalone pm dir) takes no lock, so nothing serializes
+pm's updates there, and the reaper does not run (review c6a2 i5).
 
 `--no-autostash` overrides a user's `merge.autoStash=true`, which would
 otherwise make git itself text-stash the swapped-in registry, reset it and
@@ -254,7 +259,11 @@ kept, even with a dirty worktree (read-tree case 19). So the fast-forward
 never unlinks or recreates the file. After it, HEAD and the index hold the
 target and the worktree holds target + live state, uncommitted as before.
 `_restore_registry` puts back the exact live bytes and the original index
-entry.
+entry. If that entry cannot be put back (another git process holds
+`index.lock`, which usually failed the fast-forward too), the incoming blob
+stays staged on the old HEAD and a later commit would commit it, so it
+prints the `git update-index --cacheinfo` command that restores it
+(review c6a2 i5).
 
 `_stash_for_merge` (lock held) stashes only ordinary files:
 1. Take the dirty paths (`-z`) and apply `_stashable_paths`. That drops
@@ -354,13 +363,17 @@ lock is a different one.
     no markers, no stash, HEAD == target, nothing staged);
   - finalize gives merged + `merged_at`;
   - other dirty and untracked files are stashed and restored;
-  - a failed fast-forward restores the exact registry bytes and the index;
+  - a fast-forward that fails after the swap and the stash restores the
+    exact registry bytes and the index (the restore is asserted to run:
+    a diverged base plans nothing since i3);
+  - an index entry that cannot be restored (`index.lock` held) is reported
+    with the command that restores it;
   - a stash failure, or an empty stash push, restores the registry and
     never pops the user's own stash;
   - git never rewrites the live registry (same inode across merge and
     stash push/pop);
   - a clean registry is updated without leaving a dirty tree;
-  - a staged registry hunk survives a failed update;
+  - a staged registry hunk survives an update that fails after the swap;
   - a writer that re-dirties the registry never enters the text stash;
   - an uncommitted `pm/` dir never stashes the registry;
   - a user's `merge.autoStash=true` never text-stashes the registry;
@@ -376,7 +389,8 @@ lock is a different one.
 - Locking:
   - the lock is held during every rewriting git step (first fast-forward
     included) and released afterwards;
-  - reaping (`stash list` / `stash drop`) runs under the lock;
+  - reaping (`stash list` / `stash drop`) runs under the lock, and not at
+    all in a repo without pm's registry;
   - a busy lock leaves the checkout untouched, and the post-publish pull
     then exits 1 without a recovery window (`test_pr_enhancements.py`);
   - a concurrent writer thread loses no notes (3 runs).

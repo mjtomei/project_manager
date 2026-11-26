@@ -3355,7 +3355,8 @@ def _apply_registry(repo: Path, plan: dict) -> bool:
     if plan["new_text"] != live_text:
         store.save_text(plan["new_text"], root)
     if not _stage_registry(repo, plan["incoming"]):
-        _restore_registry(repo, plan)
+        # A failed update-index leaves the index as it was.
+        _restore_registry(repo, plan, restage=False)
         return False
     return True
 
@@ -3368,8 +3369,14 @@ def _stage_registry(repo: Path, entry: tuple[str, str]) -> bool:
                            check=False).returncode == 0
 
 
-def _restore_registry(repo: Path, plan: dict) -> None:
-    """Undo :func:`_apply_registry` after a failed update (exact bytes)."""
+def _restore_registry(repo: Path, plan: dict, *, restage: bool = True) -> None:
+    """Undo :func:`_apply_registry` after a failed update (exact bytes).
+
+    If the original index entry cannot be put back (e.g. another git
+    process holds ``index.lock``), the incoming blob stays staged on the old
+    HEAD, and a later ``git commit`` would commit it.  Nothing undoes that
+    silently, so say how to fix it.
+    """
     path = plan["root"] / "project.yaml"
     try:
         current = path.read_text()
@@ -3377,7 +3384,12 @@ def _restore_registry(repo: Path, plan: dict) -> None:
         current = None
     if current != plan["live_text"]:
         store.save_text(plan["live_text"], plan["root"])
-    _stage_registry(repo, plan["index"])
+    if restage and not _stage_registry(repo, plan["index"]):
+        mode, sha = plan["index"]
+        click.echo(f"Warning: could not restore the index entry of "
+                   f"{_REGISTRY_REL}, so the incoming version is still "
+                   f"staged. Restore it with `git update-index --cacheinfo "
+                   f"{mode},{sha},{_REGISTRY_REL}`.", err=True)
 
 
 def _stash_top(cwd: Path) -> str:
@@ -3601,7 +3613,8 @@ def _ff_with_autostash(repo_dir: str | Path, target: str,
     over the merged one (#253 S74).  If the lock stays busy the checkout is
     left untouched and a :class:`_RegistryLockBusy` result is returned.
     After a successful update with everything restored, leaked auto-stashes
-    are reaped (still under the lock).
+    are reaped (still under the lock; so only in a repo that holds pm's
+    registry).
     """
     repo_path = Path(repo_dir)
     # The plan runs before the lock (seconds on a large registry): pin the
@@ -3659,11 +3672,13 @@ def _ff_with_autostash(repo_dir: str | Path, target: str,
                                    f"+ merged changes).")
                 else:
                     _restore_registry(repo_path, plan)
-        if merge_r.returncode == 0 and restored:
+        if merge_r.returncode == 0 and restored and reg_root is not None:
             # Under the lock, like every pm auto-stash push and pop: another
             # update's in-flight auto-stash (stored, files not yet reverted,
             # or applied but not yet dropped) is then never taken for an
-            # applied leftover, nor shifted under its positional drop.
+            # applied leftover, nor shifted under its positional drop.  A
+            # repo without pm's registry (a standalone pm dir) has no such
+            # lock, so its leaked stashes are left to the user.
             _reap_auto_stashes(repo_path)
     return merge_r
 

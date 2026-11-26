@@ -12,6 +12,7 @@ Real-git tests drive :func:`pr_mod._ff_with_autostash`, the helper both
 production call sites (``_publish_local`` and ``_pull_after_merge``) use.
 """
 
+import re
 import subprocess
 import threading
 import time
@@ -79,6 +80,37 @@ def _incoming(repo, pm, fn=None, files=None):
 
 def _stash_list(repo):
     return _git("stash", "list", cwd=repo).stdout
+
+
+def _with_code_overlap(repo, pm, fn):
+    """`incoming` changes the registry (*fn*) and code.txt; code.txt is
+    dirty locally too, so the first fast-forward stops on the overlap."""
+    (repo / "code.txt").write_text("v1\n")
+    _git("add", "code.txt", cwd=repo)
+    _git("commit", "-q", "-m", "code", cwd=repo)
+    _incoming(repo, pm, fn, files={"code.txt": "v2\n"})
+    (repo / "code.txt").write_text("v1 local\n")
+
+
+def _failing_retry():
+    """A run_git that fails the second ``git merge`` (the retry after the
+    stash), i.e. the update fails after the registry was swapped in."""
+    real = pr_mod.git_ops.run_git
+    merges = []
+
+    def run_git(*args, **kw):
+        if args[0] == "merge":
+            merges.append(args)
+            if len(merges) == 2:
+                return subprocess.CompletedProcess(args, 1, "",
+                                                   "simulated failure")
+        return real(*args, **kw)
+    return mock.patch.object(pr_mod.git_ops, "run_git", side_effect=run_git)
+
+
+def _spy_restore():
+    return mock.patch.object(pr_mod, "_restore_registry",
+                             wraps=pr_mod._restore_registry)
 
 
 def _add_note(note_id, text, ts="2026-05-05T05:05:05"):
@@ -306,26 +338,55 @@ class TestRegistryAcrossFastForward:
         assert _stash_list(repo) == ""
 
     def test_failed_ff_restores_exact_local_registry(self, tmp_path):
-        """A fast-forward that still fails after stashing (diverged base)
-        leaves the registry byte-identical and the other files restored."""
+        """A fast-forward that still fails after the merged registry was
+        swapped in and the other files stashed leaves the registry
+        byte-identical, nothing staged and the other files restored."""
         repo = _init_repo(tmp_path)
         pm = _seed_project(repo)
-        _incoming(repo, pm, _add_note("note-in", "x"))
-        # master diverges from incoming: no fast-forward possible.
-        (repo / "other.txt").write_text("m\n")
-        _git("add", "other.txt", cwd=repo)
-        _git("commit", "-q", "-m", "diverge", cwd=repo)
+        _with_code_overlap(repo, pm, _add_note("note-in", "x"))
         _edit(pm, lambda d: _pr(d, "pr-001").update(updated_at="local"))
-        (repo / "other.txt").write_text("m\nlocal\n")
         before = (pm / "project.yaml").read_bytes()
         head = _git("rev-parse", "HEAD", cwd=repo).stdout
 
-        r = pr_mod._ff_with_autostash(repo, "incoming")
+        with _failing_retry(), _spy_restore() as restore:
+            r = pr_mod._ff_with_autostash(repo, "incoming")
         assert r.returncode != 0
+        restore.assert_called_once()          # the swap really was undone
         assert (pm / "project.yaml").read_bytes() == before
-        assert (repo / "other.txt").read_text() == "m\nlocal\n"
+        assert (repo / "code.txt").read_text() == "v1 local\n"
         assert _git("rev-parse", "HEAD", cwd=repo).stdout == head
         assert _stash_list(repo) == ""
+        assert _git("diff", "--cached", "--name-only", cwd=repo).stdout == ""
+
+    def test_unrestorable_index_entry_is_reported(self, tmp_path, capsys):
+        """Another git process holding index.lock fails the fast-forward and
+        the index restore alike.  The incoming blob then stays staged on the
+        old HEAD (a later commit would commit it), so the warning gives the
+        command that puts the original entry back."""
+        repo = _init_repo(tmp_path)
+        pm = _seed_project(repo)
+        _incoming(repo, pm, _add_note("note-in", "x"))
+        _edit(pm, lambda d: _pr(d, "pr-001").update(updated_at="local"))
+        before = (pm / "project.yaml").read_bytes()
+        index_lock = repo / ".git" / "index.lock"
+        real_apply = pr_mod._apply_registry
+
+        def apply_then_lock(*args):
+            ok = real_apply(*args)
+            index_lock.write_text("")
+            return ok
+
+        with mock.patch.object(pr_mod, "_apply_registry", apply_then_lock):
+            r = pr_mod._ff_with_autostash(repo, "incoming")
+        index_lock.unlink()
+        assert r.returncode != 0
+        assert (pm / "project.yaml").read_bytes() == before
+        staged = _git("diff", "--cached", "--name-only", cwd=repo).stdout
+        assert staged == "pm/project.yaml\n"
+        err = capsys.readouterr().err
+        cmd = re.search(r"`git (update-index --cacheinfo [^`]+)`", err)
+        assert cmd, err
+        assert _git(*cmd.group(1).split(), cwd=repo).returncode == 0
         assert _git("diff", "--cached", "--name-only", cwd=repo).stdout == ""
 
     def test_stash_failure_restores_registry(self, tmp_path):
@@ -503,23 +564,26 @@ class TestRegistryAcrossFastForward:
             "show", "incoming:pm/project.yaml", cwd=repo).stdout
 
     def test_failed_update_keeps_a_staged_registry_hunk(self, tmp_path):
+        """The swap stages the incoming blob and the stash is taken against
+        HEAD's entry; a failed update puts the user's staged hunk back."""
         repo = _init_repo(tmp_path)
         pm = _seed_project(repo)
-        _incoming(repo, pm, _add_note("note-in", "x"))
-        (repo / "other.txt").write_text("m\n")            # diverge
-        _git("add", "other.txt", cwd=repo)
-        _git("commit", "-q", "-m", "diverge", cwd=repo)
+        _with_code_overlap(repo, pm, _add_note("note-in", "x"))
         _edit(pm, lambda d: _pr(d, "pr-002").update(title="staged"))
         _git("add", "pm/project.yaml", cwd=repo)
         _edit(pm, lambda d: _pr(d, "pr-001").update(updated_at="unstaged"))
         staged = _git("ls-files", "-s", "pm/project.yaml", cwd=repo).stdout
         before = (pm / "project.yaml").read_bytes()
 
-        r = pr_mod._ff_with_autostash(repo, "incoming")
+        with _failing_retry(), _spy_restore() as restore:
+            r = pr_mod._ff_with_autostash(repo, "incoming")
         assert r.returncode != 0
+        restore.assert_called_once()
         assert _git("ls-files", "-s", "pm/project.yaml",
                     cwd=repo).stdout == staged
         assert (pm / "project.yaml").read_bytes() == before
+        assert (repo / "code.txt").read_text() == "v1 local\n"
+        assert _stash_list(repo) == ""
 
     def test_writer_redirty_never_enters_text_stash(self, tmp_path,
                                                      monkeypatch):
@@ -766,6 +830,24 @@ class TestRegistryLock:
         assert (("stash", "drop"), "held") in probes, probes
         assert all(state == "held" for _, state in probes), probes
         assert _stash_list(repo) == ""
+
+    def test_no_reaping_without_the_registry_lock(self, tmp_path):
+        """A repo without pm's registry (a standalone pm dir) has no lock
+        serializing pm's auto-stash pushes and pops, so the reaper could
+        race another update's in-flight auto-stash there: it does not run,
+        and a leaked one stays for the user."""
+        repo = _init_repo(tmp_path)
+        (repo / "a.txt").write_text("base\n")
+        _git("add", "a.txt", cwd=repo)
+        _git("commit", "-q", "-m", "a", cwd=repo)
+        (repo / "a.txt").write_text("applied\n")
+        _git("stash", "push", "-m", "pm: auto-stash for merge", cwd=repo)
+        (repo / "a.txt").write_text("applied\n")
+        _incoming(repo, None)                  # commits a.txt = "applied"
+
+        assert pr_mod._ff_with_autostash(repo, "incoming").returncode == 0
+        assert (repo / "a.txt").read_text() == "applied\n"    # applied...
+        assert "pm: auto-stash for merge" in _stash_list(repo)  # ...kept
 
     def test_busy_lock_leaves_checkout_untouched(self, tmp_path, capsys):
         repo = _init_repo(tmp_path)
