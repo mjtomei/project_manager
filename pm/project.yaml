@@ -57039,3 +57039,28 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-5dfc63b
+  plan: bugs
+  title: 'Tests: CliRunner ''-C'' leaves cli.helpers._project_override set for later
+    tests'
+  branch: pm/pr-5dfc63b-tests-clirunner-c-leaves-cli-helpers-project-overr
+  status: pending
+  depends_on: []
+  description: 'tests/test_pr_notes.py and tests/test_prompt_bounds.py invoke cli
+    with [''-C'', str(tmp_root), ...]; the cli group callback calls set_project_override(),
+    a module global in pm_core/cli/helpers.py, and nothing restores it, so every later
+    test in the session that calls state_root() without -C resolves to that (deleted)
+    tmp root. Repro: run tests/test_pr_notes.py then a test asserting helpers._project_override
+    is None -> fails. Suite passes today only because later tests patch state_root
+    or pass -C themselves (order-dependent). Fix: monkeypatch.setattr(helpers, ''_project_override'',
+    None) in those tests'' fixtures (as tests/test_prompt_gen.py''s pm_root does since
+    pr-6c0ee2d review-loop 322e i3), or an autouse conftest fixture.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-26T16:12:14.921325+00:00'
+  updated_at: '2026-11-26T16:12:14.921325+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []

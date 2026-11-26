@@ -12,9 +12,9 @@ from unittest.mock import patch
 import pytest
 from click.testing import CliRunner
 
-from pm_core import notes, prompt_gen, store
-from pm_core.architecture_prompts import architecture_section
-from pm_core.cli import cli
+from pm_core import architecture_prompts, notes, prompt_gen, store
+from pm_core.architecture_prompts import PROMPT_TYPES, architecture_section
+from pm_core.cli import cli, helpers
 from pm_core.prompt_bounds import ARCHITECTURE_BUDGET, prompt_bytes
 
 
@@ -62,11 +62,15 @@ def pm_root(tmp_path, monkeypatch):
     """A throwaway standalone pm root the prompt builders resolve to.
 
     Without this the builders would read the real repo's ``pm/`` — and its
-    ``architecture.md`` once one is committed.
+    ``architecture.md`` once one is committed.  The plan CLI tests pass
+    ``-C``, which sets a module-global override; registering it with
+    monkeypatch restores it afterwards so later tests don't inherit a
+    deleted tmp root.
     """
     root = tmp_path / "pm"
     root.mkdir()
     monkeypatch.setattr(store, "find_project_root", lambda *a, **k: root)
+    monkeypatch.setattr(helpers, "_project_override", None)
     return root
 
 
@@ -208,6 +212,16 @@ class TestArchitectureSection:
         _write_arch(tmp_path)
         block = architecture_section(tmp_path, "impl")
         assert "pm pr note add <pr-id> 'architecture:" in block
+
+    def test_every_role_has_guidance_and_debt_addendum(self, tmp_path):
+        # PROMPT_TYPES is derived from the guidance mapping; a new role must
+        # also state how the debt rule applies to it (even if only "").
+        assert set(PROMPT_TYPES) == {"plan", "impl", "review"}
+        assert (set(architecture_prompts._STRUCTURAL_DEBT_ROLE_ADDENDUM)
+                == set(PROMPT_TYPES))
+        _write_arch(tmp_path)
+        for role in PROMPT_TYPES:
+            _assert_aware(architecture_section(tmp_path, role))
 
     def test_unknown_prompt_type_raises_even_without_document(self, tmp_path):
         with pytest.raises(ValueError):

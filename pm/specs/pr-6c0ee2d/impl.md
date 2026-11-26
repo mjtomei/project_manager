@@ -31,7 +31,13 @@ refactor PR depend on it).
   module (review-loop 322e i1). The plan's DP7 row lists
   `architecture_prompts` so the baseline seeding (pr-75abaff) maps it
   (review-loop 322e i2):
-  - `PROMPT_TYPES = ("plan", "impl", "review")`
+  - `PROMPT_TYPES = tuple(_ROLE_GUIDANCE)` → `("plan", "impl", "review")`.
+    Role text lives in two mappings keyed by role: `_ROLE_GUIDANCE` and
+    `_STRUCTURAL_DEBT_ROLE_ADDENDUM` (text appended after the debt rule).
+    Deriving `PROMPT_TYPES` from the guidance mapping means a new role (the
+    sign-off PR pr-4bff69e is the likely first) can't silently fall through
+    to another role's text; a test asserts both mappings cover the same roles
+    (review-loop 322e i3).
   - `architecture_section(root, prompt_type, *, pr_id=None,
     max_bytes=ARCHITECTURE_BUDGET) -> str`: the prompt block (see R2).
     Returns `""` when there's no document. `pr_id` fills the impl guidance's
@@ -82,7 +88,7 @@ another); note when a change legitimately introduces a new FR/DP.
   DP, and changes that blur two DPs together. A new upward edge →
   **NEEDS_WORK** (stated in the review guidance); an orphan workaround
   comment (no improvements PR id) → **NEEDS_WORK** (stated once, in the
-  debt rule's review lead). A contested FR/DP boundary change that needs
+  debt rule's review addendum). A contested FR/DP boundary change that needs
   human judgment → **INPUT_REQUIRED**. Check that a legitimately new FR/DP
   was noted.
 
@@ -135,7 +141,10 @@ follow it themselves when fixing in review-loop mode.
 ### R6 — Tests
 New `tests/test_prompt_gen.py` (all hermetic: `store.find_project_root`
 monkeypatched to a tmp `pm/` dir; plan CLI driven with `-C <tmp root>` and
-`find_claude` patched to `None` so the prompt is printed):
+`find_claude` patched to `None` so the prompt is printed; the fixture also
+registers `cli.helpers._project_override` with monkeypatch, because `-C`
+sets that module global and it would otherwise leak a deleted tmp root into
+later tests — review-loop 322e i3):
 - `architecture_section`: absent → `""`; whitespace-only → `""`; unreadable
   (a directory at that path) → `""`; small doc inlined verbatim with no
   truncation marker; over budget → excerpt bounded (block ≤ budget + static

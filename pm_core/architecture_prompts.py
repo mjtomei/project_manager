@@ -18,15 +18,11 @@ from pm_core import notes
 from pm_core.prompt_bounds import ARCHITECTURE_BUDGET, bounded_text
 
 
-#: Roles :func:`architecture_section` has guidance for.  Bug-fix PRs use the
-#: impl/review blocks.
-PROMPT_TYPES = ("plan", "impl", "review")
-
-
-def _role_guidance(prompt_type: str, pointer: str, pr_id: str | None) -> str:
-    this_pr = pr_id or "<pr-id>"
-    if prompt_type == "plan":
-        return f"""\
+#: Role-specific guidance, keyed by prompt type.  Formatted with
+#: ``pointer`` (how the session names the document) and ``this_pr`` (the PR
+#: id, or a ``<pr-id>`` placeholder).
+_ROLE_GUIDANCE: dict[str, str] = {
+    "plan": """\
 While planning:
 - Map each proposed PR to the DP(s) it changes, and name them in the PR's
   description when the files don't make it obvious.
@@ -34,9 +30,8 @@ While planning:
   upward coupling or a hidden shared-state cycle.
 - If the plan legitimately introduces a new FR/DP, or moves a module from one
   DP to another, say so explicitly in the plan file — what it is, where it
-  sits in the matrix order, and why — so `{pointer}` can be updated."""
-    if prompt_type == "impl":
-        return f"""\
+  sits in the matrix order, and why — so `{pointer}` can be updated.""",
+    "impl": """\
 While implementing:
 - Before designing, find the DP(s) this PR's task touches and keep the
   change inside them.
@@ -44,8 +39,8 @@ While implementing:
   DP to another, record it:
   `pm pr note add {this_pr} 'architecture: <new FR/DP or remap, where it sits in the matrix order, why>'`
   Edit `{pointer}` itself only when this PR's task asks you to —
-  otherwise the note is how the change reaches it."""
-    return f"""\
+  otherwise the note is how the change reaches it.""",
+    "review": """\
 While reviewing, treat the document as the baseline and check the diff for:
 - New upward `*` coupling — a module in a lower-order DP importing or calling
   into a higher-order one, including a lazy import added inside a function to
@@ -57,10 +52,13 @@ While reviewing, treat the document as the baseline and check the diff for:
   note, or in the PR's own edit to `{pointer}`).
 
 New upward coupling is **NEEDS_WORK**. A contested FR/DP boundary change
-that needs human judgment is **INPUT_REQUIRED**."""
+that needs human judgment is **INPUT_REQUIRED**.""",
+}
 
 
-_STRUCTURAL_DEBT_LEAD: dict[str, str] = {
+#: Role-specific text appended after the structural-debt rule.  Every role in
+#: ``_ROLE_GUIDANCE`` needs an entry (``""`` when the rule stands alone).
+_STRUCTURAL_DEBT_ROLE_ADDENDUM: dict[str, str] = {
     "plan": """
 This applies to plans too: when a plan accepts a workaround, or leaves
 coupling debt in place as out of scope, file or append the improvements PR as
@@ -73,6 +71,12 @@ improvements PR id is **NEEDS_WORK**. In review-loop mode, follow the rule
 yourself for any workaround you add while fixing.
 """,
 }
+
+
+#: Roles :func:`architecture_section` has guidance for — one source of truth,
+#: so a new role (e.g. sign-off) can't silently fall through to another
+#: role's text.  Bug-fix PRs use the impl/review blocks.
+PROMPT_TYPES = tuple(_ROLE_GUIDANCE)
 
 
 _STRUCTURAL_DEBT_RULE = """
@@ -133,8 +137,9 @@ def architecture_section(root: Path, prompt_type: str, *,
     excerpt = bounded_text(content, max_bytes=max_bytes,
                            pointer=f"`{pointer}`",
                            label="architecture document")
-    guidance = _role_guidance(prompt_type, pointer, pr_id)
-    rule = _STRUCTURAL_DEBT_RULE + _STRUCTURAL_DEBT_LEAD[prompt_type]
+    guidance = _ROLE_GUIDANCE[prompt_type].format(
+        pointer=pointer, this_pr=pr_id or "<pr-id>")
+    rule = _STRUCTURAL_DEBT_RULE + _STRUCTURAL_DEBT_ROLE_ADDENDUM[prompt_type]
     return f"""
 ## Project Architecture (`{pointer}`)
 
