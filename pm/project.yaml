@@ -31077,7 +31077,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/222
   gh_pr_number: 222
   created_at: '2026-05-21T04:06:05.061620+00:00'
-  updated_at: '2026-11-26T18:50:32.887929+00:00'
+  updated_at: '2026-11-26T19:21:04.850567+00:00'
   started_at: '2026-05-25T02:58:20.169677+00:00'
   reviewed_at: '2026-05-25T03:13:02.415469+00:00'
   merged_at: null
@@ -31455,6 +31455,21 @@ prs:
       skipped; S74 harness at 8ace9106 PASS 4/4 + dirty 3/3.'
     created_at: '2026-11-26T18:50:32Z'
     last_edited: '2026-11-26T18:50:32Z'
+  - id: note-5169f9f
+    text: 'Review loop c6a2 i6 (1836b950): NEEDS_WORK, fixed + pushed. (1) _dirty_file_paths
+      now passes -unormal: a user status.showUntrackedFiles=no hid an untracked file
+      that blocks the fast-forward, so the pathspec auto-stash never took it and the
+      update failed (master unrestricted stash push took it). (2) _stash_already_applied
+      lists the stash tracked paths with --no-renames: with rename detection only
+      a renamed file new path was checked, so a stashed rename counted as applied
+      while the old path still existed. (3) Incidental, R5: pm project set (cli/project.py
+      _set_project_bool) did an unlocked load + save, which could write a registry
+      loaded before a merge back over the merged one; it now uses store.locked_update.
+      +4 tests (5 cases), all fail on 64e2fea2. Spec 2c/5 updated. Evidence /pm-captures/review-c6a2-i6:
+      full suite 5728 passed / 1 skipped; S74 harness at 1836b950 PASS 4/4 + dirty
+      3/3.'
+    created_at: '2026-11-26T19:21:04Z'
+    last_edited: '2026-11-26T19:21:04Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-ca6981c-bug-pm-merge-s-git-stash-pop-corrupt-ac115969
 - id: pr-c41f029
   plan: bugs
