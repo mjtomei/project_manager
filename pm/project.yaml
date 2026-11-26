@@ -31077,7 +31077,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/222
   gh_pr_number: 222
   created_at: '2026-05-21T04:06:05.061620+00:00'
-  updated_at: '2026-11-26T17:10:43.602932+00:00'
+  updated_at: '2026-11-26T17:51:33.641739+00:00'
   started_at: '2026-05-25T02:58:20.169677+00:00'
   reviewed_at: '2026-05-25T03:13:02.415469+00:00'
   merged_at: null
@@ -31397,6 +31397,27 @@ prs:
       not the registry lock.'
     created_at: '2026-11-26T17:10:43Z'
     last_edited: '2026-11-26T17:10:43Z'
+  - id: note-f4e607b
+    text: 'Review loop c6a2 i3 (e5507843): NEEDS_WORK, fixed + pushed. BLOCKING, fixed:
+      _plan_registry pre-merged the live registry toward the target without checking
+      the update is a fast-forward. When HEAD already contains the target, `git merge
+      --ff-only` is a no-op ("Already up to date", rc 0), but the plan still reverted
+      every field the newer HEAD had changed in the live registry, and it staged the
+      target''s older blob (MM pm/project.yaml, a staged reversion). Live path: the
+      post-publish pull runs outside the publish lock, so update A pins origin/master=M1
+      and plans, B fast-forwards to M2 first, and A re-plans under the lock with base
+      M2 and reverts M2''s committed registry changes; also any pull to a commit HEAD
+      already contains. Fix: plan only when HEAD is an ancestor of the target (integration.is_ancestor);
+      otherwise git leaves the file alone. +2 regression tests (test_target_already_in_head_leaves_registry_alone,
+      test_other_update_moving_head_past_the_target_reverts_nothing), both fail on
+      10de2ad1. Spec 2c/4/5 updated. Evidence /pm-captures/review-c6a2-i3: S74 harness
+      PASS 4/4 + dirty 3/3; full suite 5717 passed / 1 skipped (12 test_markdown_render
+      failures = missing markdown dep in the venv, 13/13 on rerun with it). Considered,
+      not changed: the reaper re-parses old unapplied pre-fix auto-stashes'' registries
+      under the lock on every merge (about 0.35 s per parse with the C loader), the
+      same order as any pm write.'
+    created_at: '2026-11-26T17:51:33Z'
+    last_edited: '2026-11-26T17:51:33Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-ca6981c-bug-pm-merge-s-git-stash-pop-corrupt-ac115969
 - id: pr-c41f029
   plan: bugs
