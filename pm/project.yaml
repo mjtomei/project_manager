@@ -56440,3 +56440,61 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-e2cd753
+  plan: bugs
+  title: 'Bug: plan post-step background review (review_step) is killed at CLI exit,
+    so no review file or fix pane ever appears'
+  branch: pm/pr-e2cd753-bug-plan-post-step-background-review-review-step-i
+  status: pending
+  depends_on: []
+  description: 'pm_core/plans/review.py::review_step runs the check via claude_launcher.launch_claude_print_background,
+    which starts a daemon=True thread. The CLI commands that call it (pm plan add/review/deps/load/import)
+    return right after, so the interpreter exits and kills the thread before `claude
+    -p` returns. Result: no pm/reviews/<step>-<ts>.txt is written, no PASS/NEEDS_FIX
+    background pane appears, and `pm plan fixes` stays empty. Repro (2026-11-26, observed
+    on the pr-30888b1 branch; master has the same daemon thread in launch_claude_print_background):
+    throwaway project, pm init --backend local --no-import; put a stand-in `claude`
+    on PATH that exits 0 immediately for interactive runs and prints "NEEDS_FIX: missing"
+    for `-p`; run `pm plan add X` -> prints "Reviewing results... (background)" then
+    exits; pm/reviews never exists. Fix options: run the check as a detached subprocess
+    (e.g. a `pm plan _check` child started with start_new_session) instead of an in-process
+    daemon thread, or join the thread before exit. Choosing between them is a UX call:
+    joining would keep the plan pane open until the check finishes.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-26T16:46:49.642436+00:00'
+  updated_at: '2026-11-26T16:47:05.685746+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-2b9d002
+  plan: bugs
+  title: 'Bug: concurrent pm plan add with the same name registers duplicate plan
+    entries sharing one id and plan file'
+  branch: pm/pr-2b9d002-bug-concurrent-pm-plan-add-with-the-same-name-regi
+  status: pending
+  depends_on: []
+  description: 'pm_core/cli/plan.py::plan_add generates the plan id from a project.yaml
+    snapshot taken outside the lock (store.generate_plan_id(name, existing_ids)),
+    writes plans/<id>.md, then appends the entry under store.locked_update without
+    re-checking the id. Repro (2026-11-26, pr-30888b1 branch; master has the same
+    id/lock ordering): throwaway project, pm init --backend local --no-import; run
+    three `pm plan add "Same"` in parallel with no claude on PATH -> all three print
+    "Created plan plan-2a98b1d: Same" and `pm plan list` shows plan-2a98b1d three
+    times, all pointing at one plan file. Later per-plan actions (load/review/edit)
+    then resolve an ambiguous id. Fix sketch: pick the id inside the locked_update
+    apply (re-derive against the locked data, extend on collision), then write the
+    plan file, and echo or launch with the final id. The TUI precomputes the id for
+    its per-plan window name, so a collision-extended id must still be reachable from
+    that window.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-26T16:49:27.176356+00:00'
+  updated_at: '2026-11-26T16:49:27.176356+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
