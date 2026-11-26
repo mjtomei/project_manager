@@ -31077,7 +31077,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/222
   gh_pr_number: 222
   created_at: '2026-05-21T04:06:05.061620+00:00'
-  updated_at: '2026-11-26T21:47:39.410692+00:00'
+  updated_at: '2026-11-26T22:10:43.769663+00:00'
   started_at: '2026-05-25T02:58:20.169677+00:00'
   reviewed_at: '2026-05-25T03:13:02.415469+00:00'
   merged_at: null
@@ -31557,6 +31557,21 @@ prs:
       pre-fix-570453b3.txt (1 fail), full suite at ec68e34e 5743 passed / 1 skipped.'
     created_at: '2026-11-26T21:47:39Z'
     last_edited: '2026-11-26T21:47:39Z'
+  - id: note-0b5323b
+    text: 'Review loop c6a2 i12 (836a4406): NEEDS_WORK, fixed + pushed. When an auto-stash
+      pop conflicted on a nested pm registry and on another file, _resolve_project_yaml_pop
+      merged the registry and kept the stash for the other file. The warning still
+      listed the unmerged paths from before the resolver ran, so it said the just-merged
+      registry "now holds conflict markers" right after "Merged sub/pm/project.yaml".
+      _restore_merge_stash now re-reads the unmerged paths after the resolver. +1
+      test (test_partly_resolved_pop_names_only_what_still_conflicts), fails on 6325f7dc.
+      Spec 2c/5 updated. Evidence /pm-captures/review-c6a2-i12: probe pre/post, pre-fix-6325f7dc.txt;
+      full suite at 836a4406 5744 passed / 1 skipped. Considered, not changed: master
+      resolver full `git reset -q` after a fully resolved nested-registry pop unstages
+      pre-existing staged deletions/renames (nested registries only, pre-existing
+      master code).'
+    created_at: '2026-11-26T22:10:43Z'
+    last_edited: '2026-11-26T22:10:43Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-ca6981c-bug-pm-merge-s-git-stash-pop-corrupt-ac115969
 - id: pr-c41f029
   plan: bugs
