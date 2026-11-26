@@ -562,7 +562,13 @@ def plan_load(plan_id: str | None):
     prs = parse_plan_prs(plan_content)
 
     if not prs:
-        click.echo("No PRs found in plan file. The plan file needs a ## PRs section — re-run 'pm plan add' or edit the plan file directly.", err=True)
+        # Re-running `pm plan add` would mint a new plan id and orphan this
+        # draft, so point at the review session, which proposes the missing
+        # breakdown for this same plan.
+        click.echo(
+            f"No PRs found in plan file. Run 'pm plan review {plan_id}' "
+            "(key c in the plans view) to propose a ## PRs section, or add "
+            "one to the plan file directly.", err=True)
         raise SystemExit(1)
 
     click.echo(f"Found {len(prs)} PRs in plan file:")

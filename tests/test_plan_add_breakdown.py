@@ -151,6 +151,19 @@ class TestReviewCoversMissingBreakdown:
         assert "start by proposing a PR breakdown" in result.output
 
 
+    def test_load_without_prs_points_at_review(self, tmp_path):
+        """`plan load` on a plan with no ## PRs names the recovery path that
+        keeps the plan id (`plan review`), not `plan add`, which mints a new
+        plan and orphans the draft."""
+        root = _state(tmp_path, plan_body="# Plan\n\nJust a draft.\n")
+        result = CliRunner().invoke(
+            cli, ["-C", str(root), "plan", "load", "pl-001"])
+        assert result.exit_code != 0
+        assert "No PRs found in plan file" in result.output
+        assert "pm plan review pl-001" in result.output
+        assert "plan add" not in result.output
+
+
 class TestGuideHasNoBreakdownStep:
     def test_step_description(self):
         desc = guide.STEP_DESCRIPTIONS["has_plan_draft"]

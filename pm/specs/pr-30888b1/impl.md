@@ -83,7 +83,7 @@ key. `pm plan breakdown` then fails with Click's standard
   - The workflow-lifecycle numbering is already updated by the merge.
 - `pm_core/prompt_gen.py`: remove `pm plan breakdown` from the `tui_section` forbidden list (already done by the merge) and from the watcher-explainer forbidden list (new on master).
 - `pm_core/tui/pane_ops.py` assistant prompt: already lists `a`/`c`/`l` after the merge.
-- `pm_core/cli/plan.py`: the `plan load` "No PRs found" error no longer names `pm plan breakdown`. The `plan fix` docstring and the `_MANUAL_TESTING_GUIDANCE` comment drop "breakdown". (The merge already applied all three.)
+- `pm_core/cli/plan.py`: the `plan load` "No PRs found" error no longer names `pm plan breakdown`. It points at `pm plan review ⟦plan_id⟧` (key `c`), the recovery path from Ambiguity 4, and does not suggest re-running `pm plan add`, which would mint a new plan id. The `plan fix` docstring and the `_MANUAL_TESTING_GUIDANCE` comment drop "breakdown".
 - `pm_core/fake_claude.py`: drop "breakdown" from the `plan` session-type comment.
 
 ### R6. Tests
@@ -98,6 +98,7 @@ key. `pm plan breakdown` then fails with Click's standard
   - the existing-PR listing appears only when PRs exist, and is bounded with the `pm pr list` pointer;
   - `REVIEW_PROMPTS["plan-add"]` requires `## PRs`;
   - the pre-load review prompt contains the missing-PRs instruction;
+  - `plan load` on a plan with no `## PRs` points at `pm plan review ⟦plan_id⟧`, not `plan add`;
   - the guide setup prompt and `STEP_DESCRIPTIONS` have no `w`/breakdown step;
   - `handle_plan_action(app, "breakdown", …)` launches nothing;
   - a source scan of `pm_core/**/*.py` finds no `plan breakdown`, `plan-breakdown`, `plan:breakdown` or "Break plan into PRs".
@@ -116,7 +117,7 @@ key. `pm plan breakdown` then fails with Click's standard
 2. **Should `has_plan_draft` be renamed?** No. Only its user-facing description changes. The state name is used by `guide_progress.py`, the step-resolution logic and the tests, and its meaning (a plan exists without a `## PRs` section) still holds.
 3. **Should a hidden deprecated `breakdown` alias remain?** No. The task says to remove the command. Click's "No such command" error is clear, and the help text points at `plan add` and `plan review`.
 4. **Recovery path for a plan without PRs.** Use `plan review` (R4) rather than letting `plan add` resume an existing plan. `plan add` always mints a new plan id, so re-running it would leave a stale draft entry. The review prompt is the owner's stated backstop ("we have the review prompt to catch issues").
-5. **Coordination with pr-6c0ee2d** (architecture foundation, `plan-axiomatic-design`, not yet started). That PR adds an architecture-awareness block to the plan prompts in `cli/plan.py`. Its PR 2 seeds `pm/architecture.md` inside `plan add`, and the plan lists pr-30888b1 as its external dependency. Resolution: keep the plan add prompt's tail as `…{tui_section}{notes_block}` so an architecture block can sit next to `notes_block`. Tell pr-6c0ee2d that `plan breakdown` is gone: architecture awareness goes into `plan add`, `plan review` and `plan import` only, and greenfield seeding belongs in `plan add`. pr-6c0ee2d is not in this workdir's registry (it exists only on its own branch and in the host registry), so `pm pr note add pr-6c0ee2d` cannot reach it from the impl container. The handoff is recorded as a pr-30888b1 note, and the owner relays it to pr-6c0ee2d.
+5. **Coordination with pr-6c0ee2d** (architecture foundation, `plan-axiomatic-design`; impl commit ee67fb0b pushed 2026-11-26). That PR adds an architecture-awareness block to the plan prompts in `cli/plan.py`. Its PR 2 seeds `pm/architecture.md` inside `plan add`, and the plan lists pr-30888b1 as its external dependency. Resolution: keep the plan add prompt's tail as `…{tui_section}{notes_block}` so an architecture block can sit next to `notes_block`. Tell pr-6c0ee2d that `plan breakdown` is gone: architecture awareness goes into `plan add`, `plan review` and `plan import` only, and greenfield seeding belongs in `plan add`. pr-6c0ee2d is not in this workdir's registry (it exists only on its own branch and in the host registry), so `pm pr note add pr-6c0ee2d` cannot reach it from the impl container. The handoff is recorded as a pr-30888b1 note, and the owner relays it to pr-6c0ee2d. Merge preview of ee67fb0b against this branch (review 4efb i1): `plan.py` conflicts only on the `plan_breakdown` block (resolve by dropping it; `plan add` picks up `arch_block` cleanly), and `tests/test_prompt_gen.py` merges cleanly but its `_PLAN_COMMANDS["breakdown"]` case then fails: `TestPlanPrompts::test_includes_architecture_when_present[breakdown]` and `test_clean_when_absent[breakdown]` both exit with `No such command 'breakdown'` (trial merge: 2 failed, 10 passed). Whichever PR merges second must also drop that case.
 
 No **[UNRESOLVED]** items.
 
