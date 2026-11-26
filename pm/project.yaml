@@ -22968,7 +22968,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/200
   gh_pr_number: 200
   created_at: '2026-05-04T19:50:22.167828+00:00'
-  updated_at: '2026-05-25T00:42:58.086578+00:00'
+  updated_at: '2026-11-26T17:10:48.568568+00:00'
   started_at: '2026-05-04T19:53:30.713246+00:00'
   reviewed_at: '2026-05-05T17:29:39.794582+00:00'
   merged_at: null
@@ -22987,6 +22987,20 @@ prs:
       completes AND on review/qa/merge transitions, not just the start-gate row.'
     created_at: '2026-05-25T00:42:57Z'
     last_edited: '2026-05-25T00:42:57Z'
+  - id: note-c42e0ca
+    text: 'From pr-ca6981c (#222) review c6a2 i2: pm merge''s main-repo update (_ff_with_autostash,
+      pm_core/cli/pr.py) holds pm/project.yaml.lock (store._lock on the pm root) across
+      the whole fast-forward. During that time it stages the target''s pm/project.yaml
+      blob in the REAL index (update-index --cacheinfo) and relies on HEAD and that
+      index entry not changing under the lock. store_commit (this PR) does update-ref
+      refs/heads/<base> plus update-index --cacheinfo pm/project.yaml on the real
+      index (and the rollback after a failed push) under its own yaml-commit lock
+      only. It can therefore interleave with a merge: it would overwrite the staged
+      entry or move the checked-out base mid-update (the update then fails, or the
+      PR returns to sign-off). Take store._lock(<pm root>) around those local ref/index
+      writes as well (never across the git push), once #222 is on master.'
+    created_at: '2026-11-26T17:10:48Z'
+    last_edited: '2026-11-26T17:10:48Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-f74988c-improvement-pm-pr-start-auto-commits-203ee4e9
 - id: pr-23d97f8
   plan: null
@@ -31063,7 +31077,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/222
   gh_pr_number: 222
   created_at: '2026-05-21T04:06:05.061620+00:00'
-  updated_at: '2026-11-26T16:40:49.548713+00:00'
+  updated_at: '2026-11-26T17:10:43.602932+00:00'
   started_at: '2026-05-25T02:58:20.169677+00:00'
   reviewed_at: '2026-05-25T03:13:02.415469+00:00'
   merged_at: null
@@ -31363,6 +31377,26 @@ prs:
       / 1 skipped.'
     created_at: '2026-11-26T16:40:49Z'
     last_edited: '2026-11-26T16:40:49Z'
+  - id: note-a42a0a0
+    text: 'Review loop c6a2 i2 (10de2ad1): NEEDS_WORK, fixed + pushed. The registry
+      plan runs before the lock (seconds on a big registry; dump alone ~3.7 s here),
+      so three concurrency gaps were fixed in _ff_with_autostash: (1) the target is
+      pinned to one commit up front, because a concurrent fetch moving origin/<base>
+      made the ff go to a commit whose registry the index was not staged with (spurious
+      "would be overwritten: pm/project.yaml"); (2) a re-plan under the lock when
+      another update moved HEAD meanwhile, because a stale HEAD entry made the auto-stash
+      carry a registry change, so git refused its pop and the user files stayed stashed;
+      (3) _reap_auto_stashes now runs under the registry lock, because outside it
+      it could drop another update''s in-flight auto-stash or shift its positional
+      drop onto the user''s WIP; the live registry is now loaded lazily and checked
+      last. Minor: unmerged paths are read with -z; the store.load marker message
+      gives the full path and warns that a checkout discards uncommitted pm state.
+      3 new regression tests (6 tests fail on 5f0c0b6e code). Evidence /pm-captures/review-c6a2-i2:
+      S74 harness at 10de2ad1 PASS 4/4 + dirty 3/3. Cross-PR note on pr-f74988c (#200):
+      its store_commit writes the main repo base ref + real index under its own lock,
+      not the registry lock.'
+    created_at: '2026-11-26T17:10:43Z'
+    last_edited: '2026-11-26T17:10:43Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-ca6981c-bug-pm-merge-s-git-stash-pop-corrupt-ac115969
 - id: pr-c41f029
   plan: bugs
