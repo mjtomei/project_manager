@@ -33,7 +33,7 @@ def _bug_fix_flow_block(pr: dict, has_architecture: bool = False) -> str:
     fix_arch = ""
     if has_architecture:
         fix_arch = """
-   Fix the root cause inside the DP that owns it (see **Project
+   Keep the fix inside the DP that owns the root cause (see **Project
    Architecture**). A guard, lazy import or duplicated check that only
    masks coupling across DPs is structural debt: file or append the
    `improvements` PR and cite its id in the code comment (see **File

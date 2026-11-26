@@ -127,9 +127,11 @@ follow it themselves when fixing in review-loop mode.
   - Pass `has_architecture=bool(arch_block)` to the bug-fix blocks.
 - `pm_core/bug_fix_prompts.py`
   - `_bug_fix_flow_block(pr, has_architecture=False)`: when True, step 3
-    ("Fix") adds: fix the root cause inside the owning DP; a guard, lazy
-    import or duplicated check that papers over coupling falls under **File
-    Structural Debt** (file/append an improvements PR and cite its id).
+    ("Fix") adds: keep the fix inside the DP that owns the root cause; a
+    guard, lazy import or duplicated check that papers over coupling falls
+    under **File Structural Debt** (file/append an improvements PR and cite
+    its id). It's worded as a constraint on the fix, not a new imperative,
+    because it follows the step's "skip" clause (review-loop 322e i6).
   - `_bug_fix_review_block(pr, has_architecture=False)`: when True, add a
     checklist bullet: the fix addresses the root cause rather than masking
     coupling, and any accepted workaround cites a filed `improvements` PR id.

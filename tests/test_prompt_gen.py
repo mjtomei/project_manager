@@ -98,7 +98,7 @@ def _assert_clean(prompt: str):
 # ---------------------------------------------------------------------------
 
 class TestArchitectureSection:
-    @pytest.mark.parametrize("prompt_type", ["plan", "impl", "review"])
+    @pytest.mark.parametrize("prompt_type", PROMPT_TYPES)
     def test_absent_returns_empty(self, tmp_path, prompt_type):
         assert architecture_section(tmp_path, prompt_type) == ""
 
@@ -304,14 +304,14 @@ class TestBugFixPrompts:
         _assert_aware(p)
         assert "Bug Fix Flow" in p
         flow = p[p.index("## Bug Fix Flow"):]
-        assert "inside the DP that owns it" in flow
+        assert "Keep the fix inside the DP that owns the root cause" in flow
         assert "File\n   Structural Debt, Don't Just Comment It" in flow
 
     def test_impl_bug_flow_clean_when_absent(self, pm_root):
         p = prompt_gen.generate_prompt(_data(dict(_BUG)), "pr-b")
         assert "Bug Fix Flow" in p
         _assert_clean(p)
-        assert "inside the DP that owns it" not in p
+        assert "inside the DP that owns the root cause" not in p
 
     def test_review_bug_checklist_points_at_architecture_when_present(self, pm_root):
         _write_arch(pm_root)
