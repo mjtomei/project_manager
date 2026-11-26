@@ -2388,8 +2388,35 @@ prs:
       are in scenarios/3/pre-fix and post-fix. Full suite 5701 passed/1 skipped.'
     created_at: '2026-11-26T17:41:35Z'
     last_edited: '2026-11-26T17:41:35Z'
+  - id: note-e3cab91
+    text: 'QA S6 refiner (2026-11-26, f51e6fcf): all 3 stories held live, 300-PR fixture
+      (~8 min of pm pr add; run it in background). CLI count cap: 40 lines then "...
+      (+260 more; run `pm pr list` to see all PRs)", prompt 6.4 KB. Byte cap: after
+      `pm pr edit --title` gives 6 of the first 40 PRs ~6.1 KB titles, the listing
+      stops at 17 lines (~19.5 KB) then +283 more; prompt 23 KB, still one argv entry,
+      so the file fallback is not reachable from plan add. TUI: use the recording
+      stand-in exported on PATH before `pm session` (forwarded to panes), not fake-claude
+      config (tag-keyed, hijacks shell plan add and never sees the prompt). Pre-existing
+      on master c9805cdd, not this PR: any refresh while the plans view is open (r,
+      or the one a TUI plan add triggers) leaves the tech tree missing every row below
+      the first and no selected node after `p` back; `r` in tree view repaints in
+      ~3 s. No PR tracks it; file one. 300-PR tree j/k latency 50-340 ms.'
+    created_at: '2026-11-26T18:01:12Z'
+    last_edited: '2026-11-26T18:01:12Z'
+  - id: note-2a2b67c
+    text: 'QA S6 run (2026-11-26, f51e6fcf): PASS 3/3 live, no code change. Story
+      1 (300 PRs): shell plan add → 6324-byte single argv (argc=3, no prompt file),
+      40 listing lines then "... (+260 more; run `pm pr list` to see all PRs)". Story
+      2 (6 x 6.1 KB titles): 17 lines / 19,492 B then +283 more, prompt 22,983 B,
+      sections unchanged. Story 3 (TUI p,a): plan-c43cefd window holds the stand-in,
+      prompt 22,977 B with the same 17-line listing, Launched plan-add pane, 3 plans;
+      nav 37-145 ms, 40-key bursts settle ~0.7 s. Pre-existing tree row loss after
+      a refresh in the plans view, replayed on master c9805cdd: filed pr-29690d8.
+      Captures: /pm-captures/scenarios/6/.'
+    created_at: '2026-11-26T18:21:35Z'
+    last_edited: '2026-11-26T18:21:35Z'
   created_at: '2026-03-01T17:51:46.490716+00:00'
-  updated_at: '2026-11-26T17:41:35.791791+00:00'
+  updated_at: '2026-11-26T18:21:35.738233+00:00'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-30888b1-fold-plan-breakdown-into-plan-add-st-ab512a43
 - id: pr-3116896
   plan: tui-ux
@@ -56550,6 +56577,35 @@ prs:
   gh_pr_number: null
   created_at: '2026-11-26T17:04:29.182095+00:00'
   updated_at: '2026-11-26T17:04:29.182095+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-29690d8
+  plan: bugs
+  title: 'Bug: TUI tech tree keeps only its first node row after a refresh while the
+    plans view is open'
+  branch: pm/pr-29690d8-bug-tui-tech-tree-keeps-only-its-first-node-row-af
+  status: pending
+  depends_on: []
+  description: 'Pre-existing on master c9805cdd (not caused by pr-30888b1). Repro:
+    project with PRs in more than one tree row (24 independent PRs at 200x50 give
+    4 rows), start pm session, press p (plans view), trigger any refresh while the
+    plans view is shown (press r, or add a plan with `a`, which triggers one), then
+    press p to return to the tree. The tech tree now paints only the first row of
+    nodes; every row below it is blank and, when the selected node is not in row 1,
+    no double-bordered selection is visible. Pressing r in the tree view repaints
+    all rows in ~2-3 s. Likely location: pm_core/tui/app.py _show_plans_view/action_toggle_plans
+    hides the tree container (styles.display = none) and the refresh recomputes the
+    tree while it has no size, then showing it again does not re-layout (compare the
+    PlansPane refresh(layout=True) fix 2261f26a). Evidence: /pm-captures/scenarios/6/pre-existing-master/
+    (master, 4 rows -> 1 after p,r,p; r restores 4) and /pm-captures/scenarios/6/story3/
+    (pr-30888b1, 300 PRs, TUI plan add then p). Found in pr-30888b1 QA S6 (note-e3cab91).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-26T18:18:26.293811+00:00'
+  updated_at: '2026-11-26T18:18:41.014155+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
