@@ -401,11 +401,14 @@ class TestRegistryAcrossFastForward:
         def run_git(*args, **kw):
             watch = args[0] == "merge" or args[:2] in (("stash", "push"),
                                                        ("stash", "pop"))
+            # (inode, mtime): a freed inode number is reused at once, so an
+            # unlink + recreate can keep the same st_ino.
+            st = (pm / "project.yaml").stat
             if watch:
-                inodes.append((pm / "project.yaml").stat().st_ino)
+                inodes.append((st().st_ino, st().st_mtime_ns))
             r = real(*args, **kw)
             if watch:
-                inodes.append((pm / "project.yaml").stat().st_ino)
+                inodes.append((st().st_ino, st().st_mtime_ns))
             return r
 
         with mock.patch.object(pr_mod.git_ops, "run_git",
