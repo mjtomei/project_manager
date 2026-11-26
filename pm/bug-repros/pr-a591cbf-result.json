@@ -1,0 +1,11 @@
+{
+  "tested_head": "8dfbc18871c4ef626d6a6820a6a7a1b4b637b4e9",
+  "method": "Actual _build_meta_pane_cmd trap, cat shim pauses after reading old content; concurrent writer installs foreign path before shell comparison/unlink. Isolated temporary directory only.",
+  "command": "pm_meta_clear_override() { [ \"$(cat /tmp/pm251-guard-race-pitn0fml/.pm/sessions/isolated-test/override 2>/dev/null)\" = /tmp/pm251-guard-race-pitn0fml/meta-root ] && rm -f /tmp/pm251-guard-race-pitn0fml/.pm/sessions/isolated-test/override || true ; } ; trap pm_meta_clear_override EXIT HUP INT TERM ; true",
+  "foreign_override_before_resume": "/tmp/pm251-guard-race-pitn0fml/foreign-root\n",
+  "foreign_override_survived": false,
+  "debug_survived": true,
+  "exit": 0,
+  "stdout": "",
+  "stderr": ""
+}

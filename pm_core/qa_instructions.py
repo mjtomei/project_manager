@@ -4,7 +4,8 @@ Manages four categories of files under pm/qa/, all markdown with YAML
 frontmatter:
 
 - pm/qa/instructions/ — reusable test-environment procedures
-- pm/qa/regression/   — migrated TUI tests
+- pm/qa/regression/   — regression tests: Claude prompts run in an isolated
+                        QA run by ``pm qa regression`` (may be empty)
 - pm/qa/artifacts/    — recipes for capturing concrete evidence of
                         behavior (recordings, logs) consumable by
                         humans or downstream agents
@@ -296,15 +297,21 @@ def instruction_summary_for_prompt(pm_root: Path,
         if not items:
             continue
         lines.append(f"### {label}")
-        for item in items:
+
+        def _item_line(item: dict) -> str:
             desc = f" — {item['description']}" if item["description"] else ""
             filename = Path(item['path']).name
-            lines.append(f"- **{item['title']}** (`{filename}`){desc}")
+            return f"- **{item['title']}** (`{filename}`){desc}"
+
+        lines.append("\n".join(_item_line(i) for i in items))
         lines.append("")
 
     if not lines:
         return "No QA instructions found."
 
+    # The library entries are instructions, so they are inlined whole and never
+    # truncated or count-capped; an over-limit prompt is delivered by the
+    # launcher's file-backed bootstrap instead (see pm_core.prompt_bounds).
     return "\n".join(lines)
 
 
@@ -318,22 +325,24 @@ def mocks_for_prompt(pm_root: Path) -> str:
     if not mocks:
         return ""
 
-    lines: list[str] = [
+    header = "\n".join([
         "## Mocks",
         "",
         "The following mock contracts are defined for this project.  Use these "
         "when writing or running QA scenarios — do not devise your own mocking "
         "strategy for dependencies listed here.",
         "",
-    ]
-    for mock in mocks:
+    ]) + "\n"
+
+    def _mock_block(mock: dict) -> str:
         f = Path(mock["path"])
         content = f.read_text()
         _, body = _parse_frontmatter(content)
         desc = f" — {mock['description']}" if mock["description"] else ""
-        lines.append(f"### {mock['title']}{desc}")
-        lines.append("")
-        lines.append(body.strip())
-        lines.append("")
+        return f"### {mock['title']}{desc}\n\n{body.strip()}\n"
 
-    return "\n".join(lines) + "\n"
+    # Mock bodies are guidance the scenarios are written against, so they are
+    # inlined whole and never truncated; an over-limit prompt is delivered by
+    # the launcher's file-backed bootstrap instead.
+    body = "\n".join(_mock_block(m) for m in mocks)
+    return header + body + "\n"

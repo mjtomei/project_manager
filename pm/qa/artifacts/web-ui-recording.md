@@ -29,8 +29,10 @@ Write into `<capture-dir>/<short-name>/` (the scenario prompt
 substitutes the per-PR captures directory — `$(pm qa captures-path
 <pr-id>)/...` — for `<capture-dir>`):
 
-- `recording.webm` — Playwright's native context-level video; the
-  rendered walk-through (**load-bearing**).
+- `recording.mp4` — the rendered walk-through (the primary artifact).
+  Playwright records VP8 webm natively; the finalize step transcodes it
+  to H.264 mp4 so it plays everywhere including iOS Safari (VP8/VP9
+  webm does not decode on iOS).
 - `trace.zip` — Playwright trace (DOM snapshots + network + console);
   step through with `npx playwright show-trace trace.zip`.
 - `*.png` — key-state screenshots (one per demonstrated state).
@@ -146,6 +148,22 @@ const shot = (page, name) =>
 });
 ```
 
+### 3. Finalize: transcode the video to H.264 mp4
+
+Playwright's native recording is VP8 webm, which iOS Safari cannot
+decode. Transcode to H.264 and keep only the mp4:
+
+```bash
+ffmpeg -y -i "$CAPDIR/recording.webm" -c:v libx264 -profile:v high \
+    -pix_fmt yuv420p -crf 18 -movflags +faststart \
+    "$CAPDIR/recording.mp4"
+rm -f "$CAPDIR/recording.webm"
+```
+
+(`-movflags +faststart` puts the moov atom up front so playback starts
+before the full download; the 1280x800 recording size is already even,
+as H.264 requires.)
+
 ## Capture — Layer 2: protocol capture
 
 Greppable proof of the server contract underneath the rendered demo.
@@ -194,6 +212,7 @@ fencing deep:
     ## Commands
 
         CAPDIR=... APP_URL=... node driver.mjs
+        ffmpeg -i recording.webm ... recording.mp4   # H.264 finalize
         curl -N "$SSE_URL" > sse.log   # protocol layer
 
     ## What this demonstrates
@@ -204,8 +223,8 @@ fencing deep:
 
     ## Files
 
-    - `recording.webm` — Playwright native context video; the rendered
-      walk-through (load-bearing).
+    - `recording.mp4` — the rendered walk-through, transcoded to H.264
+      from Playwright's native webm.
     - `trace.zip` — Playwright trace; `npx playwright show-trace trace.zip`.
     - `01-loaded.png` … `NN-*.png` — key-state screenshots.
     - `dom.html` — DOM dump at a representative state.
@@ -218,7 +237,7 @@ fencing deep:
 npx playwright show-trace "$CAPDIR/trace.zip"   # step through every action
 ```
 
-Or play `recording.webm` directly, read `sse.log` to confirm the push
+Or play `recording.mp4` directly, read `sse.log` to confirm the push
 events arrived, and grep `http.log` / `dom.html` for the rendered
 contract. The manifest tells reviewers what they're looking at without
 re-deriving it from the driver script.

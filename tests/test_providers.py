@@ -1,6 +1,7 @@
 """Tests for pm_core.providers — LLM provider configuration."""
 
 import os
+import stat
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
@@ -8,10 +9,14 @@ import pytest
 
 from pm_core.providers import (
     ProviderConfig,
+    ProviderNotFoundError,
     ProviderTestResult,
+    ProvidersLockTimeout,
+    ProvidersWriteError,
     get_provider,
     list_providers,
     load_providers,
+    providers_lock,
     save_providers,
     set_session_provider,
     get_default_provider,
@@ -153,6 +158,390 @@ class TestLoadSaveProviders:
             loaded = load_providers()
             assert loaded["default"] == "ollama"
             assert loaded["providers"]["ollama"]["model"] == "llama3.1"
+
+
+# ---------------------------------------------------------------------------
+# providers.yaml file permissions
+# ---------------------------------------------------------------------------
+
+DUMMY_KEY = "sk-test-dummy-not-a-real-key"
+DUMMY_KEY_2 = "sk-test-existing-dummy-not-a-real-key"
+
+
+class TestProvidersFilePermissions:
+    """``providers.yaml`` may hold literal API keys, so it must be owner-only.
+
+    Regression tests for the bug where ``save_providers`` used
+    ``Path.write_text``: a new file under the default ``umask 022`` came out
+    ``0644``, and an existing permissive file was never tightened.
+    """
+
+    @staticmethod
+    def _mode(path: Path) -> int:
+        return stat.S_IMODE(path.stat().st_mode)
+
+    @staticmethod
+    def _add(provider: str, api_base: str, api_key: str):
+        from click.testing import CliRunner
+        from pm_core.cli import cli
+        return CliRunner().invoke(cli, [
+            "provider", "add", provider,
+            "--api-base", api_base,
+            "--api-key", api_key,
+            "--skip-check",
+        ])
+
+    @staticmethod
+    def _temp_files(tmp_path: Path) -> list[Path]:
+        """Temp files ``save_providers`` writes next to the config."""
+        return list(tmp_path.glob(".providers.yaml.pm-*"))
+
+    def test_new_file_is_owner_only_under_umask_022(self, tmp_path):
+        path = tmp_path / "providers.yaml"
+        assert not path.exists()
+        old_umask = os.umask(0o022)
+        try:
+            with patch("pm_core.providers.pm_home", return_value=tmp_path):
+                result = self._add("dummy", "http://localhost:1", DUMMY_KEY)
+                assert result.exit_code == 0, result.output
+                assert self._mode(path) == 0o600
+                assert self._temp_files(tmp_path) == []
+                config = load_providers()
+                assert config["providers"]["dummy"]["api_key"] == DUMMY_KEY
+        finally:
+            os.umask(old_umask)
+
+    def test_new_file_is_owner_only_under_umask_000(self, tmp_path):
+        # A fully permissive umask must not widen the credential file.
+        path = tmp_path / "providers.yaml"
+        old_umask = os.umask(0o000)
+        try:
+            with patch("pm_core.providers.pm_home", return_value=tmp_path):
+                result = self._add("dummy", "http://localhost:1", DUMMY_KEY)
+                assert result.exit_code == 0, result.output
+                assert self._mode(path) == 0o600
+        finally:
+            os.umask(old_umask)
+
+    def test_existing_permissive_file_is_tightened(self, tmp_path):
+        path = tmp_path / "providers.yaml"
+        path.write_text(
+            "providers:\n"
+            "  existing:\n"
+            "    type: local\n"
+            "    api_base: http://localhost:9\n"
+            f"    api_key: {DUMMY_KEY_2}\n"
+            "default: existing\n"
+        )
+        os.chmod(path, 0o644)
+        assert self._mode(path) == 0o644
+        old_umask = os.umask(0o022)
+        try:
+            with patch("pm_core.providers.pm_home", return_value=tmp_path):
+                result = self._add("dummy", "http://localhost:1", DUMMY_KEY)
+                assert result.exit_code == 0, result.output
+                assert self._mode(path) == 0o600
+                assert self._temp_files(tmp_path) == []
+                config = load_providers()
+                # Existing configuration and credential survive the save.
+                assert config["default"] == "existing"
+                assert config["providers"]["existing"]["api_key"] == DUMMY_KEY_2
+                assert config["providers"]["dummy"]["api_key"] == DUMMY_KEY
+        finally:
+            os.umask(old_umask)
+
+    def test_failed_replace_keeps_original_and_cleans_temp(self, tmp_path):
+        """A failed replace must not leave a stray temp or damage the config."""
+        path = tmp_path / "providers.yaml"
+        original = (
+            "providers:\n"
+            "  existing:\n"
+            "    type: local\n"
+            "    api_base: http://localhost:9\n"
+            f"    api_key: {DUMMY_KEY_2}\n"
+            "default: existing\n"
+        )
+        path.write_text(original)
+        os.chmod(path, 0o644)
+        with patch("pm_core.providers.pm_home", return_value=tmp_path), \
+                patch("pm_core.providers.os.replace", side_effect=OSError("boom")):
+            with pytest.raises(ProvidersWriteError):
+                save_providers({
+                    "providers": {"dummy": {"type": "local",
+                                            "api_base": "http://localhost:1",
+                                            "api_key": DUMMY_KEY}},
+                })
+        assert path.read_text() == original
+        assert self._mode(path) == 0o644
+        assert self._temp_files(tmp_path) == []
+
+    def test_failed_temp_creation_names_the_target(self, tmp_path):
+        """A ``mkstemp`` failure is one typed write error, not a raw
+        ``OSError``: the CLI turns it into one ``Error:`` line."""
+        path = tmp_path / "providers.yaml"
+        original = "providers: {}\n"
+        path.write_text(original)
+        with patch("pm_core.providers.pm_home", return_value=tmp_path), \
+                patch("pm_core.providers.tempfile.mkstemp",
+                      side_effect=PermissionError(13, "Permission denied",
+                                                  str(tmp_path))):
+            with pytest.raises(ProvidersWriteError) as excinfo:
+                save_providers({"providers": {}})
+        assert str(path) in str(excinfo.value)
+        assert "Permission denied" in str(excinfo.value)
+        assert path.read_text() == original
+        assert self._temp_files(tmp_path) == []
+
+
+# ---------------------------------------------------------------------------
+# providers_lock / set_default_provider hardening
+# ---------------------------------------------------------------------------
+
+def _unwritable_home(tmp_path: Path) -> Path:
+    """An existing ``~/.pm`` that this user cannot write into."""
+    home = tmp_path / "pm"
+    home.mkdir()
+    os.chmod(home, 0o500)
+    return home
+
+
+class TestProvidersLock:
+    def test_unwritable_pm_home_raises_one_write_error(self, tmp_path):
+        if os.geteuid() == 0:
+            pytest.skip("root ignores directory permissions")
+        home = _unwritable_home(tmp_path)
+        try:
+            with patch("pm_core.providers.pm_home", return_value=home):
+                with pytest.raises(ProvidersWriteError) as excinfo:
+                    with providers_lock(timeout=0.1):
+                        pass
+        finally:
+            os.chmod(home, 0o700)
+        message = str(excinfo.value)
+        assert str(home) in message
+        assert "writable" in message
+
+    def test_times_out_instead_of_blocking_forever(self, tmp_path):
+        import fcntl
+        lock_path = tmp_path / "providers.yaml.lock"
+        with patch("pm_core.providers.pm_home", return_value=tmp_path):
+            holder = open(lock_path, "a")
+            try:
+                fcntl.flock(holder.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                with pytest.raises(ProvidersLockTimeout) as excinfo:
+                    with providers_lock(timeout=0.1):
+                        pass
+            finally:
+                holder.close()
+            assert str(lock_path) in str(excinfo.value)
+            assert "timed out" in str(excinfo.value)
+            # Nothing was left held: the timed-out attempt closed its fd
+            # without ever taking the lock, so a fresh lock works.
+            with providers_lock(timeout=0.1):
+                pass
+
+    def test_lock_is_released_after_an_exception(self, tmp_path):
+        with patch("pm_core.providers.pm_home", return_value=tmp_path):
+            with pytest.raises(RuntimeError):
+                with providers_lock(timeout=0.1):
+                    raise RuntimeError("body failed")
+            with providers_lock(timeout=0.1):
+                pass
+
+    def test_timeout_closes_its_lock_file(self, tmp_path):
+        """A timed-out attempt never took the lock, but it must still close
+        its descriptor: otherwise the lock file stays open for the life of
+        the process (one leaked fd per timeout).  ``excinfo`` keeps the
+        traceback (and the context manager's frame) alive, so the assertion
+        does not depend on garbage collection."""
+        import builtins
+        import fcntl
+        lock_path = tmp_path / "providers.yaml.lock"
+        opened = []
+        real_open = builtins.open
+
+        def spy_open(*args, **kwargs):
+            fh = real_open(*args, **kwargs)
+            if args and str(args[0]) == str(lock_path):
+                opened.append(fh)
+            return fh
+
+        with patch("pm_core.providers.pm_home", return_value=tmp_path), \
+                patch("pm_core.providers.open", spy_open, create=True):
+            holder = real_open(lock_path, "a")
+            try:
+                fcntl.flock(holder.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                with pytest.raises(ProvidersLockTimeout) as excinfo:
+                    with providers_lock(timeout=0.05):
+                        pass
+            finally:
+                holder.close()
+        assert "timed out" in str(excinfo.value)
+        assert len(opened) == 1
+        assert opened[0].closed
+
+    def test_save_reports_an_uncreatable_pm_home_as_a_write_error(self, tmp_path):
+        """``save_providers`` called without the lock (a library caller)
+        names the path instead of leaking ``pm_home()``'s raw OSError."""
+        def boom():
+            raise PermissionError(13, "Permission denied", str(tmp_path / "pm"))
+
+        with patch("pm_core.providers.pm_home", side_effect=boom):
+            with pytest.raises(ProvidersWriteError) as excinfo:
+                save_providers({"providers": {}})
+        assert "cannot write" in str(excinfo.value)
+        assert "writable" in str(excinfo.value)
+
+
+class TestSetDefaultProvider:
+    def test_missing_provider_is_refused_and_file_untouched(self, tmp_path):
+        path = tmp_path / "providers.yaml"
+        original = "providers: {}\ndefault: claude\n"
+        path.write_text(original)
+        with patch("pm_core.providers.pm_home", return_value=tmp_path):
+            with pytest.raises(ProviderNotFoundError):
+                set_default_provider("gone")
+        assert path.read_text() == original
+
+    def test_builtin_claude_is_always_accepted(self, tmp_path):
+        with patch("pm_core.providers.pm_home", return_value=tmp_path):
+            set_default_provider(BUILTIN_CLAUDE)
+            assert get_default_provider() == BUILTIN_CLAUDE
+
+    def test_configured_provider_is_accepted_and_saved(self, tmp_path):
+        """The locked existence check must not reject a provider that is
+        there: the success path still writes ``default: <name>``."""
+        path = tmp_path / "providers.yaml"
+        path.write_text("providers:\n"
+                        "  x:\n"
+                        "    type: local\n"
+                        "    api_base: http://localhost:1\n")
+        with patch("pm_core.providers.pm_home", return_value=tmp_path):
+            set_default_provider("x")
+            assert get_default_provider() == "x"
+        assert "default: x" in path.read_text()
+
+    def test_existence_check_uses_the_locked_read(self, tmp_path):
+        """The re-check must run while the edit lock is held: a name that
+        disappears between the CLI's old pre-check and the locked update
+        can no longer be written as the default."""
+        import pm_core.providers as providers
+        from contextlib import contextmanager
+
+        held = {"now": False}
+        real_lock = providers.providers_lock
+
+        @contextmanager
+        def recording_lock(*args, **kwargs):
+            with real_lock(*args, **kwargs):
+                held["now"] = True
+                try:
+                    yield
+                finally:
+                    held["now"] = False
+
+        def fake_load():
+            assert held["now"] is True, "provider check ran outside the lock"
+            return {"providers": {}}
+
+        with patch("pm_core.providers.pm_home", return_value=tmp_path), \
+                patch.object(providers, "providers_lock", recording_lock), \
+                patch.object(providers, "load_providers_for_edit", fake_load):
+            with pytest.raises(ProviderNotFoundError):
+                providers.set_default_provider("gone")
+
+    def test_cli_sets_a_configured_provider(self, tmp_path):
+        """The success path still writes and reports the new default, so
+        the error handling around it cannot silently swallow a real set."""
+        from click.testing import CliRunner
+        from pm_core.cli import cli
+
+        path = tmp_path / "providers.yaml"
+        path.write_text("providers:\n"
+                        "  x:\n"
+                        "    type: local\n"
+                        "    api_base: http://localhost:1\n")
+        with patch("pm_core.providers.pm_home", return_value=tmp_path):
+            result = CliRunner().invoke(cli, ["provider", "default", "x"])
+        assert result.exit_code == 0, result.output
+        assert "Default provider set to 'x'" in result.output
+        assert "default: x" in path.read_text()
+
+    def test_cli_reports_missing_provider_with_one_error_line(self, tmp_path):
+        from click.testing import CliRunner
+        from pm_core.cli import cli
+
+        path = tmp_path / "providers.yaml"
+        original = ("providers:\n"
+                    "  x:\n"
+                    "    type: local\n"
+                    "    api_base: http://localhost:1\n")
+        path.write_text(original)
+        with patch("pm_core.providers.pm_home", return_value=tmp_path):
+            result = CliRunner().invoke(cli, ["provider", "default", "gone"])
+        assert result.exit_code == 1
+        assert "Error: Provider 'gone' not found." in result.output
+        assert "Traceback" not in result.output
+        assert path.read_text() == original
+
+    def test_cli_reports_unwritable_home_with_one_error_line(self, tmp_path):
+        if os.geteuid() == 0:
+            pytest.skip("root ignores directory permissions")
+        from click.testing import CliRunner
+        from pm_core.cli import cli
+
+        home = _unwritable_home(tmp_path)
+        try:
+            with patch("pm_core.providers.pm_home", return_value=home):
+                result = CliRunner().invoke(cli, ["provider", "default", "claude"])
+        finally:
+            os.chmod(home, 0o700)
+        assert result.exit_code == 1
+        assert isinstance(result.exception, SystemExit)
+        assert result.output.count("Error:") == 1
+        assert "Traceback" not in result.output
+
+    def test_cli_reports_pm_home_failure_with_one_error_line(self, tmp_path):
+        from click.testing import CliRunner
+        from pm_core.cli import cli
+
+        def boom():
+            raise PermissionError(13, "Permission denied", "/home/u/.pm")
+
+        with patch("pm_core.providers.pm_home", side_effect=boom):
+            result = CliRunner().invoke(cli, [
+                "provider", "add", "x", "--api-base", "http://localhost:1",
+                "--skip-check"])
+        assert result.exit_code == 1
+        assert isinstance(result.exception, SystemExit)
+        assert result.output.count("Error:") == 1
+        assert "Traceback" not in result.output
+
+    def test_cli_reports_a_lock_timeout_with_one_error_line(self, tmp_path):
+        import fcntl
+        from click.testing import CliRunner
+        from pm_core.cli import cli
+
+        path = tmp_path / "providers.yaml"
+        original = ("providers:\n"
+                    "  x:\n"
+                    "    type: local\n"
+                    "    api_base: http://localhost:1\n")
+        path.write_text(original)
+        holder = open(tmp_path / "providers.yaml.lock", "a")
+        try:
+            fcntl.flock(holder.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            with patch("pm_core.providers.pm_home", return_value=tmp_path), \
+                    patch("pm_core.providers.PROVIDERS_LOCK_TIMEOUT", 0.1):
+                result = CliRunner().invoke(cli, ["provider", "default", "x"])
+        finally:
+            holder.close()
+        assert result.exit_code == 1
+        assert isinstance(result.exception, SystemExit)
+        assert result.output.count("Error:") == 1
+        assert "timed out" in result.output
+        assert "Traceback" not in result.output
+        assert path.read_text() == original
 
 
 # ---------------------------------------------------------------------------

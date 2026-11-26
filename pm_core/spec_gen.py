@@ -33,7 +33,6 @@ _log = configure_logger("pm.spec_gen")
 PHASES = ("impl", "qa")
 
 
-
 def get_spec_mode() -> str:
     """Return the global spec generation mode: auto, review, or prompt.
 
@@ -138,7 +137,10 @@ def _build_spec_prompt(data: dict, pr: dict, phase: str) -> str:
     base_branch = data.get("project", {}).get("base_branch", "master")
     workdir = pr.get("workdir", "")
 
-    # Gather prior specs for context
+    # Gather prior specs for context.  Specs are instructions, so they are
+    # inlined whole and never truncated: a spec that would push the prompt
+    # over PROMPT_ARG_LIMIT is delivered by the launcher's file-backed
+    # bootstrap instead (see pm_core.prompt_bounds for the policy).
     prior_specs = ""
     if phase == "qa":
         impl_spec = get_spec(pr, "impl")
@@ -745,6 +747,9 @@ def format_spec_for_prompt(pr: dict, phase: str) -> str:
             + staleness_note
         )
 
+    # The spec is instruction text, so it is inlined whole and never
+    # truncated; an over-limit prompt is delivered by the launcher's
+    # file-backed bootstrap rather than by cutting the spec.
     return f"""
 ## {label}
 

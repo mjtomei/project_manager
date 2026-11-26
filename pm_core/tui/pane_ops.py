@@ -18,6 +18,21 @@ from pm_core.tui.screens import ConnectScreen
 
 _log = configure_logger("pm.tui.pane_ops")
 
+# Lines of existing log history the L pane shows before following.
+LOG_PANE_BACKLOG_LINES = 500
+# Recent auto-start confirmations ("log: Auto-start: targets += X", "Auto-
+# sequence armed for X", "Auto-merge: ...") repeated below the backlog, so
+# they are on screen when L opens even after busy debug output (and other
+# status messages) pushed them hundreds of lines up into scrollback.
+LOG_PANE_RECAP_LINES = 8
+LOG_PANE_RECAP_PATTERN = r"\[tui\] log: Auto-(start|sequence|merge)"
+# Opening L writes its own burst of debug lines (split, pane-opened hook,
+# rebalance, "launched pane") right after the pane starts; in a half-width
+# split each wraps to two rows, so following immediately pushed the recap
+# header off the top before the user saw it.  Let that burst land first and
+# print it above the recap.
+LOG_PANE_SETTLE_SECONDS = 1.0
+
 
 
 
@@ -29,7 +44,8 @@ def heal_registry(session: str | None) -> None:
     """Fix pane registry discrepancies on TUI startup.
 
     Heals all windows: removes dead panes, cleans empty window entries,
-    and ensures the TUI pane is registered in the current window.
+    and ensures the TUI pane is registered in the window it actually
+    lives in.
     """
     if not session or not tmux_mod.in_tmux():
         return
@@ -39,7 +55,14 @@ def heal_registry(session: str | None) -> None:
         return
 
     try:
-        window = tmux_mod.get_window_id(session)
+        # Resolve the window from our own pane, not from the session's
+        # active window: with a second client attached elsewhere (or a TUI
+        # started by hand in another window) those differ, and the TUI
+        # would never re-register itself.  Every CLI that resolves the
+        # session through _find_tui_pane (pm tui view, pm autostart, ...)
+        # then cannot find a live TUI.
+        window = (tmux_mod.pane_window_id(tui_pane_id)
+                  or tmux_mod.get_window_id(session))
         if not window:
             return
 
@@ -51,7 +74,7 @@ def heal_registry(session: str | None) -> None:
             live_panes = tmux_mod.get_pane_indices(session, win_id)
             window_live_ids[win_id] = {pid for pid, _ in live_panes}
 
-        # Also query current window's live panes for TUI re-registration
+        # Also query our own window's live panes for TUI re-registration
         if window not in window_live_ids:
             live_panes = tmux_mod.get_pane_indices(session, window)
             window_live_ids[window] = {pid for pid, _ in live_panes}
@@ -127,7 +150,8 @@ def get_session_and_window(app) -> tuple[str, str] | None:
 
 
 def launch_pane(app, cmd: str, role: str, fresh: bool = False,
-                target_window: str | None = None) -> None:
+                target_window: str | None = None,
+                env: dict[str, str] | None = None) -> None:
     """Launch a wrapped pane, register it, and rebalance.
 
     If a pane with this role already exists and is alive, focuses it instead
@@ -136,6 +160,10 @@ def launch_pane(app, cmd: str, role: str, fresh: bool = False,
     When *target_window* is provided, the pane is launched (and dedup'd) in
     that tmux window rather than the TUI's current window. Used by watchers
     that need to keep launched sessions alongside their own work log.
+
+    *env* carries provider values; they are exported into the new pane's
+    environment through a private file, so the values never appear in the
+    command string.
     """
     info = get_session_and_window(app)
     if not info:
@@ -154,7 +182,7 @@ def launch_pane(app, cmd: str, role: str, fresh: bool = False,
         else:
             _log.info("pane with role=%s already exists: %s, focusing", role, existing_pane)
             tmux_mod.select_pane_smart(existing_pane, session, window)
-            app.log_message(f"Focused existing {role} pane")
+            app.log_message(f"Focused existing {role} pane", force=True)
             return
 
     data = pane_registry.load_registry(session)
@@ -163,10 +191,13 @@ def launch_pane(app, cmd: str, role: str, fresh: bool = False,
     wrap = f"bash -c 'trap \"pm _pane-exited {session} {window} {gen} $TMUX_PANE\" EXIT; {escaped}'"
     try:
         direction = pane_layout.preferred_split_direction(session, window)
-        pane_id = tmux_mod.split_pane(session, direction, wrap, window=window)
+        pane_id = tmux_mod.split_pane(session, direction, wrap, window=window,
+                                      env=env)
         pane_layout.register_and_rebalance(session, window, [(pane_id, role, cmd)])
         tmux_mod.select_pane_smart(pane_id, session, window)
-        app.log_message(f"Launched {role} pane")
+        # Forced: this answers the user's key, which may land while a
+        # sticky message (e.g. "Review loop done") holds the line.
+        app.log_message(f"Launched {role} pane", force=True)
         _log.info("launched pane: role=%s id=%s", role, pane_id)
     except Exception as e:
         _log.exception("failed to launch %s pane", role)
@@ -260,7 +291,35 @@ def view_log(app) -> None:
     if not log_path.exists():
         app.log_message("No log file yet.")
         return
-    launch_pane(app, f"tail -f {log_path}", "log", fresh=fresh)
+    launch_pane(app, log_pane_command(log_path), "log", fresh=fresh)
+
+
+def log_pane_command(log_path) -> str:
+    """Shell command for the L pane: backlog, auto-start recap, then follow.
+
+    Plain ``tail -f`` shows only the last 10 lines; the debug log is busy
+    (pane layout, review-loop polling), so an "Auto-sequence armed" line
+    mirrored a minute earlier sits hundreds of lines up — in scrollback, not
+    on screen.  Show the backlog, wait for the pane's own launch lines and
+    print them, repeat the last few auto-start confirmations ("HH:MM:SS log:
+    ...") at the bottom, then follow from the line count taken last, so
+    nothing written in between is lost.  No ``exec``: launch_pane's EXIT
+    trap must still run.
+    """
+    f = shlex.quote(str(log_path))
+    pattern = shlex.quote(LOG_PANE_RECAP_PATTERN)
+    return (
+        f'n=$(wc -l < {f}); '
+        f'head -n "$n" {f} | tail -n {LOG_PANE_BACKLOG_LINES}; '
+        f'sleep {LOG_PANE_SETTLE_SECONDS}; '
+        f'm=$(wc -l < {f}); '
+        f'head -n "$m" {f} | tail -n "+$((n + 1))"; '
+        f'echo "── recent auto-start messages ──"; '
+        f'head -n "$m" {f} | grep -E {pattern} | tail -n {LOG_PANE_RECAP_LINES}'
+        f' | sed "s/ [A-Z]* *\\[tui\\] log: / log: /"; '
+        f'echo "── following log ──"; '
+        f'tail -n "+$((m + 1))" -f {f}'
+    )
 
 
 def launch_meta(app) -> None:
@@ -328,8 +387,10 @@ they can use dedicated shortcuts rather than typing commands.
 
 The user will tell you what they need."""
 
-    cmd = build_claude_shell_cmd(prompt=prompt, session_type="discuss")
-    launch_pane(app, cmd, "claude", fresh=fresh)
+    env: dict[str, str] = {}
+    cmd = build_claude_shell_cmd(prompt=prompt, session_type="discuss",
+                                 env_out=env)
+    launch_pane(app, cmd, "claude", fresh=fresh, env=env)
 
 
 def launch_discuss(app) -> None:
@@ -391,8 +452,10 @@ focused. Press Escape to return focus to the tree/plans view.
 
 Ask the user what they'd like to know about."""
 
-    cmd = build_claude_shell_cmd(prompt=prompt, session_type="discuss")
-    launch_pane(app, cmd, "discuss", fresh=fresh)
+    env: dict[str, str] = {}
+    cmd = build_claude_shell_cmd(prompt=prompt, session_type="discuss",
+                                 env_out=env)
+    launch_pane(app, cmd, "discuss", fresh=fresh, env=env)
 
 
 def launch_watcher_review(app) -> None:
@@ -443,22 +506,87 @@ def launch_watcher_review(app) -> None:
         transcript_dir=transcript_dir,
     )
 
-    cmd = build_claude_shell_cmd(prompt=prompt, session_type="watcher_review")
-    launch_pane(app, cmd, "watcher-review", fresh=fresh)
+    env: dict[str, str] = {}
+    cmd = build_claude_shell_cmd(prompt=prompt, session_type="watcher_review",
+                                 env_out=env)
+    launch_pane(app, cmd, "watcher-review", fresh=fresh, env=env)
+
+
+async def _launch_regression_item(app, qa_id: str,
+                                  target_window: str | None,
+                                  cmd: str | None = None) -> None:
+    """Run regression test *qa_id* in a pane, unless it cannot launch.
+
+    Same launcher as the CLI and ``pm qa launch``: ``pm qa regression`` runs
+    the test in an isolated QA workdir (a QA container when container mode
+    is enabled) against a disposable test project, never this TUI's session.
+    What would stop it is logged here instead of flashing by in a pane that
+    exits at once.  The check runs off the event loop: with container mode
+    enabled it asks the runtime (``<runtime> info``, up to 10 s).
+
+    *cmd* replaces the default ``pm qa regression <id> --file-prs`` command
+    (the command bar runs the options the user typed).
+    """
+    import asyncio
+    from pm_core.regression_prompts import (regression_launch_cmd,
+                                            regression_launch_problem)
+    problem = await asyncio.to_thread(regression_launch_problem,
+                                      app._root, qa_id)
+    if problem:
+        app.log_message(problem.splitlines()[0])
+        _log.warning("regression launch refused: %s", problem)
+        return
+    launch_pane(app, cmd or regression_launch_cmd(app._root, qa_id),
+                "qa-item", target_window=target_window)
+
+
+def launch_regression_command(app, args: list[str]) -> None:
+    """Run ``qa regression <args>`` typed in the command bar in a pane.
+
+    The command runs the test's interactive session in the foreground, so it
+    needs a pane: the command bar's captured subprocess would block the TUI
+    until its timeout, then kill the session before its container cleanup
+    trap runs.  Same pre-launch check as the QA pane's Enter.
+    """
+    import click
+    from pm_core.cli.qa import qa_regression
+    from pm_core.regression_prompts import regression_command
+
+    if not app._root:
+        app.log_message("No project root")
+        return
+    # Parsed by the command itself, so the test id is the one
+    # `pm qa regression` will run, and a malformed command (no test id, an
+    # unknown option, an option missing its value) is reported here instead
+    # of in a pane that exits at once.  Without a help option: `--help`
+    # would print to the TUI's own stdout.
+    try:
+        ctx = qa_regression.make_context("qa regression", list(args),
+                                         help_option_names=[])
+    except click.UsageError as exc:
+        app.log_message(
+            f"qa regression: {exc.format_message()} Usage: qa regression "
+            "<test-id> [--file-prs] [--branch <b>]")
+        return
+    app.run_worker(_launch_regression_item(
+        app, ctx.params["test_id"], None,
+        cmd=regression_command(app._root, list(args))), exclusive=False)
 
 
 def launch_qa_item(app, item_id: str, target_window: str | None = None) -> None:
-    """Launch Claude with a QA instruction prompt.
+    """Launch Claude with a QA instruction prompt, or run a regression test.
 
     *item_id* has the form ``category:id`` (e.g. ``instructions:login-flow``
-    or ``regression:pane-layout``).
+    or ``regression:auth-flow``).  A regression item runs
+    ``pm qa regression <id> --file-prs`` in the pane (an isolated run, see
+    :mod:`pm_core.regression_prompts`).
 
     *target_window* optionally directs the launched pane into a specific
     tmux window. When omitted (e.g. the human Enter-key path from the QA
     pane), the pane opens in the TUI's current window.
     """
     from pm_core import qa_instructions
-    from pm_core.claude_launcher import find_claude, build_claude_shell_cmd
+    from pm_core.claude_launcher import build_claude_shell_cmd
 
     if not app._root:
         app.log_message("No project root")
@@ -469,6 +597,11 @@ def launch_qa_item(app, item_id: str, target_window: str | None = None) -> None:
         app.log_message(f"Invalid QA item id: {item_id}")
         return
     category, qa_id = parts
+
+    if category == "regression":
+        app.run_worker(_launch_regression_item(app, qa_id, target_window),
+                       exclusive=False)
+        return
 
     item = qa_instructions.get_instruction(app._root, qa_id, category=category)
     if not item:
@@ -481,17 +614,7 @@ def launch_qa_item(app, item_id: str, target_window: str | None = None) -> None:
     body = item.get("body", "")
     title = item.get("title", qa_id)
 
-    if category == "regression":
-        from pm_core.regression_prompts import build_regression_test_prompt
-        full_prompt = build_regression_test_prompt(
-            session=sess,
-            pane_id=pane_id or None,
-            title=title,
-            body=body,
-            file_findings=True,
-        )
-    else:
-        full_prompt = f"""\
+    full_prompt = f"""\
 ## Session Context
 
 You are running a QA instruction against tmux session: {sess}{pane_line}
@@ -507,8 +630,10 @@ To interact with this session, use commands like:
 {body}
 """
 
-    cmd = build_claude_shell_cmd(prompt=full_prompt, session_type="qa_author")
-    launch_pane(app, cmd, "qa-item", target_window=target_window)
+    env: dict[str, str] = {}
+    cmd = build_claude_shell_cmd(prompt=full_prompt, session_type="qa_author",
+                                 env_out=env)
+    launch_pane(app, cmd, "qa-item", target_window=target_window, env=env)
 
 
 # ---------------------------------------------------------------------------
@@ -595,7 +720,7 @@ def _launch_in_plans_window(app, plan_id: str | None, cmd: str, role: str,
         if pane_id and win:
             pane_layout.register_and_rebalance(
                 session, win["id"], [(pane_id, role, cmd)])
-            app.log_message(f"Launched {role} pane")
+            app.log_message(f"Launched {role} pane", force=True)
             _log.info("launched pane in new window: role=%s id=%s window=%s",
                       role, pane_id, name)
         _focus_plans_window(app, plan_id)
@@ -677,7 +802,7 @@ def show_connect(app) -> None:
         app.push_screen(ConnectScreen(command))
     else:
         app.log_message("Not a shared session")
-        app.set_timer(2, app._clear_log_message)
+        app.clear_log_message_later(2)
 
 
 def quit_app(app) -> None:
@@ -712,6 +837,16 @@ def restart_app(app) -> None:
         app._driver.stop_application_mode()
     except Exception:
         pass  # new Textual app will reinitialize the terminal
+    # The pidfile keeps naming this pid across the exec, so CLI helpers
+    # keep sending SIGUSR1/SIGUSR2; until the new TUI installs its
+    # handlers the default action would kill it.  SIG_IGN survives exec;
+    # queued commands are dispatched by the new TUI's startup drain.
+    import signal
+    for sig in (signal.SIGUSR1, signal.SIGUSR2):
+        try:
+            signal.signal(sig, signal.SIG_IGN)
+        except (ValueError, OSError):
+            pass
     pm = shutil.which("pm")
     if pm:
         os.execvp(pm, [pm, "_tui"])

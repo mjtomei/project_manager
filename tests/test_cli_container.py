@@ -8,6 +8,7 @@ from click.testing import CliRunner
 
 from pm_core.cli.container import (
     container_build,
+    container_cleanup,
     _build_container_build_prompt,
 )
 
@@ -217,3 +218,23 @@ class TestContainerBuildCommand:
         mock_launch.assert_called_once()
         call_kwargs = mock_launch.call_args
         assert call_kwargs[1]["session_key"] == "container:build"
+
+
+class TestContainerCleanupCommand:
+    """pm container cleanup parses the runtime's ps listing into names."""
+
+    @pytest.mark.parametrize("sep", ["\t", "  "], ids=["tab", "podman3-spaces"])
+    def test_removes_each_container_by_name_only(self, sep):
+        # podman 3.x renders the "{{.Names}}\t{{.Status}}" format's \t as
+        # spaces; the status text must never become part of the name.
+        listing = (f"pm-tag-qa-pr-aaaaaaa-0123456789abcdef-s7{sep}Up 4 minutes ago\n"
+                   f"pm-tag-review-pr-bbbbbbb{sep}Exited (0) 2 minutes ago\n")
+        ps = MagicMock(returncode=0, stdout=listing)
+        with patch("pm_core.container._run_runtime", return_value=ps), \
+             patch("pm_core.container.remove_container") as rm:
+            result = CliRunner().invoke(container_cleanup, ["--pr", "pr-aaaaaaa"])
+
+        assert result.exit_code == 0, result.output
+        rm.assert_called_once_with("pm-tag-qa-pr-aaaaaaa-0123456789abcdef-s7")
+        assert "(Up 4 minutes ago)" in result.output
+        assert "Removed 1 container(s)." in result.output

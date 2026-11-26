@@ -744,8 +744,88 @@ class TestHealRegistrySkipsWrite:
         # All panes alive
         mock_get_panes.return_value = [(tui_pane, 0), ("%2", 1)]
 
-        with patch.dict(os.environ, {"TMUX_PANE": tui_pane}):
+        with patch("pm_core.tui.pane_ops.tmux_mod.pane_window_id",
+                   return_value=window), \
+             patch.dict(os.environ, {"TMUX_PANE": tui_pane}):
             heal_registry("pm-test")
 
         mtime_after = os.path.getmtime(reg_file)
         assert mtime_before == mtime_after, "file should not be rewritten when registry is healthy"
+
+
+class TestHealRegistryOwnWindow:
+    """heal_registry registers the TUI pane in the window it actually
+    lives in, not in the session's active window.
+
+    A TUI started by hand (``pm _tui``) in a plain shell window, or any
+    TUI running while another client views a different window, is not in
+    the session's active window.  Resolving the window from the session
+    would then never re-register the TUI pane, leaving the registry
+    without a ``tui`` role entry, so ``_find_tui_pane`` (pm tui view,
+    pm autostart, ...) cannot find the live TUI at all.
+    """
+
+    @patch("pm_core.tui.pane_ops.tmux_mod.get_pane_indices")
+    @patch("pm_core.tui.pane_ops.tmux_mod.get_window_id")
+    @patch("pm_core.tui.pane_ops.tmux_mod.pane_window_id")
+    @patch("pm_core.tui.pane_ops.tmux_mod.in_tmux", return_value=True)
+    def test_registers_tui_in_own_window(
+        self, mock_in_tmux, mock_pane_window, mock_get_window,
+        mock_get_panes, mock_registry,
+    ):
+        import os
+        from pm_core.tui.pane_ops import heal_registry
+
+        tui_pane = "%8"
+        own_window = "@8"
+        active_window = "@3"
+
+        _save_registry("pm-test", {
+            "session": "pm-test", "windows": {}, "generation": "1",
+        })
+
+        mock_pane_window.return_value = own_window
+        mock_get_window.return_value = active_window
+        mock_get_panes.return_value = [(tui_pane, 0)]
+
+        with patch.dict(os.environ, {"TMUX_PANE": tui_pane}):
+            heal_registry("pm-test")
+
+        data = load_registry("pm-test")
+        assert own_window in data["windows"], (
+            "TUI pane should be registered in its own window")
+        panes = data["windows"][own_window]["panes"]
+        assert [p["id"] for p in panes] == [tui_pane]
+        assert panes[0]["role"] == "tui"
+        assert active_window not in data["windows"]
+
+    @patch("pm_core.tui.pane_ops.tmux_mod.get_pane_indices")
+    @patch("pm_core.tui.pane_ops.tmux_mod.get_window_id")
+    @patch("pm_core.tui.pane_ops.tmux_mod.pane_window_id")
+    @patch("pm_core.tui.pane_ops.tmux_mod.in_tmux", return_value=True)
+    def test_falls_back_to_session_window(
+        self, mock_in_tmux, mock_pane_window, mock_get_window,
+        mock_get_panes, mock_registry,
+    ):
+        """When the pane's window cannot be resolved, the session's active
+        window is still used (previous behaviour)."""
+        import os
+        from pm_core.tui.pane_ops import heal_registry
+
+        tui_pane = "%8"
+        active_window = "@3"
+
+        _save_registry("pm-test", {
+            "session": "pm-test", "windows": {}, "generation": "1",
+        })
+
+        mock_pane_window.return_value = None
+        mock_get_window.return_value = active_window
+        mock_get_panes.return_value = [(tui_pane, 0)]
+
+        with patch.dict(os.environ, {"TMUX_PANE": tui_pane}):
+            heal_registry("pm-test")
+
+        data = load_registry("pm-test")
+        assert active_window in data["windows"]
+        assert [p["id"] for p in data["windows"][active_window]["panes"]] == [tui_pane]

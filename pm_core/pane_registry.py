@@ -27,6 +27,25 @@ def base_session_name(session: str) -> str:
     return session.split("~")[0]
 
 
+def pm_session_name(session: str) -> str:
+    """The pm session that tmux session *session* shows (base name).
+
+    Like :func:`base_session_name`, but a user's own view grouped with a
+    pm session under another name (``tmux new-session -t pm-x -s myview``)
+    resolves through its group: tmux names that view in hooks and popups
+    while its client is the most recently active one (S121).  The group is
+    looked up by the full name first, so a view named like a pm session
+    (``pm-laptop``) or containing ``~`` (``my~view``) also resolves (S124).
+    """
+    if not session:
+        return session
+    from pm_core import tmux as tmux_mod
+    group = tmux_mod.session_group(session)
+    if group.startswith("pm-"):
+        return base_session_name(group)
+    return base_session_name(session)
+
+
 def registry_dir() -> Path:
     """Return the directory for pane registry files."""
     from pm_core.paths import pane_registry_dir
@@ -225,6 +244,49 @@ def unregister_windows(session: str, window_names: list[str]) -> list[str]:
                 del windows[name]
                 removed.append(name)
                 _logger.info("unregister_windows: removed window %s", name)
+        return data
+
+    locked_read_modify_write(registry_path(session), modifier)
+    return removed
+
+
+def prune_dead_windows(session: str) -> list[str]:
+    """Remove registry entries for windows that no longer exist in *session*.
+
+    Registration and layout only reconcile the window they touch, so a
+    window killed while nothing was registering into it (for example the
+    QA window an execution-only run leaves behind, killed before the next
+    run) keeps its panes under a stale ``@id`` forever. Returns the removed
+    window IDs.
+    """
+    _ensure_logging()
+    from pm_core import tmux as tmux_mod
+
+    # Query tmux OUTSIDE the lock, and never prune a session we cannot see:
+    # an empty window list from a dead/absent session must not wipe the
+    # registry.  A live session always has at least one window, so an empty
+    # list here means the query itself failed (or the session died between
+    # the two calls) — not that every registered window is gone.
+    if not tmux_mod.session_exists(session):
+        return []
+    live_windows = {w["id"] for w in tmux_mod.list_windows(session)}
+    if not live_windows:
+        _logger.info("prune_dead_windows: no live windows for %s, skipping",
+                     session)
+        return []
+
+    removed: list[str] = []
+
+    def modifier(raw):
+        data = _prepare_registry_data(raw, session)
+        for window_id in list(data.get("windows", {})):
+            if window_id not in live_windows:
+                removed.append(window_id)
+                del data["windows"][window_id]
+        if not removed:
+            return None  # no changes, skip write
+        _logger.info("prune_dead_windows: removed %s from %s",
+                     removed, session)
         return data
 
     locked_read_modify_write(registry_path(session), modifier)

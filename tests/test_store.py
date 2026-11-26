@@ -134,6 +134,17 @@ class TestPlanParentInvalid:
         with pytest.raises(store.PlanValidationError, match="non-existent parent"):
             store.load(tmp_pm_root)
 
+    def test_invalid_plans_are_an_unloadable_file(self, tmp_pm_root):
+        """Callers that keep their state on an unloadable project.yaml catch
+        ProjectYamlParseError; plans that do not validate must be caught
+        there too (S44: one escaping a TUI timer kills the TUI)."""
+        _write_yaml(tmp_pm_root,
+            "project:\n  name: test\nplans:\n"
+            "  - id: plan-001\n    name: A\n    file: a.md\n    status: draft\n    parent: plan-999\n"
+        )
+        with pytest.raises(store.ProjectYamlParseError, match="non-existent parent"):
+            store.load(tmp_pm_root)
+
     def test_invalid_parent_skipped_when_validate_false(self, tmp_pm_root):
         _write_yaml(tmp_pm_root,
             "project:\n  name: test\nplans:\n"
@@ -198,6 +209,20 @@ class TestPlanValidationEdgeCases:
         )
         data = store.load(tmp_pm_root)
         assert data["plans"] is None
+
+
+class TestMissingProjectFile:
+    def test_missing_file_is_an_unloadable_file_and_still_not_found(
+            self, tmp_pm_root):
+        """A checkout or rebase unlinks project.yaml before writing the new
+        one: callers that keep their state on an unloadable file must catch
+        it as ProjectYamlParseError, and "no project" callers still see a
+        FileNotFoundError with the usual message."""
+        with pytest.raises(store.ProjectYamlParseError) as exc:
+            store.load(tmp_pm_root)
+        assert isinstance(exc.value, FileNotFoundError)
+        assert exc.value.filename == str(tmp_pm_root / "project.yaml")
+        assert "No such file or directory" in str(exc.value)
 
 
 # ---------------------------------------------------------------------------
@@ -290,3 +315,14 @@ class TestYamlBackend:
             first = self._body(tmp_pm_root)
             store.save(store.load(tmp_pm_root, validate=False), tmp_pm_root)
             assert self._body(tmp_pm_root) == first
+
+
+def test_get_pr_skips_entries_without_an_id():
+    """S94: a hand-edited id-less entry ahead of the PR made a QA
+    completion's note write raise KeyError: 'id' and killed the TUI."""
+    pr = {"id": "pr-001", "status": "qa"}
+    data = {"prs": [{"title": "no id", "status": "qa"}, "junk", pr],
+            "plans": [{"name": "no id"}, {"id": "plan-1"}]}
+    assert store.get_pr(data, "pr-001") is pr
+    assert store.get_pr(data, "pr-002") is None
+    assert store.get_plan(data, "plan-1") == {"id": "plan-1"}

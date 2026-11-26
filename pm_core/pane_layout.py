@@ -703,7 +703,9 @@ def handle_any_pane_closed() -> None:
         _logger.info("handle_any_pane_closed: not in tmux, skipping")
         return
 
-    current_session = tmux_mod.get_session_name()
+    # A user's own grouped view (myview) shares the pm session's registry.
+    from pm_core.pane_registry import pm_session_name
+    current_session = pm_session_name(tmux_mod.get_session_name())
     reg_path = registry_path(current_session)
     if not reg_path.exists():
         _logger.info("handle_any_pane_closed: no registry for %s", current_session)

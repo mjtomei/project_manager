@@ -8,6 +8,9 @@ from typing import Optional
 from pm_core import store, graph, notes
 from pm_core.paths import get_global_setting, has_global_setting
 from pm_core.plans.parser import parse_plan_prs
+from pm_core.prompt_bounds import (
+    PLAN_LIST_BUDGET, PLAN_LIST_MAX, bounded_join,
+)
 
 
 STEP_ORDER = [
@@ -341,13 +344,19 @@ def build_assist_prompt(data: dict, root: Optional[Path],
     repo = project.get("repo", "unknown")
     plans = data.get("plans") or []
 
-    # Build plan summary
-    plan_lines = []
-    for plan in plans:
-        plan_id = plan.get("id", "???")
-        title = plan.get("title", plan.get("name", "???"))
-        plan_lines.append(f"  - {plan_id}: {title}")
-    plan_summary = "\n".join(plan_lines) if plan_lines else "  (no plans yet)"
+    # Build plan summary.  The listing carries user-authored plan names, so a
+    # count cap alone does not bound it (the same cap-times-item-size defect
+    # the PR listings had); the byte budget bounds the product and the marker
+    # names `pm plan list` for the rest.
+    plan_summary = bounded_join(
+        plans,
+        lambda p: (f"  - {p.get('id', '???')}: "
+                   f"{p.get('title', p.get('name', '???'))}"),
+        max_items=PLAN_LIST_MAX,
+        max_bytes=PLAN_LIST_BUDGET,
+        omitted_note=lambda n: (
+            f"  ... (+{n} more; run `pm plan list` to see every plan)"),
+    ) or "  (no plans yet)"
 
     pane_id = os.environ.get("TMUX_PANE", "")
     sess = session_name or "default"

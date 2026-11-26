@@ -3,6 +3,15 @@
 from pm_core import store, notes
 from pm_core.backend import get_backend
 from pm_core.paths import get_global_setting
+from pm_core.prompt_bounds import (
+    ARTIFACT_PATHS_BUDGET, ARTIFACT_PATHS_MAX, DEPS_MAX,
+    INTEGRATION_LIST_BUDGET, INTEGRATION_MAX_PATHS,
+    MERGE_ERROR_MAX_LINES, PLAN_CONTEXT_MAX_SIBLINGS, PLAN_LIST_BUDGET,
+    PR_NOTE_SUMMARY_CHARS, PR_NOTES_BUDGET,
+    QA_SCENARIO_REASON_CHARS, QA_SCENARIOS_MAX,
+    WATCHER_MANAGED_MAX, bounded_join, bounded_lines,
+    fit_prompt, prompt_bytes,
+)
 from pm_core.spec_gen import (format_spec_for_prompt,
                                spec_generation_preamble)
 # Bug-fix prompt blocks live in their own module; re-exported here so
@@ -11,6 +20,23 @@ from pm_core.spec_gen import (format_spec_for_prompt,
 from pm_core.bug_fix_prompts import (
     _is_bug_pr, _bug_fix_flow_block, _bug_fix_review_block,
 )
+
+# Per-block byte budgets live in pm_core/prompt_bounds.py so every builder
+# shares one source of truth.  A prompt is one argv entry (MAX_ARG_STRLEN is
+# 128 KiB); these leave headroom for static text under PROMPT_ARG_LIMIT.
+_PR_NOTES_BUDGET = PR_NOTES_BUDGET
+_PR_NOTE_SUMMARY_CHARS = PR_NOTE_SUMMARY_CHARS
+_PLAN_CONTEXT_MAX_SIBLINGS = PLAN_CONTEXT_MAX_SIBLINGS
+_PLAN_LIST_BUDGET = PLAN_LIST_BUDGET
+_QA_SCENARIOS_MAX = QA_SCENARIOS_MAX
+_QA_SCENARIO_REASON_CHARS = QA_SCENARIO_REASON_CHARS
+_INTEGRATION_MAX_PATHS = INTEGRATION_MAX_PATHS
+_INTEGRATION_LIST_BUDGET = INTEGRATION_LIST_BUDGET
+_ARTIFACT_PATHS_MAX = ARTIFACT_PATHS_MAX
+_ARTIFACT_PATHS_BUDGET = ARTIFACT_PATHS_BUDGET
+_WATCHER_MANAGED_MAX = WATCHER_MANAGED_MAX
+_MERGE_ERROR_MAX_LINES = MERGE_ERROR_MAX_LINES
+_DEPS_MAX = DEPS_MAX
 
 _OUT_OF_SCOPE_BUGS_BLOCK = """
 ## Incidental Bugs
@@ -87,6 +113,25 @@ the appropriate key in the TUI instead.
 """
 
 
+def _signoff_return_block(pr: dict, for_signoff: bool = False) -> str:
+    """Why sign-off sent this PR back (reason, revisions, integration)."""
+    from pm_core.signoff import format_signoff_return
+    return format_signoff_return(pr, for_signoff=for_signoff)
+
+
+def _note_timestamp(n: dict, key: str) -> str:
+    """A note timestamp as a comparable string, tolerating a null value.
+
+    Hand-edited/legacy ``project.yaml`` can carry ``created_at:`` or
+    ``last_edited:`` with a null (or non-string) value.  Comparing that
+    against a string raised TypeError in the merge/sort below and aborted the
+    whole prompt builder — the same malformed-note shape
+    :func:`_pr_note_full_line` and ``cli/pr.py::_note_line`` already tolerate
+    for ``id``/``text``.  Coerce to a string so ordering stays deterministic.
+    """
+    return str(n.get(key) or "")
+
+
 def _format_pr_notes(pr: dict, workdir: str | None = None) -> str:
     """Format PR notes as a markdown section, or empty string if none.
 
@@ -121,20 +166,151 @@ def _format_pr_notes(pr: dict, workdir: str | None = None) -> str:
         if existing is None:
             merged[nid] = n
         else:
-            new_ts = n.get("last_edited") or n.get("created_at", "")
-            old_ts = existing.get("last_edited") or existing.get("created_at", "")
+            new_ts = (_note_timestamp(n, "last_edited")
+                      or _note_timestamp(n, "created_at"))
+            old_ts = (_note_timestamp(existing, "last_edited")
+                      or _note_timestamp(existing, "created_at"))
             if new_ts > old_ts:
                 merged[nid] = n
 
-    all_notes = sorted(merged.values(), key=lambda n: n.get("created_at", ""))
+    all_notes = sorted(merged.values(),
+                       key=lambda n: _note_timestamp(n, "created_at"))
     if not all_notes:
         return ""
-    note_lines = []
-    for n in all_notes:
+    header = "\n## PR Notes\n"
+    full = _render_pr_notes(all_notes)
+    if prompt_bytes(header + full) <= _PR_NOTES_BUDGET:
+        return header + full + "\n"
+    budget = _PR_NOTES_BUDGET - prompt_bytes(header)
+    return header + _render_pr_notes_bounded(all_notes, budget, pr.get("id")) + "\n"
+
+
+def _pr_note_full_line(n: dict) -> str:
+    """One note rendered in full, as both note renderers must render it.
+
+    ``_render_pr_notes`` (the under-budget renderer) and
+    ``_render_pr_notes_bounded`` (which decides per note whether the kept line
+    is the note's full text) have to agree byte for byte: the bounded renderer
+    picks between the two by size, and counts a kept line as "abbreviated" only
+    when it differs from this.  A divergence here would make both the choice
+    and the marker lie.
+    """
+    ts = n.get("created_at", "")
+    ts_str = f" ({ts})" if ts else ""
+    # Tolerate a note with no ``text`` (hand-edited or legacy project.yaml),
+    # the same shape ``_format_pr_notes`` already tolerates for ``id``: this
+    # function renders *every* note (including in ``_render_pr_notes``), so a
+    # direct index would crash the whole prompt builder on one bad note.  A
+    # present-but-null ``text:`` is the same shape, so use ``or ''`` (a plain
+    # default would render the literal ``None``).
+    return f"- {n.get('text') or ''}{ts_str}"
+
+
+def _render_pr_notes(notes: list[dict]) -> str:
+    """Full rendering of every note, one bullet each."""
+    return "\n".join(_pr_note_full_line(n) for n in notes)
+
+
+def _render_pr_notes_bounded(notes: list[dict], budget: int,
+                             pr_id: str | None = None) -> str:
+    """Render notes within *budget*, newest in full and older as summaries.
+
+    Every note stays represented while the budget allows; a closing marker
+    names the count omitted (if any) and the command to read the full text.
+    Newer notes supersede older ones for handoff purposes, so they get the
+    full text first — and when the budget is too small even for every note's
+    one-line summary, the newest note is still kept in full and older
+    summaries are dropped to pay for it.
+
+    *pr_id* is interpolated into the marker so the command is directly
+    runnable — the same block carries the concrete id from ``fit_prompt``'s
+    pointer, so a literal placeholder here would be inconsistent.
+    """
+    read_cmd = f"pm pr note list {pr_id}" if pr_id else "pm pr note list <pr-id>"
+
+    full_line = _pr_note_full_line
+
+    def summary_line(n: dict) -> str:
+        text = " ".join((n.get("text") or "").split())
+        if len(text) > _PR_NOTE_SUMMARY_CHARS:
+            text = text[:_PR_NOTE_SUMMARY_CHARS].rstrip() + "…"
         ts = n.get("created_at", "")
         ts_str = f" ({ts})" if ts else ""
-        note_lines.append(f"- {n['text']}{ts_str}")
-    return f"\n## PR Notes\n" + "\n".join(note_lines) + "\n"
+        return f"- {text}{ts_str}"
+
+    sep = "\n"
+    marker_budget = 220
+    summaries = [summary_line(n) for n in notes]
+    total = prompt_bytes(sep.join(summaries))
+    if total > budget - marker_budget:
+        # Not even every note's one-line summary fits, so notes have to be
+        # dropped.  Keep the *newest* note in full — it is the operative
+        # handoff — and pay for it by dropping more of the oldest summaries;
+        # leaving it as a 200-char preview while older previews survive would
+        # invert the recency ordering the upgrade path below uses.  The
+        # upgrade is skipped when the note cannot fit at all, in which case it
+        # stays a summary (the same degradation the path below applies to a
+        # single oversized note).
+        rendered = list(summaries)
+        newest_full = full_line(notes[-1])
+        upgraded = prompt_bytes(newest_full) <= budget - marker_budget
+        if upgraded:
+            rendered[-1] = newest_full
+        kept = list(rendered)
+        while kept and prompt_bytes(sep.join(kept)) > budget - marker_budget:
+            kept.pop(0)
+        omitted = len(notes) - len(kept)
+        # Count the kept lines that really are previews.  A note short enough
+        # to survive ``summary_line`` unchanged renders identically either way,
+        # so "every kept line but the upgraded newest" would report lines as
+        # abbreviated while the session reads them verbatim — the same marker
+        # accuracy rule the wording below follows.  ``kept`` is a suffix of
+        # ``rendered``, which is aligned 1:1 with ``notes``.
+        first_kept = len(notes) - len(kept)
+        abbreviated = sum(
+            1 for i in range(first_kept, len(notes))
+            if kept[i - first_kept] != full_line(notes[i])
+        )
+        note = f"{omitted} older note(s) omitted"
+        if abbreviated:
+            note += f" and {abbreviated} abbreviated"
+        marker = (
+            f"... ({note} to fit the prompt size limit — "
+            f"run `{read_cmd}` to read all notes.)"
+        )
+        return sep.join(kept + [marker])
+
+    # Reserve the marker's room up front: without it the newest notes would
+    # fill the budget exactly and the "older notes are abbreviated" marker
+    # would have to be dropped, leaving the abbreviations unexplained.
+    remaining = budget - total - marker_budget
+    rendered = list(summaries)
+    upgraded = 0
+    for i in range(len(notes) - 1, -1, -1):
+        full = full_line(notes[i])
+        delta = prompt_bytes(full) - prompt_bytes(rendered[i])
+        if delta > remaining:
+            break
+        rendered[i] = full
+        remaining -= delta
+        upgraded += 1
+    if upgraded:
+        marker = (
+            "... (older notes are abbreviated to fit the prompt size limit — "
+            f"run `{read_cmd}` to read them in full.)"
+        )
+    else:
+        # Not even the newest note fit in full (a single note can exceed the
+        # whole budget), so every note below is a summary.  Naming only the
+        # "older" ones would misdescribe the block the session is reading.
+        marker = (
+            "... (notes are abbreviated to fit the prompt size limit — "
+            f"run `{read_cmd}` to read them in full.)"
+        )
+    if prompt_bytes(sep.join(rendered + [marker])) <= budget:
+        return sep.join(rendered + [marker])
+    # Defensive: drop the marker rather than overshoot the budget.
+    return sep.join(rendered)
 
 
 def generate_prompt(data: dict, pr_id: str, session_name: str | None = None) -> str:
@@ -153,17 +329,25 @@ def generate_prompt(data: dict, pr_id: str, session_name: str | None = None) -> 
     plan_ref = pr.get("plan")
     plan = store.get_plan(data, plan_ref) if plan_ref else None
 
-    # Build dependency context
-    dep_lines = []
-    for dep_id in pr.get("depends_on") or []:
+    # Build dependency context.  Cap the list so a pathological dependency
+    # set cannot blow the prompt budget; the marker points at `pm pr graph`.
+    def _dep_line(dep_id: str) -> str:
         dep_pr = store.get_pr(data, dep_id)
-        if dep_pr:
-            status = dep_pr.get("status", "unknown").upper()
-            dep_lines.append(f"- {dep_id} ({dep_pr.get('title', '???')}) - {status}")
+        if not dep_pr:
+            return ""
+        status = dep_pr.get("status", "unknown").upper()
+        return f"- {dep_id} ({dep_pr.get('title', '???')}) - {status}"
 
+    dep_lines = [line for line in map(_dep_line, pr.get("depends_on") or [])
+                 if line]
     deps_section = ""
     if dep_lines:
-        deps_section = "It depends on:\n" + "\n".join(dep_lines)
+        deps_section = "It depends on:\n" + bounded_join(
+            dep_lines, str, max_items=_DEPS_MAX,
+            max_bytes=_PLAN_LIST_BUDGET,
+            omitted_note=lambda n: (
+                f"... (+{n} more; run `pm pr graph` for the full tree)"),
+        )
 
     branch = pr.get("branch", f"pm/{pr_id}")
     title = pr.get("title", "")
@@ -186,8 +370,12 @@ def generate_prompt(data: dict, pr_id: str, session_name: str | None = None) -> 
 
     tui_block = tui_section(session_name) if session_name else ""
 
-    # Include PR notes (addendums added after work began)
+    # Include PR notes (addendums added after work began).  The sign-off
+    # return block is instruction text (the operative handoff), so it is
+    # inlined whole below rather than passed to fit_prompt; only the notes
+    # enumeration is bounded.
     pr_notes_block = _format_pr_notes(pr, workdir=pr.get("workdir"))
+    signoff_return_block = _signoff_return_block(pr)
 
     beginner_block = _beginner_addendum()
     cleanup_block = _auto_cleanup_addendum()
@@ -200,7 +388,13 @@ def generate_prompt(data: dict, pr_id: str, session_name: str | None = None) -> 
 
     pr_notes_handoff_block = _pr_notes_handoff_block(pr_id)
 
-    prompt = f"""You're working on PR {pr_id}: "{title}"
+    def _assemble(parts: dict[str, str]) -> str:
+        # Only the enumerations and the PR notes are size-bounded, so only
+        # those come from *parts*; the description, spec, sign-off return and
+        # session notes are instructions and are inlined whole.
+        deps_section = parts["deps"]
+        pr_notes_block = parts["notes"]
+        prompt = f"""You're working on PR {pr_id}: "{title}"
 
 This session is managed by `pm`. Run `pm help` to see available commands.
 
@@ -210,7 +404,7 @@ This session is managed by `pm`. Run `pm help` to see available commands.
 
 ## Task
 {description}
-{pr_notes_block}{impl_spec_block}{impl_spec_preamble}{bug_fix_block}{pr_notes_handoff_block}
+{pr_notes_block}{signoff_return_block}{impl_spec_block}{impl_spec_preamble}{bug_fix_block}{pr_notes_handoff_block}
 ## Tips
 - This session may be resuming after a restart. Check `git status` and `git log` to see if previous work exists on this branch — if so, continue from there. The directory may contain uncommitted implementation work from a previous session.
 - Before referencing existing code (imports, function calls, class usage), read the source to verify the interface.
@@ -221,7 +415,30 @@ This session is managed by `pm`. Run `pm help` to see available commands.
 ## Workflow
 {instructions}
 {tui_block}{general_notes_block}{impl_specific_block}{beginner_block}{cleanup_block}"""
-    return prompt.strip()
+        return prompt.strip()
+
+    # Only the PR notes and the pure enumerations are bounded; everything
+    # instruction-shaped (description, spec, sign-off return, session notes)
+    # is inlined whole.  fit_prompt still abbreviates the enumerations when
+    # their sum plus this builder's static text would exceed the argv limit,
+    # and returns the render unchanged — for the launcher's file-backed
+    # bootstrap to deliver intact — when it cannot fit at all.
+    return fit_prompt(
+        _assemble,
+        {
+            "deps": (deps_section, "`pm pr graph`", "dependency list"),
+            "notes": (pr_notes_block, f"`pm pr note list {pr_id}`", "PR notes"),
+        },
+    )
+
+
+def _plan_sibling_line(p: dict) -> str:
+    """One-line listing of a sibling PR for the plan-context block.
+
+    Shared by the review and sign-off prompts; both bound the listing with
+    ``PLAN_LIST_BUDGET`` because the lines carry user-authored titles.
+    """
+    return f"- {p['id']}: {p.get('title', '???')} [{p.get('status', 'pending')}]"
 
 
 def generate_review_prompt(data: dict, pr_id: str, session_name: str | None = None,
@@ -258,14 +475,17 @@ def generate_review_prompt(data: dict, pr_id: str, session_name: str | None = No
     if plan:
         sibling_prs = [p for p in all_prs if p.get("plan") == plan_ref and p["id"] != pr_id]
         if sibling_prs:
-            lines = []
-            for p in sibling_prs:
-                status = p.get("status", "pending")
-                lines.append(f"- {p['id']}: {p.get('title', '???')} [{status}]")
+            lines = bounded_join(
+                sibling_prs, _plan_sibling_line,
+                max_items=_PLAN_CONTEXT_MAX_SIBLINGS,
+                max_bytes=_PLAN_LIST_BUDGET,
+                omitted_note=lambda n: (
+                    f"... (+{n} more; run `pm pr list --plan {plan['id']}`)"),
+            )
             plan_context = f"""
 ## Plan Context
 This PR is part of plan "{plan['name']}" ({plan['id']}). Other PRs in this plan:
-{chr(10).join(lines)}
+{lines}
 """
 
     tui_block = tui_section(session_name) if session_name else ""
@@ -279,8 +499,11 @@ This PR is part of plan "{plan['name']}" ({plan['id']}). Other PRs in this plan:
     except FileNotFoundError:
         pass
 
-    # Include PR notes (addendums)
+    # Include PR notes (addendums) and the sign-off return block.  Only the
+    # notes block is bounded; the return is instruction text and is inlined
+    # whole (see generate_prompt).
     pr_notes_block = _format_pr_notes(pr, workdir=pr.get("workdir"))
+    signoff_return_block = _signoff_return_block(pr)
 
     # Backend-appropriate diff and sync commands
     backend_name = data.get("project", {}).get("backend", "vanilla")
@@ -316,14 +539,33 @@ implementation has significant gaps, consider requesting re-implementation
 with spec generation enabled.
 """.replace("{pr_id}", pr_id)
 
-    prompt = f"""You are reviewing PR {pr_id}: "{title}"
+    # Everything appended after the main body is static for this build, so
+    # compute it once: fit_prompt may re-render several times.
+    tail = ""
+    if _is_bug_pr(pr):
+        tail += _bug_fix_review_block(pr)
+    tail += "\n" + _OUT_OF_SCOPE_BUGS_BLOCK
+    tail += "\n" + _pr_notes_handoff_block(pr_id)
+    tail += review_specific_block
+    tail += _beginner_addendum()
+    if review_loop:
+        tail += _review_loop_addendum(pr.get("branch", ""), review_iteration,
+                                      review_loop_id)
+
+    def _assemble(parts: dict[str, str]) -> str:
+        # Only the enumerations and the PR notes are size-bounded; the
+        # description, spec, sign-off return and session notes are
+        # instructions and are inlined whole.
+        pr_notes_block = parts["notes"]
+        plan_context = parts["plan"]
+        prompt = f"""You are reviewing PR {pr_id}: "{title}"
 
 ## Task
 Review the code changes in this PR for quality, correctness, and architectural fit.
 
 ## Description
 {description}
-{pr_notes_block}{impl_spec_block}{plan_context}{tui_block}{general_notes_block}
+{pr_notes_block}{signoff_return_block}{impl_spec_block}{plan_context}{tui_block}{general_notes_block}
 ## Steps
 {pull_step}{n}. Run `{diff_cmd}` to see all changes
 {n+1}. **Generic checks** — things any codebase should get right:
@@ -342,17 +584,659 @@ Review the code changes in this PR for quality, correctness, and architectural f
    - **NEEDS_WORK** — Blocking issues or non-blocking suggestions found — either way, fix them in this iteration. Separate code-quality fixes from architectural concerns.
    - **INPUT_REQUIRED** — Any issue that needs the user's attention before the PR can proceed: ambiguities in the PR spec, architectural decisions you can't make alone, something that looks broken but you can't tell if it's intentional, a dependency or environmental problem you can't resolve, or anything else you'd want a human to look at before moving on. If in doubt between NEEDS_WORK and INPUT_REQUIRED, prefer INPUT_REQUIRED — an unresolved concern silently rolled into a PASS is the worst outcome. Do NOT use INPUT_REQUIRED for manual testing — QA handles testing separately. Include specific questions that need the user's decision."""
 
-    base = prompt.strip()
+        base = prompt.strip()
+        return base + tail
+
+    # Only the PR notes and the two enumerations (sibling-PR plan context,
+    # dependency list) are bounded; the description, spec, sign-off return and
+    # session notes are instructions and are inlined whole.  fit_prompt
+    # abbreviates the enumerations until the prompt fits, and returns the
+    # render unchanged when it cannot.
+    return fit_prompt(
+        _assemble,
+        {
+            "notes": (pr_notes_block, f"`pm pr note list {pr_id}`", "PR notes"),
+            "plan": (plan_context,
+                     f"`pm pr list --plan {plan_ref}`" if plan_ref
+                     else "`pm pr list`", "plan context"),
+        },
+    )
+
+
+# The on-demand reader for the sign-off QA-scenario block.  Spelled `$CAP/...`
+# (defined by the sign-off prompt's own evidence checklist) so it resolves in
+# the container the session runs in.  One source of truth for the three
+# markers that name it: the block's count marker, its per-line truncation
+# note, and fit_prompt's block-level marker — a block-level marker that named
+# only `pm qa captures-path` (which prints a directory) would not return the
+# verdicts it cut.
+_QA_SCENARIOS_PATH = "`$CAP/scenarios/<n>/verdict.md`"
+_QA_SCENARIOS_READER = f"{_QA_SCENARIOS_PATH} for all verdicts"
+
+# Fallback when the PR's newest qa_status.json cannot be used: missing,
+# unreadable, or valid JSON that is not an object (a hand-edited/corrupt
+# file).  Same wording for every cause so the sign-off session always gets
+# the same instruction.
+_QA_STATUS_UNREADABLE = (
+    "\n_qa_status.json unreadable — read the captures dir directly._\n")
+
+
+def _qa_scenarios_pointer() -> str:
+    """Where a session reads the QA verdicts an abbreviated listing left out.
+
+    The live ``qa_status.json`` lives in an ephemeral workdir under the *host*
+    ``~/.pm/workdirs/qa/``, which does not exist inside the container the
+    sign-off session runs in — the same host-vs-container split
+    :func:`pm_core.integration.integration_pointer` handles.  Per-scenario
+    verdicts are persisted under the captures dir
+    (``scenarios/<n>/verdict.md`` + ``scenario.json``, see
+    ``qa_loop._persist_scenario_verdicts``), and that dir is bind-mounted at
+    ``/pm-captures`` inside a container — so name it, not the workdir file.
+
+    Spelled ``$CAP/...`` rather than an absolute path: this prompt is built by
+    the *host* pm process but read inside the container, where the host
+    ``~/.pm/sessions/<tag>/captures/`` path does not exist.  The sign-off
+    prompt defines ``CAP="$(pm qa captures-path <pr-id>)"`` in its own
+    evidence checklist and already spells the per-scenario dir
+    ``$CAP/scenarios/<n>/`` there, so the marker matches it exactly (and
+    resolving a path here would also create the captures dir as a side
+    effect).
+    """
+    return f"read {_QA_SCENARIOS_READER}"
+
+
+def _signoff_qa_scenarios_parts(pr_id: str) -> tuple[str, str]:
+    """Split the QA status block into ``(head, listing)``.
+
+    *head* is the overall verdict and the QA error.  Both are pm-generated
+    evidence, not enumerations, so they are inlined whole and never truncated:
+    the error's full text exists only in the QA run's host
+    ``~/.pm/workdirs/qa/<pr>-*/qa_status.json``, which a containerised
+    sign-off session cannot read (the reason the old 500-character cut was
+    removed).  Keeping them out of the shrinkable block is what stops
+    ``fit_prompt`` from cutting the error with a marker that names the
+    per-scenario verdict files — which do not contain it.
+
+    *listing* is the per-scenario verdict enumeration — the only part the
+    sign-off builder hands to ``fit_prompt``.  It is count- and line-bounded,
+    and every marker it carries names the per-scenario verdict files under
+    ``$CAP``, which really do contain the full verdicts.
+    """
+    import json
+    from pm_core.paths import latest_qa_status_path
+    latest = latest_qa_status_path(pr_id)
+    if latest is None:
+        return ("\n_No qa_status.json found — read the captures dir directly._\n",
+                "")
+    try:
+        data = json.loads(latest.read_text())
+    except (OSError, ValueError):
+        return (_QA_STATUS_UNREADABLE, "")
+    # The file is written as an object by ``qa_loop._write_status_file``, but
+    # a hand-edited/corrupt one can hold any valid JSON; a non-object would
+    # raise AttributeError on ``.get()`` and abort the whole sign-off prompt.
+    # Same fallback as an unreadable file.
+    if not isinstance(data, dict):
+        return (_QA_STATUS_UNREADABLE, "")
+    head_lines = [f"Overall QA verdict: **{data.get('overall') or '?'}**"]
+    if data.get("error"):
+        # Normalise whitespace but keep every character.  The error is
+        # pm-generated (planner/trust/handoff messages), not a collection, and
+        # a bare ``…`` cut here would be loss with no reader: the full text
+        # lives only in the QA run's host
+        # ``~/.pm/workdirs/qa/<pr>-*/qa_status.json``, which a containerised
+        # sign-off session cannot read.
+        err = " ".join(str(data["error"]).split())
+        head_lines.append(f"QA error: {err}")
+    head = "\n" + "\n".join(head_lines) + "\n"
+    scenarios = data.get("scenarios") or []
+    if isinstance(scenarios, dict):
+        scenarios = list(scenarios.values())
+    valid = [s for s in scenarios if isinstance(s, dict)]
+    if not valid:
+        return (head, "")
+    truncated = False
+
+    def _scenario_line(s: dict) -> str:
+        nonlocal truncated
+        idx = s.get("index", "?")
+        title = " ".join(str(s.get("title", "")).split())
+        if len(title) > 120:
+            title = title[:120].rstrip() + "…"
+            truncated = True
+        verdict = s.get("verdict", "?")
+        reason = " ".join((s.get("verdict_reason") or "").split())
+        if len(reason) > _QA_SCENARIO_REASON_CHARS:
+            reason = reason[:_QA_SCENARIO_REASON_CHARS].rstrip() + "…"
+            truncated = True
+        line = f"- Scenario {idx} — {title}: **{verdict}**"
+        if reason:
+            line += f" — {reason}"
+        return line
+
+    listing_lines = [bounded_join(
+        valid, _scenario_line, max_items=_QA_SCENARIOS_MAX,
+        omitted_note=lambda n: (
+            f"... (+{n} more scenarios; {_qa_scenarios_pointer()})"),
+    )]
+    if truncated:
+        # A title/reason cut per line is not a dropped item, so the
+        # listing's own omission marker does not cover it — without this
+        # note the session reads abbreviated previews as if they were the
+        # full verdicts (the same "the marker must describe what the session
+        # is reading" rule the PR-notes and plan-deps markers follow).
+        # `$CAP` is defined in this prompt's own evidence checklist, so the
+        # note needs no path resolution.
+        listing_lines += [
+            "",
+            "_(Scenario titles and reasons above are abbreviated to fit "
+            f"the prompt size limit; read {_QA_SCENARIOS_PATH} "
+            "for the full verdicts.)_",
+        ]
+    return (head + "\n", "\n".join(listing_lines) + "\n")
+
+
+def _signoff_qa_scenarios_block(pr_id: str) -> str:
+    """The complete QA status block (head + listing).
+
+    See :func:`_signoff_qa_scenarios_parts` for the split; the sign-off
+    builder passes only the listing to ``fit_prompt``.
+    """
+    head, listing = _signoff_qa_scenarios_parts(pr_id)
+    return head + listing
+
+
+def _signoff_integration_block(pr: dict, pr_id: str) -> str:
+    """The integration check sign-off reviews (see pm_core.integration)."""
+    from pm_core import integration as integ
+    from pm_core.signoff import SIGNOFF_IMPL, SIGNOFF_MERGE
+    rec = pr.get("integration") or {}
+    if not rec:
+        return ("\n_No integration check recorded — run `pm pr signoff "
+                f"integrate {pr_id}` before routing; {SIGNOFF_MERGE} is "
+                "impossible without one._\n")
+    base_sha = rec.get("base_sha") or ""
+    lines = [
+        f"- Target: `{rec.get('base_branch')}` of `{rec.get('target_repo')}`",
+        f"- Fetched base revision: `{base_sha or '?'}`",
+        f"- PR HEAD checked: `{rec.get('head') or '?'}`",
+        f"- Result: **{rec.get('status')}** — {integ.summary(rec)}",
+    ]
+    if rec.get("merge_base") and base_sha:
+        lines.append(
+            f"- Base changes since this PR branched: `git log --oneline "
+            f"{rec['merge_base'][:12]}..{base_sha[:12]}` / `git diff "
+            f"{rec['merge_base'][:12]} {base_sha[:12]}` "
+            f"({rec.get('base_files_count', 0)} file(s))")
+    # Count-capped *and* byte-bounded: the lines are filesystem paths, so 20
+    # long ones measured 200 KB — over PROMPT_ARG_LIMIT, in static text
+    # fit_prompt cannot shrink.  The pointer names the full record.
+    # The marker carries no leading space: bounded_join appends it after
+    # ``separator`` (", "), so one here would render as a double space.
+    # The count is the *record's* remainder, not just this list's: project.yaml
+    # keeps at most ``_YAML_LIST_LIMIT`` paths per list and records the real
+    # total separately, so a 200-path record must not read as "(+20 more)".
+    def _list_note(vals: list, total):
+        def note(n: int) -> str:
+            omitted = integ.omitted_path_count(vals, total, n)
+            return f"(+{omitted} more; {integ.integration_pointer(pr_id)})"
+        return note
+
+    if rec.get("overlap"):
+        vals = rec["overlap"]
+        lines.append("- Files changed on both sides: " + bounded_join(
+            vals, lambda f: f"`{f}`", max_items=_INTEGRATION_MAX_PATHS,
+            max_bytes=_INTEGRATION_LIST_BUDGET,
+            separator=", ",
+            omitted_note=_list_note(vals, rec.get("overlap_total"))))
+    if rec.get("conflicts"):
+        vals = rec["conflicts"]
+        lines.append("- Conflicting paths: " + bounded_join(
+            vals, lambda f: f"`{f}`", max_items=_INTEGRATION_MAX_PATHS,
+            max_bytes=_INTEGRATION_LIST_BUDGET,
+            separator=", ",
+            omitted_note=_list_note(vals, rec.get("conflicts_total"))))
+    if rec.get("status") == integ.CONFLICT:
+        lines.append(f"- A conflicted integration can only route "
+                     f"**{SIGNOFF_IMPL}** (pm enforces this).")
+    return "\n" + "\n".join(lines) + "\n"
+
+
+def generate_signoff_prompt(data: dict, pr_id: str,
+                            session_name: str | None = None) -> str:
+    """Generate a Claude Code prompt for the sign-off step of a PR.
+
+    Sign-off is the PR-level comprehensive review that runs *after* QA passes
+    and finalizes.  It walks every scenario + every step, aggregates evidence
+    across ALL stages (impl repro/verify captures + per-scenario captures),
+    weighs the diff vs master and the PR's scope, then emits a single routing
+    verdict that pm executes as the PR's next hop.
+
+    The reviewer is a **router only** — it never edits code; every fix happens
+    back in impl/qa so it re-passes review+qa.
+    """
+    from pm_core.signoff import (
+        SIGNOFF_MERGE, SIGNOFF_REQA, SIGNOFF_REVIEW, SIGNOFF_IMPL, SIGNOFF_BLOCKED,
+    )
+
+    pr = store.get_pr(data, pr_id)
+    if not pr:
+        raise ValueError(f"PR {pr_id} not found")
+
+    title = pr.get("title", "")
+    description = pr.get("description", "").strip()
+    base_branch = data.get("project", {}).get("base_branch", "master")
+    backend_name = data.get("project", {}).get("backend", "vanilla")
+    if backend_name == "local":
+        diff_cmd = f"git diff {base_branch}...HEAD"
+    else:
+        diff_cmd = f"git diff origin/{base_branch}...HEAD"
+
+    # Plan / sibling context (scope awareness for the router).
+    plan_ref = pr.get("plan")
+    plan = store.get_plan(data, plan_ref) if plan_ref else None
+    all_prs = data.get("prs") or []
+    plan_context = ""
+    if plan:
+        sibling_prs = [p for p in all_prs
+                       if p.get("plan") == plan_ref and p["id"] != pr_id]
+        if sibling_prs:
+            lines = bounded_join(
+                sibling_prs, _plan_sibling_line,
+                max_items=_PLAN_CONTEXT_MAX_SIBLINGS,
+                max_bytes=_PLAN_LIST_BUDGET,
+                omitted_note=lambda n: (
+                    f"... (+{n} more; run `pm pr list --plan {plan['id']}`)"),
+            )
+            plan_context = (
+                f"\n## Plan Context\nThis PR is part of plan "
+                f"\"{plan['name']}\" ({plan['id']}). Other PRs:\n"
+                + lines + "\n")
+
+    tui_block = tui_section(session_name) if session_name else ""
+    pr_notes_block = _format_pr_notes(pr, workdir=pr.get("workdir"))
+    signoff_return_block = _signoff_return_block(pr, for_signoff=True)
+    impl_spec_block = format_spec_for_prompt(pr, "impl") or ""
+    # The QA block is split: the overall verdict and the QA error are
+    # pm-generated evidence, inlined whole; only the per-scenario verdict
+    # listing is handed to fit_prompt as a shrinkable enumeration.
+    qa_head, qa_listing = _signoff_qa_scenarios_parts(pr_id)
+    integration_block = _signoff_integration_block(pr, pr_id)
+
     if _is_bug_pr(pr):
-        base += _bug_fix_review_block(pr)
-    base += "\n" + _OUT_OF_SCOPE_BUGS_BLOCK
-    base += "\n" + _pr_notes_handoff_block(pr_id)
-    base += review_specific_block
-    base += _beginner_addendum()
-    if review_loop:
-        base += _review_loop_addendum(pr.get("branch", ""), review_iteration,
-                                      review_loop_id)
-    return base
+        impl_bullet = (
+            f"`$CAP/impl/` — implementation captures. This is a **bug-fix PR** "
+            f"(reproduce → fix → verify), so impl captures split into "
+            f"`pre-fix/` (the failing repro on pre-fix code) and `post-fix/` "
+            f"(the post-fix verification). Read both and judge whether they "
+            f"genuinely demonstrate the bug and its absence — a fix with thin "
+            f"or missing repro/verify evidence has not really been shown to "
+            f"work (route **{SIGNOFF_IMPL}**)."
+        )
+    else:
+        impl_bullet = (
+            "`$CAP/impl/` — implementation captures (primary evidence for the "
+            "PR's behavior)."
+        )
+
+    # The per-block budgets above bound each block on its own, but their sum
+    # plus this builder's static text (~19 KB) can still exceed the argv
+    # limit when a PR is large in several dimensions at once.  fit_prompt
+    # abbreviates the largest blocks — each marker names where to read the
+    # full text — until the whole prompt fits.
+    plan_pointer = (f"`pm pr list --plan {plan_ref}`" if plan_ref
+                    else "`pm pr list`")
+    tail = "\n" + _pr_notes_handoff_block(pr_id) + _beginner_addendum()
+
+    def _assemble(parts: dict[str, str]) -> str:
+        # Only the enumerations and the PR notes are size-bounded; the
+        # description, spec and sign-off return are instructions and are
+        # inlined whole.
+        pr_notes_block = parts["notes"]
+        plan_context = parts["plan"]
+        qa_listing = parts["qa"]
+        prompt = f"""You are performing the **sign-off review** for PR {pr_id}: "{title}"
+
+Sign-off is the dedicated lifecycle step between QA and merge. Your job is a
+PR-level *comprehensive* review and a routing decision.
+
+## Description
+{description}
+{pr_notes_block}{signoff_return_block}{impl_spec_block}{plan_context}{tui_block}
+## QA scenarios (from the QA run)
+{qa_head}{qa_listing}
+## Integration with the latest base
+pm fetched the latest `{base_branch}` and merged this PR's HEAD with it in an
+isolated candidate (your worktree and the base branch were not touched):
+{integration_block}
+## What to do
+
+0. **Check integration with the latest base.** Sign-off owns integration: a
+   {SIGNOFF_MERGE} certifies this PR *combined with the base revision above*,
+   and the merge step publishes exactly that candidate — it never resolves
+   conflicts. You may refresh the check with
+   `pm pr signoff integrate {pr_id}` (read-only: it fetches and computes
+   the candidate). Your verdict
+   is bound to the check shown above; if a refresh shows the base moved,
+   say so in the report — the merge step re-runs sign-off when the base it
+   approved is no longer current. Read what changed on the base since the
+   PR branched and judge
+   whether it interacts with this PR: conflicts, semantic overlap (the same
+   behaviour, APIs, data or tests changed on both sides) or changed
+   behaviour the PR relies on. Line/file counts alone are not the rule.
+   Never merge the base into the branch, push the base branch, or run any
+   backend merge (`pm pr merge`, `gh pr merge`) yourself — on a return pm
+   merges a clean base into the PR branch for the next step, and
+   conflicts go to implementation.
+
+1. **Read the diff**: run `{diff_cmd}`.
+
+2. **Review the evidence record. Make sure all features are included in artifacts
+     that are sufficient to demonstrate success of the PR without reviewing code.**
+   - `CAP="$(pm qa captures-path {pr_id})"`:
+     - {impl_bullet}
+     - `$CAP/scenarios/<n>/` — per-scenario QA captures, prompts, and verdicts.
+   - **(a) BDD — does the captured behavior support the diff's claims?** For
+     each scenario/step, does the evidence actually demonstrate the behavior the
+     diff claims to deliver?
+   - **(b) Meta-QA / anti-shortcut — was the QA itself rigorous?** Look for thin
+     evidence, a scenario that drove a *mock* instead of code the PR touched, or
+     an obvious uncovered edge case. (Per-scenario false-PASS is already caught
+     inline by the scenario quality supervisor; this is the PR-level pass over
+     scenarios it already vetted.)
+
+3. **Write the sign-off report (deliverable).** Produce `$CAP/report.html`
+   — the human-facing BDD behaviour report. Evidence files live alongside
+   it; reference them by relative path and make sure the page opens over
+   `file://`.
+
+   The audience is an **external technical reviewer** who is invested in
+   the project but not necessarily familiar with this PR's details or the
+   surrounding code. **The report should stand on its own such that the
+   reviewer does not need to read the diff to trust the verdict** — it is
+   meant to *replace* human code review of this PR, not summarise it.
+   Anything that would have been load-bearing for a reviewer staring at
+   the diff should be in the report.
+
+   Design for **two depths in the same page**: a brief read of the
+   top-line content (header, recommendation, summary, per-step
+   conclusions) should be enough to trust the verdict and move on; the
+   *same* page should also carry the full depth — diff, scenario
+   evidence, captures — folded behind `<details>` blocks so a reviewer
+   who wants to audit can click through without leaving the page or
+   re-deriving anything. Default to collapsed for everything the
+   top-line reader doesn't need.
+
+   Write so the reviewer can pick the report up cold and:
+
+   - see **what this PR delivers** — a short, plain-English list of every
+     behaviour or change it ships — and the **inline evidence each piece
+     works**, side by side. This is the headline; the reviewer should be
+     able to read it and watch the demos in a couple of minutes and trust
+     the result;
+   - understand and trust your sign-off verdict without opening the diff;
+   - find **entry points** into loop findings (bugs that surfaced,
+     ambiguities you ran into) and the **project-level implications**
+     they imply — sibling PRs to file, decisions that constrain future
+     PRs, assumptions other plan items now depend on. These are secondary
+     to "what shipped", not the headline.
+
+   Plain English; no internal jargon (don't drop a naked function or
+   file name without a one-clause "what it is"); link to the underlying
+   commit / scenario / note for every item so the entry point is one
+   click away.
+
+   ### Hard requirement — the dashboard contract
+
+   The all-PRs dashboard (`pm pr dashboard`) reads only one piece
+   of structured data from your report: the routing verdict, parsed from
+   a single meta tag in `<head>`. This MUST be present verbatim with the
+   keyword you're routing to:
+
+   ```html
+   <meta name="pm-signoff-verdict" content="{SIGNOFF_MERGE}">
+   ```
+
+   (replace the content with whichever of {SIGNOFF_MERGE} / {SIGNOFF_REQA}
+   / {SIGNOFF_REVIEW} / {SIGNOFF_IMPL} / {SIGNOFF_BLOCKED} you choose).
+   Without it the row shows "verdict unknown". Everything else on the
+   dashboard comes from `project.yaml`.
+
+   Also bind the report to what you reviewed, and give the routing reason
+   (the next agent is shown it verbatim):
+
+   ```html
+   <meta name="pm-signoff-head" content="<PR HEAD sha you reviewed>">
+   <meta name="pm-signoff-base" content="<base revision sha you integrated with>">
+   <meta name="pm-signoff-reason" content="<one or two sentences: why this route>">
+   ```
+
+   A human approval (`pm pr signoff record`) is refused unless these match
+   the current HEAD and the recorded integration check. Include an
+   **Integration** section in the report: target base revision, result,
+   overlapping files and your semantic assessment.
+
+   ### Suggested shape — adapt as needed to serve the goal above
+
+   These sections are common pieces that tend to convince a reviewer.
+   Skip what isn't load-bearing for this PR, add anything you think the
+   reviewer needs:
+
+   - **Header**: PR display id + title; the routing verdict marker (▲
+     {SIGNOFF_MERGE} etc., using the `SIGNOFF_VERDICT_ICONS` /
+     `SIGNOFF_VERDICT_STYLES` tokens from `pm_core/signoff.py` so the
+     visual matches the TUI and `pm pr list`); one-line recommendation;
+     link back to `../index.html` for navigation (the all-PRs dashboard
+     served by `pm pr dashboard` — that path resolves to the live index
+     when the report is viewed through the dashboard server; there is no
+     static `index.html` file on disk).
+
+   - **Table of contents** near the top — anchor links into every
+     section below. Add `id="..."` to each section heading and a small
+     `<nav>` (or `<ul>`) listing them so the reviewer can jump straight
+     to e.g. the diff, the QA evidence, or a specific scenario without
+     scrolling. A single PR's report can run long; the TOC is the
+     reviewer's index.
+
+   - **What this PR delivers** (the headline; this is what the reviewer
+     reads first). A short plain-English list of every user-visible
+     behaviour, interface, or code area this PR ships. Treat it like
+     release notes: if the reviewer reads only this list, they should
+     know what shipped. One line per item. Link each bullet to the
+     diff anchor / commit it lives in.
+
+   - **Demonstrations — proof each delivered behaviour works.** For
+     every bullet in "What this PR delivers" above, **embed the
+     evidence inline right there** — pair the description with the
+     proof. Prefer demonstrations the reviewer can *watch* over text
+     they have to read: screen captures (`.mp4`) before logs; logs
+     only when a screen capture isn't meaningful (e.g. a pure
+     data-transformation result). If a bullet has no demonstration,
+     say so explicitly and explain why (e.g. "schema-only change,
+     verified via the type-check evidence below") — silent omission
+     reads as incomplete verification.
+
+     **If you cannot assemble this headline — you can't enumerate what
+     the PR delivered, or a delivered behaviour has no watchable
+     evidence and isn't a justifiable text-only exception — route to
+     {SIGNOFF_REQA} and leave a `pm pr note add {pr_id} '...'` entry
+     naming exactly what's missing** (which behaviour, what kind of
+     evidence you'd expect). QA owns producing demonstration evidence;
+     sign-off won't paper over an undemonstrated feature.
+
+   - **Loop findings & project-level implications** (secondary, not
+     the headline). Context the *planner* needs but the immediate
+     reviewer doesn't have to read first:
+
+     * **Bugs found and fixed during review/QA in this loop** (not
+       part of the original implementation) — with the area of code or
+       behaviour the bug hid in, so similar code elsewhere can be
+       audited.
+     * **Spec ambiguities** — resolved (question, answer, who decided)
+       and *unresolved* (flagged for human input). Call out anywhere
+       the resolution changes sibling PRs or future plan items.
+     * **Open questions, follow-up PRs to file, changed assumptions**
+       other plan items now depend on.
+
+   - **Per-step sections** for Implementation, Review, and QA pairing
+     evidence to each step's acceptance criteria. For a **bug PR** show
+     Implementation as Before/After (pre-fix: bug reproduces; post-fix:
+     symptom gone) and flag a missing phase rather than dropping it.
+
+   - **Code change (the diff)** — there is no web UI for the diff
+     elsewhere, so the report carries it. Run the same diff command
+     from step 1 (`{diff_cmd}`) and embed the output so the reviewer
+     can read or audit the actual change without leaving the page.
+     For navigability, split by file: get the changed file list with
+     `{diff_cmd} --name-only`, render it as an inline TOC for this
+     section, then for each file render a `<details>` block, collapsed
+     by default, containing `<pre><code class="diff">`-wrapped output
+     of `{diff_cmd} -- <path>` (HTML-escape `<`, `>`, `&` inside the
+     `<pre>`). The summary should be the file path so a reviewer can
+     scan paths and only expand what they want to read. For a small
+     single-file diff, one combined `<details>` is fine.
+
+   - **Context** at the bottom: PR description, PR notes, plan name +
+     plan notes when present — for a reviewer who wants the source
+     material without leaving the page.
+
+   ### Evidence rendering
+
+   Embed inline whenever the browser supports it. Pick the appropriate
+   native HTML control per type:
+
+     - `<video controls>` for `.mp4` video
+     - `<img>` for `.png` / `.jpg` / `.gif` / `.svg`
+     - `<audio controls>` for `.wav` / `.mp3` / `.ogg` / `.opus`
+     - `<details><pre>` for small text / log files under ~50 KB
+
+   **Layout stability:** every `<video>` and `<img>` carries explicit
+   `width` and `height` attributes (probe with `ffprobe -v error
+   -select_streams v:0 -show_entries stream=width,height -of csv=p=0
+   <file>` — works for images too), and the report's CSS includes
+   `video,img{{max-width:100%;height:auto}}`. The attributes reserve the
+   correct aspect-ratio box before media loads (no layout shift as the
+   page loads) while the CSS keeps display responsive. The page itself
+   never scrolls horizontally at any viewport width: wide content
+   (tables, code blocks, long unbroken strings) scrolls inside its own
+   container instead — include
+   `pre{{overflow-x:auto}}` and wrap each `<table>` in a
+   `<div style="overflow-x:auto">` (or give tables
+   `display:block;overflow-x:auto;max-width:100%`).
+
+   For **Markdown** evidence (`.md`), render the body inline so the
+   reader never sees stale or out-of-sync HTML. For each `.md` you
+   reference, run `pm md-render <relative path>` — this prints the
+   body-only HTML fragment (CommonMark + tables + fenced_code, no
+   document shell) — and drop the fragment inside a `<details>`
+   block collapsed by default:
+
+   ```html
+   <details>
+     <summary>scenarios/3/notes.md</summary>
+     <div class="md-body"><!-- pm md-render scenarios/3/notes.md output --></div>
+   </details>
+   ```
+
+   Use the relative path as the `<summary>` so the source file stays
+   discoverable. Do NOT link to a sibling `.md.html` — there isn't one;
+   rendering happens at report-write time so the embedded view always
+   matches what's on disk right now.
+
+   **Link as-is** for `.html` files (already render natively) and for
+   any large binary content.
+
+4. **Route** by picking the verdict below whose definition matches what you
+   found. Each verdict names the lifecycle step whose acceptance criteria it
+   covers; weigh those criteria against the evidence and choose the keyword
+   that fits — read every definition before deciding. End your response with
+   exactly ONE verdict keyword on its own line.
+
+   - **{SIGNOFF_MERGE}** — all three steps met their criteria: the evidence
+     supports the diff and the QA was rigorous, **and** the PR integrates
+     with the latest base conflict-free with no interaction that needs more
+     work or verification. This is a RECOMMENDATION to merge bound to the
+     reviewed HEAD and base revision — sign-off never merges itself; the PR
+     is reported ready_to_merge and the merge decision is made later. If the
+     PR or the base moves before the merge, the merge is refused and
+     sign-off re-runs.
+   - **{SIGNOFF_IMPL}** — covers the **Implementation** step. Purpose of impl:
+     deliver the PR's required behavior and an implementation spec. Criteria:
+     the diff implements every requirement in the spec/description; an impl
+     spec exists and the code matches it; for a bug PR, the pre-fix + post-fix
+     captures exist and demonstrate the bug and its fix. Use when there is a
+     real gap in the implementation (e.g. an INPUT_REQUIRED reflecting missing
+     required behavior, or missing captures), **or when integrating the base
+     needs code work**: merge conflicts, or base changes that require the
+     PR's code to adapt. Back to implementation (which merges the base into
+     the PR branch and reconciles it).
+   - **{SIGNOFF_REVIEW}** — covers the **Review** step. Purpose of review:
+     confirm code quality, correctness, and architectural fit. Criteria: the
+     change was actually reviewed (a review verdict exists) and no unaddressed
+     quality/architecture/correctness issue remains. If code changed after the
+     last review (e.g. a scenario fixed something during QA), it has NOT been
+     re-reviewed. Must re-pass review AND qa to validate the fix is real and
+     shortcut-free. Also use it when the base integrates cleanly but its
+     changes overlap this PR enough that the *combined* code needs review
+     (pm merges the clean base into the branch before review runs).
+   - **{SIGNOFF_REQA}** — covers the **QA** step. Purpose of QA: prove the
+     behavior works against the *real* code path. Criteria: every scenario has
+     an accounted-for verdict; each exercised the real path (not a mock) with
+     captured evidence; **every behaviour this PR delivers has a watchable
+     demonstration recorded**; obvious edge cases are covered; no PASS is unverified (e.g. verifier-cwd). Use when a PASS
+     is *unverified* (harness problem made it untrustworthy), a scenario was
+     *misframed*, OR you can't assemble the report's "What this PR delivers"
+     headline because demonstration evidence is missing for one or more
+     delivered behaviours — or the base integrates cleanly but its changes
+     could affect behaviour this PR's evidence covers, so the affected
+     scenarios must be re-verified on the integrated code (pm merges the
+     clean base into the branch first). Harness/QA problem, not a code
+     problem → re-run QA. Do NOT bounce to impl. **Leave a `pm pr note add {pr_id} '...'`
+     entry naming what's missing** so QA knows exactly what to record.
+   - Pick the **earliest** affected step: implementation before review
+     before QA. Preserve valid earlier evidence and say in the report which
+     evidence still holds (and at which revision) and which must be redone.
+   - **{SIGNOFF_BLOCKED}** — escalate / hold. Use this for genuine ambiguity
+     (CONSERVATIVE BIAS: when truly unsure, BLOCK and escalate rather than
+     merge), something impossible / out-of-scope (note the limitation), or an
+     assumed-missing feature for which you filed a follow-up PR.
+
+### Classifying an INPUT_REQUIRED before routing
+- **Misframed scenario** → note it → **{SIGNOFF_REQA}**.
+- **Real gap** → note it → **{SIGNOFF_IMPL}**.
+- **PR description assumed-missing feature** → file a new PR with a blocking `depends_on`
+  (`pm pr add ...`, then set the dependency), note it → **{SIGNOFF_BLOCKED}**;
+  or, if you judge it in-scope, expand scope and **{SIGNOFF_IMPL}**.
+- **Nice-to-have** → defer to a new PR (`pm pr add ...`) and **{SIGNOFF_MERGE}**,
+  or include it via impl if trivial (**{SIGNOFF_IMPL}**).
+- **Impossible / out-of-scope** → note the limitation → **{SIGNOFF_MERGE}** (if
+  the PR still stands on its own) or **{SIGNOFF_BLOCKED}**.
+
+`pm pr add` creates a *pending* PR (no agent session) so you may run it. Do NOT
+run any command that spawns an agent session (e.g. `pm pr start`).
+
+IMPORTANT: end your response with exactly one of {SIGNOFF_MERGE}, {SIGNOFF_REQA},
+{SIGNOFF_REVIEW}, {SIGNOFF_IMPL}, or {SIGNOFF_BLOCKED} on its own line."""
+        return prompt.strip() + tail
+
+    # Only the PR notes and the enumerations (sibling-PR plan context, QA
+    # scenario verdicts) are bounded; the description, spec and sign-off
+    # return are instructions and are inlined whole.
+    return fit_prompt(
+        _assemble,
+        {
+            "notes": (pr_notes_block, f"`pm pr note list {pr_id}`", "PR notes"),
+            "plan": (plan_context, plan_pointer, "plan context"),
+            # fit_prompt's marker says "Read the full text: <pointer>", so the
+            # pointer must return the verdicts this block cut.  `pm qa
+            # captures-path` only prints the captures directory; the per-
+            # scenario verdict files are the actual reader (the same one the
+            # block's own count marker names, and CAP is defined by this
+            # prompt's evidence checklist).  Only the listing is a block: the
+            # overall verdict and the QA error above it are not enumerations.
+            "qa": (qa_listing, _QA_SCENARIOS_READER, "QA scenario summary"),
+        },
+    )
 
 
 def _review_loop_addendum(branch: str, iteration: int = 0,
@@ -444,33 +1328,25 @@ def _auto_cleanup_addendum() -> str:
 Auto-cleanup is enabled. After finishing your main work:
 - Check for old or dead tmux panes that are no longer needed
 - Suggest the user press `b` in the TUI to rebalance panes after closing panes
-- Remind them they can run `pm pr cleanup <pr-id>` to remove merged PR workdirs
+- Remind them they can run `pm pr cleanup <pr-id>` to remove merged or closed PR workdirs
 """
 
 
 def generate_merge_prompt(data: dict, pr_id: str, error_output: str,
-                          session_name: str | None = None,
-                          pull_from_workdir: str | None = None,
-                          pull_from_origin: bool = False,
-                          stash_pop_conflict: bool = False) -> str:
-    """Generate a Claude Code prompt for resolving a merge failure.
+                          session_name: str | None = None) -> str:
+    """Generate a Claude Code prompt for post-merge repo-update recovery.
+
+    The merge step itself never asks an agent to resolve conflicts or to
+    publish anything (pr-ac10f03): it publishes only a freshly signed-off
+    candidate, and conflicts return through sign-off to implementation.
+    The one remaining merge window runs *after* the merge was published,
+    when updating the main repo checkout from origin failed.
 
     Args:
         data: Project data dict.
         pr_id: The PR identifier.
-        error_output: Verbatim error output from the failed merge attempt.
+        error_output: Verbatim error output from the failed update.
         session_name: If provided, include TUI interaction instructions.
-        pull_from_workdir: When set, this is a pull-from-workdir failure
-            (local backend).  The value is the workdir path that contains
-            the already-merged base branch.  The merge window runs in the
-            *repo dir* and needs to pull/integrate from the workdir.
-        pull_from_origin: When True, this is a pull-from-origin failure
-            (vanilla/github backend).  The merge window runs in the
-            *repo dir* and needs to pull origin into the local checkout.
-        stash_pop_conflict: When True, the git merge itself *succeeded* but
-            popping the auto-stashed local (non-project.yaml) changes hit a
-            conflict.  Takes precedence over the pull_* framing so the prompt
-            describes the actual stash-pop conflict rather than a pull failure.
     """
     pr = store.get_pr(data, pr_id)
     if not pr:
@@ -478,10 +1354,7 @@ def generate_merge_prompt(data: dict, pr_id: str, error_output: str,
 
     branch = pr.get("branch", f"pm/{pr_id}")
     title = pr.get("title", "")
-    workdir = pr.get("workdir", "")
     base_branch = data.get("project", {}).get("base_branch", "master")
-
-    backend = data.get("project", {}).get("backend", "vanilla")
     repo_url = data.get("project", {}).get("repo", "")
 
     tui_block = tui_section(session_name) if session_name else ""
@@ -496,84 +1369,21 @@ def generate_merge_prompt(data: dict, pr_id: str, error_output: str,
     except FileNotFoundError:
         pass
 
-    # --- Stash-pop-conflict variant ---
-    # The merge of the PR succeeded; only restoring the auto-stashed local
-    # changes conflicted.  project.yaml is already reconciled structurally, so
-    # the conflict is in ordinary (non-project.yaml) files the user had dirty.
-    if stash_pop_conflict:
-        prompt = f"""You're recovering local changes after a successful merge of PR {pr_id}: "{title}"
+    bounded_error = bounded_lines(
+        error_output or "",
+        max_lines=_MERGE_ERROR_MAX_LINES,
+        pointer="re-run the failed update in the repo directory",
+        label="merge error output",
+        max_bytes=20_000,
+    )
 
-The merge of `{branch}` into `{base_branch}` **succeeded**, but restoring your
-auto-stashed local changes (`pm: auto-stash for merge`) hit a conflict:
+    prompt = f"""You're updating the local repo after a successful merge of PR {pr_id}: "{title}"
 
-```
-{error_output}
-```
-
-## Context
-
-You are running in the directory where the merge happened.  `{base_branch}` is
-already merged correctly — `pm/project.yaml` has been reconciled automatically.
-Only the previously-stashed local edits to ordinary files still need merging.
-The conflicted stash entry was left in place (`git stash list`) for you to finish.
-
-## Steps
-1. Inspect the conflicting files (`git status`) and resolve the conflict markers,
-   integrating both your stashed local changes and the merged-in changes.
-2. `git add` the resolved files.
-3. Drop the now-applied auto-stash entry: `git stash drop` the
-   `pm: auto-stash for merge` entry (verify with `git stash list` first).
-4. Confirm `git stash list` no longer shows that entry and the tree is clean.
-5. End with a verdict on its own line — one of:
-   - **MERGED** — Local changes are restored and the stash is resolved. Done.
-   - **INPUT_REQUIRED** — You need human help to resolve this.
-
-IMPORTANT: Always end your response with the verdict keyword on its own line — either **MERGED** or **INPUT_REQUIRED**.
-{tui_block}{general_notes_block}{merge_specific_block}{beginner_block}"""
-        return prompt.strip()
-
-    # --- Pull-from-workdir variant ---
-    # When this is set, the merge window is running in the *repo dir* and
-    # needs to integrate the already-merged base branch from the workdir.
-    if pull_from_workdir:
-        prompt = f"""You're updating the local repo after a successful merge of PR {pr_id}: "{title}"
-
-The PR branch `{branch}` has already been merged into `{base_branch}` in the workdir,
-but pulling that result into the main repo directory failed:
-
-```
-{error_output}
-```
-
-## Context
-
-You are running in the **main repo directory** (not the PR workdir).
-The workdir at `{pull_from_workdir}` has the correct merged `{base_branch}`.
-This repo directory needs its `{base_branch}` updated to match the workdir's.
-
-## Steps
-1. Investigate the error above and fix whatever is blocking the update
-   (e.g. stash uncommitted changes, resolve diverged branches)
-2. Fetch and integrate `{base_branch}` from the workdir into this repo directory
-3. Restore any stashed changes
-4. Verify that `{base_branch}` now contains the merge commit from the workdir
-5. End with a verdict on its own line — one of:
-   - **MERGED** — The repo directory is updated. Everything is done.
-   - **INPUT_REQUIRED** — You need human help to resolve this.
-
-IMPORTANT: Always end your response with the verdict keyword on its own line — either **MERGED** or **INPUT_REQUIRED**.
-{tui_block}{general_notes_block}{merge_specific_block}{beginner_block}"""
-        return prompt.strip()
-
-    # --- Pull-from-origin variant (vanilla/github) ---
-    if pull_from_origin:
-        prompt = f"""You're updating the local repo after a successful merge of PR {pr_id}: "{title}"
-
-The PR branch `{branch}` has already been merged and pushed to origin,
+The PR branch `{branch}` has already been merged and published to origin,
 but updating the local repo directory failed:
 
 ```
-{error_output}
+{bounded_error}
 ```
 
 ## Context
@@ -582,84 +1392,23 @@ You are running in the **main repo directory** (`{repo_url}`), not the PR workdi
 Origin already has the correct merged `{base_branch}`.
 This local checkout needs its `{base_branch}` updated to match origin.
 
+This is recovery of an already-completed merge only. Do NOT push
+`{base_branch}` (or any branch) to origin, do NOT run `pm pr merge` without
+`--propagation-only`, `gh pr merge`, or any other backend merge, and do NOT
+create new commits on `{base_branch}` — pm publishes only signed-off code.
+
 ## Steps
 1. Investigate the error above and fix whatever is blocking the update
-   (e.g. stash uncommitted changes, resolve diverged branches)
-2. Pull `{base_branch}` from origin into this repo directory
+   (e.g. stash uncommitted changes)
+2. Pull `{base_branch}` from origin into this repo directory (fast-forward)
 3. Restore any stashed changes
 4. Verify that `{base_branch}` is now up to date with origin
 5. End with a verdict on its own line — one of:
    - **MERGED** — The repo directory is updated. Everything is done.
-   - **INPUT_REQUIRED** — You need human help to resolve this.
+   - **INPUT_REQUIRED** — You need human help to resolve this (e.g. local
+     commits on `{base_branch}` that origin does not have).
 
 IMPORTANT: Always end your response with the verdict keyword on its own line — either **MERGED** or **INPUT_REQUIRED**.
-{tui_block}{general_notes_block}{merge_specific_block}{beginner_block}"""
-        return prompt.strip()
-
-    # --- Standard merge-conflict variant ---
-    if backend == "local":
-        backend_block = f"""
-## Repository Setup (local backend)
-
-This is a **local-only** git project — origin points to a local directory (`{repo_url}`),
-not a remote server.  The origin repo is non-bare with `{base_branch}` checked out, so
-pushing to origin will be rejected.
-
-Resolve the conflict and commit the merge on `{base_branch}` in this workdir.
-"""
-    elif backend == "github":
-        backend_block = f"""
-## Repository Setup (GitHub backend)
-
-This project is hosted on GitHub.
-
-After resolving the conflict, push the merged `{base_branch}` to origin.
-"""
-    else:
-        backend_block = f"""
-## Repository Setup (vanilla git backend)
-
-This project uses a remote git server.
-
-After resolving the conflict, push the merged `{base_branch}` to origin.
-"""
-
-    if backend == "local":
-        merged_desc = f"The conflict is resolved and the merge is committed on `{base_branch}` in this workdir."
-        steps_block = f"""## Steps
-1. Investigate the error and resolve the issue in the workdir
-2. Complete the merge: ensure `{base_branch}` includes changes from `{branch}`
-3. Run any relevant tests to verify the resolution
-4. End with a verdict on its own line — one of:"""
-    else:
-        merged_desc = f"The conflict is resolved, merged, and pushed to origin."
-        steps_block = f"""## Steps
-1. Investigate the error and resolve the issue in the workdir
-2. Complete the merge: ensure `{base_branch}` includes changes from `{branch}`
-3. Run any relevant tests to verify the resolution
-4. Push the merged `{base_branch}` to origin
-5. End with a verdict on its own line — one of:"""
-
-    prompt = f"""You're resolving a merge failure for PR {pr_id}: "{title}"
-
-The merge of `{branch}` into `{base_branch}` failed with the following error:
-
-```
-{error_output}
-```
-{backend_block}
-## Goal
-
-Resolve the merge conflict so that `{base_branch}` contains the merged result of both branches.
-
-{steps_block}
-   - **MERGED** — {merged_desc}
-   - **INPUT_REQUIRED** — You cannot resolve the conflict automatically and need human help.
-     Describe what you need clearly: which files conflict, what the competing changes are,
-     and what decision the user needs to make. The user will interact with you directly in
-     this pane, and then you should resolve and provide a final **MERGED** verdict.
-
-IMPORTANT: Do NOT report MERGED until ALL steps above are complete. Always end your response with the verdict keyword on its own line — either **MERGED** or **INPUT_REQUIRED**.
 {tui_block}{general_notes_block}{merge_specific_block}{beginner_block}"""
     return prompt.strip()
 
@@ -667,7 +1416,8 @@ IMPORTANT: Do NOT report MERGED until ALL steps above are complete. Always end y
 def generate_watcher_prompt(data: dict, session_name: str | None = None,
                             iteration: int = 0, loop_id: str = "",
                             auto_start_target: str | None = None,
-                            meta_pm_root: str | None = None) -> str:
+                            meta_pm_root: str | None = None,
+                            auto_start_targets: list[str] | None = None) -> str:
     """Generate a Claude Code prompt for the autonomous watcher session.
 
     The watcher session observes auto-start and watches all active tmux
@@ -689,9 +1439,16 @@ def generate_watcher_prompt(data: dict, session_name: str | None = None,
         loop_id: Short unique loop identifier.
         meta_pm_root: Absolute path to the meta workdir's ``pm/`` directory
             where bugs.md and improvements.md live.
-        auto_start_target: The PR that auto-start is targeting. When set,
-            the monitor should only intervene on PRs in this PR's
-            transitive dependency fan-in.
+        auto_start_targets: The PRs auto-start is targeting. When set,
+            the monitor should only intervene on PRs in the union of their
+            transitive dependency fan-ins. An explicitly empty list (what
+            ``AutoStartWatcher`` passes when it owns no targets) is
+            fail-closed: the prompt forbids acting on any PR (observation
+            only) and says that restriction overrides the generic
+            fix-what-you-can sections. Omitting the argument keeps the
+            legacy unscoped prompt.
+        auto_start_target: Legacy single-target alias for
+            ``auto_start_targets``.
     """
     if not meta_pm_root:
         meta_pm_root = "pm"  # fallback to relative path
@@ -711,25 +1468,55 @@ def generate_watcher_prompt(data: dict, session_name: str | None = None,
     except FileNotFoundError:
         pass
 
-    # Compute auto-start scope (dependency fan-in of the target)
+    # Compute auto-start scope (union of the targets' dependency fan-ins).
+    # An explicitly provided but empty target set is fail-closed: the
+    # watcher may observe, but must not act on any PR.  (Omitting the
+    # argument entirely keeps the legacy unscoped prompt for callers that
+    # never had an auto-start scope.)
     auto_start_scope_block = ""
-    if auto_start_target:
-        from pm_core.tui.auto_start import _transitive_deps
-        managed_ids = _transitive_deps(all_prs, auto_start_target)
-        managed_ids.add(auto_start_target)
-        managed_list = ", ".join(sorted(managed_ids))
+    targets = list(auto_start_targets or [])
+    if auto_start_target and auto_start_target not in targets:
+        targets.append(auto_start_target)
+    scope_provided = auto_start_targets is not None or auto_start_target is not None
+    if targets:
+        from pm_core.autostart_state import managed_ids as _managed_ids
+        # Markers carry no leading space: bounded_join appends them after
+        # ``separator`` (", "), so one here would render as a double space.
+        managed_list = bounded_join(
+            sorted(_managed_ids(all_prs, targets)), str,
+            max_items=_WATCHER_MANAGED_MAX, separator=", ",
+            omitted_note=lambda n: f"(+{n} more; run `pm pr list`)",
+        )
+        target_list = bounded_join(
+            targets, lambda t: f"**{t}**",
+            max_items=_WATCHER_MANAGED_MAX, separator=", ",
+            omitted_note=lambda n: (
+                f"(+{n} more; run `pm autostart list`)"),
+        )
 
         auto_start_scope_block = f"""
 ### Auto-Start Scope
 
-Auto-start target: **{auto_start_target}**
-Managed PRs (target + its transitive dependencies): {managed_list}
+Auto-start targets: {target_list}
+Managed PRs (targets + their transitive dependencies): {managed_list}
 
 **IMPORTANT**: Only PRs in the managed set above are part of the auto-start pipeline.
 Other PRs may have active tmux windows from manual user activity -- do NOT attempt to
 fix, restart, or interfere with those sessions. You may observe them for cross-session
 conflict detection (e.g. overlapping file edits), but take no corrective action on
 windows belonging to unmanaged PRs.
+"""
+    elif scope_provided:
+        auto_start_scope_block = """
+### Auto-Start Scope
+
+Auto-start has no targets: no PR is managed.
+
+**IMPORTANT**: Do not start, restart, fix, merge, or otherwise take corrective
+action on any PR or tmux window. Observation and reporting only; surface issues
+to the human instead of acting on them. This restriction overrides any general
+"fix what you can" or "take corrective actions" instruction elsewhere in this
+prompt.
 """
 
     id_label = f" [{loop_id}]" if loop_id else ""
@@ -768,6 +1555,10 @@ mechanics will help you distinguish normal operation from genuine problems.
 - `qa` -- QA testing is running. QA scenarios execute in parallel; if they find
   issues and commit fixes, the PR returns to `in_review` for another review cycle.
 - `merged` -- PR merged to `{base_branch}`. Auto-start then checks for newly-unblocked dependents.
+- `closed` -- Retired without merging (`pm pr close` keeps the record as history).
+  Terminal like `merged`, but it never satisfies a dependency: its dependents stay
+  blocked until the PR is reopened (`pm pr edit <id> --status pending`) or dropped
+  from their `depends_on`. Do not merge it to unblock them.
 
 **How transitions work:**
 - **pending -> in_progress**: Auto-start detects all deps are merged and launches
@@ -780,11 +1571,15 @@ mechanics will help you distinguish normal operation from genuine problems.
   idle but the transition has not happened yet -- this is expected, not a problem.
 - **in_review -> qa**: When the review loop reaches a PASS verdict,
   auto-start transitions the PR to `qa` and launches QA scenarios.
-- **qa -> merged**: When QA passes with no changes, auto-start runs `pm pr merge`.
-  If QA finds issues or commits fixes, the PR returns to `in_review` for re-review.
-- **in_review/qa -> merged (merge conflicts)**: If the merge has conflicts, a
-  merge-resolution Claude window opens; once that finishes (also detected via idle
-  polling), the merge is re-attempted.
+- **qa -> sign_off -> merged**: When QA passes, the PR enters `sign_off`. Sign-off
+  checks integration with the latest base and either recommends the merge
+  (auto-start then runs `pm pr merge`, unless a merge hold applies) or routes the PR
+  back to implementation / review / QA. If QA finds issues or commits fixes, the PR
+  returns to `in_review` for re-review.
+- **merge conflicts / a moved base**: `pm pr merge` never resolves conflicts. If the
+  base moved since sign-off it refuses and the PR returns to sign-off, which
+  re-checks integration (conflicts go back to implementation). This is handled
+  automatically -- not a watcher concern.
 
 Note: `d` in the TUI starts a single one-shot review. To start a review **loop** (which
 auto-start uses), the TUI chord is `zz d`. If you need to manually kick off a review
@@ -818,7 +1613,7 @@ loop for a PR, use `pm tui send` to send `zz d` while the PR is selected.
 You can use `tmux list-windows` and `tmux capture-pane` to inspect all active windows:
 - Implementation windows (Sessions working on PRs)
 - Review windows (Sessions reviewing PRs)
-- Merge windows (Sessions resolving merge conflicts)
+- Merge windows (Sessions updating the main repo after a published merge)
 - The TUI itself
 
 ### 2. Auto-Fix Issues
@@ -979,11 +1774,16 @@ re-launch a still-running test or re-file a duplicate bug.
 ### 1. Inventory regression tests
 
 ```
-ls {meta_pm_root}/qa/regression/*.md
+ls {meta_pm_root}/qa/regression/*.md 2>/dev/null
 ```
 
 Each file is a regression test definition. Cross-reference with the work log
 to see when each was last run.
+
+If the listing is empty, the regression library is empty and there is no
+test to schedule. Write `regression library empty, nothing scheduled` in this
+tick's work-log entry and skip to step 5. Never record a test as run or
+passing unless it was launched and finished.
 
 ### 2. Detect in-flight tests from prior ticks
 
@@ -992,8 +1792,12 @@ launched from this watcher run as additional panes in that same window. List
 panes:
 
 ```
-tmux list-panes -t {session_name or "<session>"}:discovery -F "#{{pane_id}} #{{pane_current_command}}"
+tmux list-panes -t {session_name or "<session>"}:discovery -F "#{{pane_id}} #{{pane_current_command}} #{{pane_start_command}}"
 ```
+
+A regression-test pane's start command contains `qa regression <id>`, naming
+the test. Its current command may be `claude`, `bash` or the container
+runtime (`podman`/`docker`), depending on container mode.
 
 If a regression-test pane is still running, do **not** launch a new test this tick. Note the in-flight
 state in your work-log entry and reconcile after it finishes (next tick or
@@ -1015,14 +1819,37 @@ Use the headless launcher:
 pm qa launch regression:<id> --target-window discovery
 ```
 
-This spawns a Claude pane in the discovery window running the regression test.
-The test session itself files any bugs / improvements into the `bugs` / `ux`
-plans (see the regression filing addendum baked into its prompt).
+This spawns a pane in the discovery window running
+`pm qa regression <id> --file-prs`. The test runs in its own isolated QA
+workdir (a QA container when container mode is enabled) against a disposable
+test project it creates, not against this session or project. Its captures
+land under the session's `captures/regression/<id>/<run-id>/` directory.
+The test session itself files any bugs / improvements into the project's
+registry (see the regression filing addendum baked into its prompt).
+
+If the launch command exits non-zero (for example, container mode is enabled
+but the runtime is unusable), nothing ran. Record the error in the work log
+and do not count it as a run.
+
+The run can also fail after its pane opens, while it is being set up (the
+clone, or building/creating its container). The runner writes the run's
+`prompt.md` into its run dir just before the session starts; list a test's
+started runs newest first with:
+
+```
+ls -t ~/.pm/sessions/*/captures/regression/<id>/*/prompt.md 2>/dev/null
+```
+
+Run ids (the dir names) start with their UTC start time. If a test's pane has
+exited and none of these is newer than the launch, setup failed and the test
+never ran: record it as not run, never as a run with no findings, and leave
+its cadence unchanged.
 
 ### 5. Reconcile recently-filed PRs
 
 For tests that completed since the last tick (visible in the work log or by a
-pane that has since exited), inspect any new PRs in the `bugs` and `ux` plans:
+pane that has since exited after its run started, see step 4), inspect any
+new PRs in the `bugs` and `ux` plans:
 
 ```
 pm pr list --plan bugs
@@ -1435,6 +2262,7 @@ def generate_qa_planner_prompt(data: dict, pr_id: str,
 
     # Include PR notes (prior QA results, addendums)
     pr_notes_block = _format_pr_notes(pr, workdir=pr.get("workdir"))
+    signoff_return_block = _signoff_return_block(pr)
     pr_notes_handoff_block = _pr_notes_handoff_block(pr_id)
 
     # Include QA spec if already generated, or preamble to generate one
@@ -1483,7 +2311,12 @@ worker's prompt names the exact path)."""
         if has_artifact_recipes else ""
     )
 
-    prompt = f"""You are a QA planner analyzing PR {pr_id}: "{title}"
+    def _assemble(parts: dict[str, str]) -> str:
+        # Only the PR notes are size-bounded; the description, QA library,
+        # spec, sign-off return and session notes are instructions and are
+        # inlined whole.
+        pr_notes_block = parts["notes"]
+        prompt = f"""You are a QA planner analyzing PR {pr_id}: "{title}"
 
 ## Task
 
@@ -1530,7 +2363,7 @@ to see what changed.  Read source files as needed to understand the context.
 Make sure to not get bogged down too much in the details and method names. Try
 to abstract out user stories that exercise the changes.
 
-{pr_notes_block}{qa_spec_block}{qa_spec_preamble}
+{pr_notes_block}{signoff_return_block}{qa_spec_block}{qa_spec_preamble}
 ## QA Instruction Library
 
 These are available QA instructions.  Reference any that are relevant to
@@ -1626,7 +2459,19 @@ project. Any step that does things a user wouldn't do, like directly
 importing sub-sections of code or searching for strings in code, is likely
 not accomplishing this goal.
 """
-    return prompt.strip()
+        return prompt.strip()
+
+    # Only the PR notes are bounded here; the description, QA library, spec,
+    # sign-off return and session notes are all instruction text and are
+    # inlined whole.  The planner prompt is the one that hit E2BIG in the
+    # field, so a prompt that cannot fit goes out via the launcher's
+    # file-backed bootstrap instead of being cut.
+    return fit_prompt(
+        _assemble,
+        {
+            "notes": (pr_notes_block, f"`pm pr note list {pr_id}`", "PR notes"),
+        },
+    )
 
 
 def generate_qa_interactive_prompt(data: dict, pr_id: str,
@@ -1781,8 +2626,16 @@ If a setup step fails or a required tool is unavailable, report
     artifact_paths = getattr(scenario, "artifact_paths", None) or []
     if artifact_paths:
         # Each path is what the agent will see (set by
-        # _install_artifact_files during launch).
-        bullets = "\n".join(f"- `{p}`" for p in artifact_paths)
+        # _install_artifact_files during launch).  Cap the listing so a
+        # pathological plan cannot blow the prompt budget; the marker points
+        # at the QA library for the rest.
+        bullets = bounded_join(
+            artifact_paths, lambda p: f"- `{p}`",
+            max_items=_ARTIFACT_PATHS_MAX,
+            max_bytes=_ARTIFACT_PATHS_BUDGET,
+            omitted_note=lambda n: (
+                f"- ... (+{n} more recipes; run `pm qa list` to see the library)"),
+        )
         heading = "Capture Recipe" if len(artifact_paths) == 1 else "Capture Recipes"
         artifact_block = f"""
 ## Artifact {heading} (drive the WHEN, capture the THEN)
@@ -1852,7 +2705,11 @@ push captures — they're not part of the PR branch.
    - Push: `git push origin {branch}`
    - If push fails (another scenario pushed first), pull and retry:
      `git pull --rebase origin {branch} && git push origin {branch}`
-{n+2}. End with a verdict on its own line — one of:
+{n+2}. On the line immediately above the verdict, write a one-sentence
+   rationale in the form `Reason: <one sentence>` so the sign-off
+   reviewer has a summary alongside the verdict (e.g. `Reason: feature
+   worked end-to-end; ran command X and saw output Y.`).
+{n+3}. End with a verdict on its own line — one of:
    - **PASS** — Scenario passed, no issues found
    - **NEEDS_WORK** — Issues found and fixed (the fix is committed and pushed)
    - **INPUT_REQUIRED** — Issues found that you could not fix, or genuine ambiguity requiring human judgment"""
@@ -1866,7 +2723,11 @@ push captures — they're not part of the PR branch.
    - Implement the fix in the PR workdir
    - Commit with message prefix `qa: `
    - Push: `git push origin {branch}`
-{n+2}. End with a verdict on its own line — one of:
+{n+2}. On the line immediately above the verdict, write a one-sentence
+   rationale in the form `Reason: <one sentence>` so the sign-off
+   reviewer has a summary alongside the verdict (e.g. `Reason: feature
+   worked end-to-end; ran command X and saw output Y.`).
+{n+3}. End with a verdict on its own line — one of:
    - **PASS** — Scenario passed, no issues found
    - **NEEDS_WORK** — Issues found and fixed (the fix is committed and pushed)
    - **INPUT_REQUIRED** — Issues found that you could not fix, or genuine ambiguity requiring human judgment"""
@@ -1882,6 +2743,11 @@ against the fixed code, not just whether code paths execute. If the diff
 contains a reproduction test, running that test is a fast way to confirm
 the fix.
 """
+
+    # Scenario steps are the guidelines the session works from, so they are
+    # inlined whole and never truncated; an over-limit prompt is delivered by
+    # the launcher's file-backed bootstrap instead.
+    steps_text = scenario.steps or ""
 
     prompt = f"""You are running QA scenario {scenario.index}: "{scenario.title}"
 
@@ -1916,7 +2782,7 @@ final verdict.
 **Focus**: {scenario.focus}
 
 **Steps**:
-{scenario.steps}
+{steps_text}
 
 The steps are framed as one or more Given / When / Then user
 stories. A scenario may bundle several triples that share a focus;
@@ -1945,21 +2811,30 @@ different methodology.
 
 {execution_block}
 {_OUT_OF_SCOPE_BUGS_BLOCK}
-## Your Verdict Is Final for This Run
+## Your Verdict, and When It Is Final
 
-Once you output a verdict, the QA loop records it for this scenario and will
-not accept a later or replacement verdict from you — there is no re-poll.
-NEEDS_WORK and INPUT_REQUIRED are terminal. (The one exception is
-loop-initiated: if the loop's verification step flags your PASS, it messages
-this pane asking you to re-evaluate — answer that follow-up if it arrives.)
+PASS and NEEDS_WORK are final for this run: once you emit one, the QA loop
+records it for this scenario and will not accept a later or replacement
+verdict from you — there is no re-poll. (The one exception is loop-initiated:
+if the loop's verification step flags your PASS, it messages this pane asking
+you to re-evaluate — answer that follow-up if it arrives.)
 
-So if you realize something after delivering your verdict, or you're leaving
+INPUT_REQUIRED is **not** final in the same way. When you emit it, the loop
+keeps this scenario's pane under observation while it waits for the user to
+resolve the blocker. After the user answers you here, finish the scenario and
+end your response with **PASS** or **NEEDS_WORK**: the loop collects that
+follow-up verdict and resumes the normal QA flow (a PASS is independently
+verified and finalized as usual; NEEDS_WORK returns the PR to review).
+Emitting INPUT_REQUIRED again is allowed — it keeps the scenario waiting for
+further input rather than ending the run.
+
+If you realize something after a final PASS/NEEDS_WORK, or you're leaving
 work or context for the **next QA run on this PR** to pick up — a fix you
-couldn't finish, a flaky prerequisite, something to check next time — you
-cannot amend your verdict to carry it forward. Hand it off as a PR note
+couldn't finish, a flaky prerequisite, something to check next time — a final
+verdict cannot be amended to carry it forward. Hand it off as a PR note
 instead (see the PR Notes — Handoff Channel section below).
 {pr_notes_handoff_block}
-IMPORTANT: Always end your response with the verdict keyword on its own line."""
+IMPORTANT: Always end your response with `Reason: <one sentence>` on the second-to-last line and the verdict keyword on the very last line."""
     return prompt.strip()
 
 

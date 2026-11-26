@@ -196,6 +196,49 @@ class TestTimestampBackfill:
 
         assert pr["created_at"] == "2024-01-01T00:00:00+00:00"
 
+    def test_backfill_from_closed_at(self, tmp_pm_root):
+        """A retained `closed` record is backfilled from closed_at: it is a
+        lifecycle timestamp like merged_at (pr-62ad13d), so a hand-edited or
+        imported entry that only carries it still sorts by its closure."""
+        (tmp_pm_root / "project.yaml").write_text(
+            "project:\n"
+            "  name: test\n"
+            "  repo: /tmp/repo\n"
+            "  base_branch: master\n"
+            "prs:\n"
+            "  - id: pr-001\n"
+            "    status: closed\n"
+            "    started_at: '2024-01-01T00:00:00+00:00'\n"
+            "    reviewed_at: '2024-02-01T00:00:00+00:00'\n"
+            "    closed_at: '2024-03-01T00:00:00+00:00'\n"
+        )
+
+        data = store.load(tmp_pm_root)
+        pr = data["prs"][0]
+
+        assert pr["created_at"] == "2024-01-01T00:00:00+00:00"
+        # Closing is the last lifecycle event, so it wins over reviewed_at.
+        assert pr["updated_at"] == "2024-03-01T00:00:00+00:00"
+
+    def test_backfill_from_closed_at_alone(self, tmp_pm_root):
+        """An entry carrying only closed_at gets both fields from it."""
+        (tmp_pm_root / "project.yaml").write_text(
+            "project:\n"
+            "  name: test\n"
+            "  repo: /tmp/repo\n"
+            "  base_branch: master\n"
+            "prs:\n"
+            "  - id: pr-001\n"
+            "    status: closed\n"
+            "    closed_at: '2024-03-01T00:00:00+00:00'\n"
+        )
+
+        data = store.load(tmp_pm_root)
+        pr = data["prs"][0]
+
+        assert pr["created_at"] == "2024-03-01T00:00:00+00:00"
+        assert pr["updated_at"] == "2024-03-01T00:00:00+00:00"
+
     def test_no_backfill_when_fields_exist(self, tmp_pm_root):
         """Existing created_at/updated_at are not overwritten."""
         (tmp_pm_root / "project.yaml").write_text(

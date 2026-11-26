@@ -4,14 +4,23 @@ import json
 import logging
 import os
 import random
+import re
 import shlex
 import shutil
 import subprocess
+import tempfile
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from pm_core.paths import configure_logger, log_shell_command
+from pm_core.model_config import (
+    AMBIENT_EFFORT_ENV, accepted_efforts_of, classify_effort_env,
+)
+from pm_core.paths import configure_logger, log_shell_command, write_env_file
+from pm_core.prompt_bounds import (
+    PROMPT_ARG_LIMIT, PromptTooLargeError, prompt_bytes,
+)
 _log = configure_logger("pm.claude_launcher")
 
 # The fake-claude executable is invoked by bare name and resolved from PATH —
@@ -219,6 +228,8 @@ def _fake_claude_args(config: dict, session_id: str | None = None,
         ("body_batch", "--body-batch"),
         ("body_delay", "--body-delay"),
         ("hold", "--hold"),
+        ("idle_once_after", "--idle-once-after"),
+        ("display_bullet", "--display-bullet"),
     ):
         if cfg_key in effective:
             args.extend([flag, str(effective[cfg_key])])
@@ -274,20 +285,85 @@ def peek_fake_verdicts(session_tag: str | None = None) -> dict:
     return out
 
 
-def _resolve_provider(provider: str | None = None):
+def _warn_effort_conflicts(provider_cfg, effort: str | None,
+                           provider_env: dict | None) -> None:
+    """Log what a launch cannot confirm about *effort*.
+
+    A provider's own ``CLAUDE_CODE_EFFORT_LEVEL`` overrides ``--effort``
+    inside the CLI (2.1.316), and a level outside the route's declared
+    ``supported_efforts`` may be rejected or ignored upstream.  Neither
+    stops the launch -- the level is still passed, because the metadata is
+    dated and the CLI accepts it -- but neither may read as confirmed.
+    Shared by every launch path so they cannot disagree about one launch.
+    """
+    if not effort:
+        return
+    assigned = (provider_env or {}).get(AMBIENT_EFFORT_ENV)
+    if assigned is not None:
+        kind, level = classify_effort_env(assigned)
+        if kind == "unknown":
+            _log.warning(
+                "provider %r sets %s=%r, which is not a Claude effort "
+                "level; --effort %s applies", provider_cfg.name,
+                AMBIENT_EFFORT_ENV, assigned, effort)
+        elif kind == "level" and level != effort:
+            _log.warning(
+                "provider %r assigns %s=%s; it overrides --effort %s "
+                "for this session", provider_cfg.name,
+                AMBIENT_EFFORT_ENV, level, effort)
+    accepted = accepted_efforts_of(provider_cfg)
+    if accepted is not None and effort not in accepted:
+        _log.warning(
+            "provider %r declares supported_efforts %s; --effort %s is "
+            "not among them (the router may reject or ignore it)",
+            provider_cfg.name, list(accepted), effort)
+
+
+def _resolve_provider(provider: str | None = None, model: str | None = None,
+                      effort: str | None = None):
     """Resolve provider config and return (env_vars, model_flag, run_env).
 
     Shared helper for launch_claude, launch_claude_print, and
     launch_claude_print_background to avoid repeating the same pattern.
+    ``model_flag`` is the effective ``--model`` value (an explicit *model*
+    overrides the provider's).  The routing environment is built from that
+    selection, as build_claude_shell_cmd's (providers.launch_env).  *effort*
+    only drives the launch warnings (:func:`_warn_effort_conflicts`); the
+    caller still passes ``--effort`` itself.
     """
-    from pm_core.providers import get_provider
-    provider_cfg = get_provider(provider)
-    provider_env = provider_cfg.env_vars()
-    model_flag = provider_cfg.model_flag()
-    run_env = {**os.environ, **provider_env} if provider_env else None
+    from pm_core.providers import get_provider, launch_env
+    provider_cfg = get_provider(provider, strict=bool(provider))
+    model_flag = model or provider_cfg.model_flag()
+    provider_env, unset = launch_env(provider_cfg, provider_cfg.env_vars(),
+                                     model_flag)
+    _warn_effort_conflicts(provider_cfg, effort, provider_env)
+    run_env = None
+    if provider_env or any(v in os.environ for v in unset):
+        run_env = {**os.environ, **provider_env}
+        for var in unset:
+            run_env.pop(var, None)
     return provider_env, model_flag, run_env
 
 SESSION_REGISTRY = ".pm-sessions.json"
+
+
+def _drop_ambient_effort(run_env: dict | None, effort: str | None,
+                         provider_env: dict | None = None) -> dict | None:
+    """*run_env* with ``CLAUDE_CODE_EFFORT_LEVEL`` removed when pm sets effort.
+
+    The variable overrides ``--effort`` inside the Claude CLI (2.1.316), so
+    an inherited value would make the session run a different level than pm
+    reports.  A value the provider itself assigns is explicit configuration
+    and is kept.  Returns *run_env* unchanged when nothing needs removing.
+    """
+    if not effort or (provider_env and AMBIENT_EFFORT_ENV in provider_env):
+        return run_env
+    base = os.environ if run_env is None else run_env
+    if AMBIENT_EFFORT_ENV not in base:
+        return run_env
+    env = dict(base)
+    env.pop(AMBIENT_EFFORT_ENV, None)
+    return env
 
 
 def _registry_path(pm_root: Path) -> Path:
@@ -388,6 +464,252 @@ def find_editor() -> str:
     return "vi"
 
 
+# ---------------------------------------------------------------------------
+# Workspace trust (runtime mechanics live in pm_core.workspace_trust)
+# ---------------------------------------------------------------------------
+
+class WorkspaceTrustBlocked(RuntimeError):
+    """A launched session stayed at the workspace-trust prompt past the grace."""
+
+
+def prepare_workspace(cwd: str | None):
+    """Establish workspace trust for a host *cwd* before launching into it.
+
+    Only pm-created or explicitly authorized workdirs are trusted (see
+    ``workspace_trust.approved_path``); anything else is left to the
+    runtime's own explicit prompt.  Never raises.
+    """
+    from pm_core import workspace_trust
+    if not cwd or not os.path.isdir(cwd):
+        return workspace_trust.TrustOutcome(
+            workspace_trust.UNSUPPORTED, str(cwd or ""), "no host cwd")
+    try:
+        outcome = workspace_trust.get_trust_runtime().bootstrap(cwd)
+    except Exception as e:  # never block a launch on bootstrap bugs
+        _log.warning("workspace trust: bootstrap crashed for %s", cwd,
+                     exc_info=True)
+        return workspace_trust.TrustOutcome(workspace_trust.ERROR, cwd, str(e))
+    if outcome.status == workspace_trust.UNAPPROVED:
+        _log.info("workspace trust: %s not approved; leaving the prompt "
+                  "explicit", cwd)
+    elif not outcome.ok:
+        _log.warning("workspace trust: %s", outcome.message)
+    return outcome
+
+
+class WorkspacePromptWatch:
+    """Bounded watchdog for a pane that may be stuck at the trust prompt.
+
+    ``check()`` is cheap to call from a poll loop: it captures the pane at
+    most every *interval* seconds.  When the dialog is visible and
+    *workdir* is approved, it selects the "trust" option by reading the
+    cursor off the screen (never a blind Enter — the dialog defaults to
+    "No, exit").  Returns an actionable message once the dialog has stayed
+    visible longer than *grace* seconds, else None.
+
+    *transcript_path* (the session's JSONL, or a symlink to it) ends the
+    watch for good once it exists: Claude only writes it after the first
+    prompt is submitted, i.e. after the dialog.  Without it, text later in
+    the first turn that quotes the dialog could be mistaken for it.
+    """
+
+    MAX_ACCEPT_ATTEMPTS = 2
+    # The cap is per pane, not per watch: one pane can be watched by
+    # several watches (the QA loop's worker watch and the TUI idle
+    # tracker's, and CLI pollers build a fresh tracker per call), so the
+    # attempts already spent are also kept on the tmux pane itself.
+    _ATTEMPTS_OPTION = "@pm_trust_accept_attempts"
+    # The pid of the process that last reported this pane as blocked, so a
+    # second watch in the same TUI (e.g. the orphan watch taking over a
+    # review pane after its loop already failed on the dialog) does not
+    # report it again.  A restarted TUI (new pid) still reports it once.
+    _REPORTED_OPTION = "@pm_trust_reported_by"
+
+    def __init__(self, pane_id: str, workdir: str | None = None,
+                 grace: float | None = None, interval: float = 5.0,
+                 transcript_path: str | Path | None = None):
+        from pm_core import workspace_trust
+        self.pane_id = pane_id
+        self.workdir = workdir
+        self.transcript_path = transcript_path
+        self.started = False
+        self.grace = workspace_trust.prompt_grace_seconds() if grace is None else grace
+        self.interval = interval
+        self._runtime = workspace_trust.get_trust_runtime()
+        self._last_check = 0.0
+        self._first_seen: float | None = None
+        self._accept_attempts = 0
+        self._reported = False
+        # Set when the grace first runs out: another watch in this process
+        # had already reported this pane.
+        self.reported_elsewhere = False
+        self.shown_path: str | None = None
+
+    @property
+    def visible(self) -> bool:
+        """Whether the last check saw the trust dialog on screen."""
+        return self._first_seen is not None
+
+    def _accept_target(self, shown: str) -> str | None:
+        """The approved directory the dialog may be accepted for, else None.
+
+        A host path on the dialog decides: the session may have started
+        somewhere other than *workdir* (never trust that by proxy).  Only an
+        unreadable or container-internal path falls back to *workdir*; any
+        other path that isn't a host directory (e.g. mis-parsed) is refused.
+        """
+        from pm_core import workspace_trust
+        from pm_core.container import _CONTAINER_WORKDIR
+        if shown and os.path.isdir(shown):
+            target = shown
+        elif not shown or workspace_trust.is_within(shown, _CONTAINER_WORKDIR):
+            target = self.workdir
+        else:
+            return None
+        if target and workspace_trust.approved_path(target):
+            return target
+        return None
+
+    def _pane_attempts(self) -> int:
+        """Accept attempts any watch has already made on this pane."""
+        from pm_core import tmux as tmux_mod
+        try:
+            return int(tmux_mod.get_pane_option(
+                self.pane_id, self._ATTEMPTS_OPTION) or 0)
+        except ValueError:
+            return 0
+
+    def check(self, force: bool = False) -> str | None:
+        from pm_core import tmux as tmux_mod, workspace_trust
+        if self.started:
+            return None
+        if self.transcript_path and Path(self.transcript_path).exists():
+            self.started = True
+            self._first_seen = None
+            return None
+        now = time.monotonic()
+        if not force and now - self._last_check < self.interval:
+            return None
+        self._last_check = now
+        try:
+            screen = tmux_mod.capture_pane(self.pane_id)
+        except Exception:
+            return None
+        shown = self._runtime.detect_prompt(screen)
+        if shown is None:
+            self._first_seen = None
+            return None
+        self.shown_path = shown
+        if self._first_seen is None:
+            self._first_seen = now
+            _log.warning("workspace trust: pane %s is at the trust prompt "
+                         "(%s)", self.pane_id, shown or self.workdir)
+        used = max(self._accept_attempts, self._pane_attempts())
+        target = (self._accept_target(shown)
+                  if used < self.MAX_ACCEPT_ATTEMPTS else None)
+        if target:
+            keys = self._runtime.accept_keys(screen)
+            if keys:
+                self._accept_attempts = used + 1
+                tmux_mod.set_pane_option(self.pane_id, self._ATTEMPTS_OPTION,
+                                         str(self._accept_attempts))
+                _log.info("workspace trust: accepting prompt in pane %s for "
+                          "approved workdir %s (keys=%s)", self.pane_id,
+                          target, keys)
+                prepare_workspace(target)
+                for key in keys:
+                    tmux_mod.send_keys_literal(self.pane_id, key)
+                    time.sleep(0.2)
+                return None
+        waited = now - self._first_seen
+        if waited >= self.grace:
+            if not self._reported:
+                self._reported = True
+                pid = str(os.getpid())
+                self.reported_elsewhere = tmux_mod.get_pane_option(
+                    self.pane_id, self._REPORTED_OPTION) == pid
+                tmux_mod.set_pane_option(self.pane_id, self._REPORTED_OPTION,
+                                         pid)
+            return workspace_trust.blocked_message(
+                shown or self.workdir or "", waited)
+        return None
+
+
+def _prompt_is_oversized(prompt: str | None) -> bool:
+    """True when *prompt* exceeds the single-argv-entry budget."""
+    return bool(prompt) and prompt_bytes(prompt) > PROMPT_ARG_LIMIT
+
+
+def _bootstrap_prompt(path: str) -> str:
+    """A short argv prompt pointing claude at its full instructions on disk.
+
+    Used when the real prompt is too large for one argv entry: the complete
+    text is written to *path* and claude reads it on startup.  This preserves
+    every instruction (no truncation) while keeping argv small.
+    """
+    return f"Your complete instructions are in the file at {path}."
+
+
+def _materialize_oversized_prompt(
+    prompt: str, *, cwd: str | None = None, write_dir: str | None = None,
+    session_id: str | None = None,
+) -> tuple[str, str | None]:
+    """Return ``(argv_prompt, temp_path)`` for a possibly oversized *prompt*.
+
+    Under the limit the prompt is returned unchanged with no temp path.  Over
+    it, the full prompt is written to a file and a short bootstrap prompt is
+    returned; the caller must delete *temp_path* after the process exits.
+    Raises :class:`PromptTooLargeError` when no writable location exists.
+
+    The file lands on the host path (*write_dir*) while the bootstrap names
+    the path claude sees at runtime (*cwd*) — in a container those differ,
+    because the host workdir is mounted at the container path (the same split
+    ``build_claude_shell_cmd`` uses).  With only one of the two given, that
+    one is used for both.
+    """
+    if not _prompt_is_oversized(prompt):
+        return prompt, None
+    candidates: list[tuple[str, str]] = []
+    if write_dir:
+        candidates.append((write_dir, cwd or write_dir))
+    if cwd and cwd != write_dir:
+        candidates.append((cwd, cwd))
+    for write_base, ref_base in candidates:
+        try:
+            b = Path(write_base)
+            if not b.is_dir():
+                continue
+            d = b / "pm" / "prompts"
+            d.mkdir(parents=True, exist_ok=True)
+            fname = f"pm_prompt_{session_id or uuid.uuid4()}.txt"
+            f = d / fname
+            # Explicit UTF-8: prompt_bytes measures UTF-8, and a user-authored
+            # prompt can contain non-ASCII.  The default (locale) encoding
+            # raises UnicodeEncodeError under an ASCII locale, which would
+            # crash the fallback that exists to deliver this prompt.
+            f.write_text(prompt, encoding="utf-8")
+            ref = Path(ref_base) / "pm" / "prompts" / fname
+            _log.warning(
+                "prompt is %d bytes, over the %d-byte argv limit; using "
+                "file-backed bootstrap %s", prompt_bytes(prompt),
+                PROMPT_ARG_LIMIT, ref)
+            return _bootstrap_prompt(str(ref)), str(f)
+        except OSError:
+            continue
+    try:
+        fd, path = tempfile.mkstemp(prefix="pm_prompt_", suffix=".txt")
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(prompt)
+        _log.warning(
+            "prompt is %d bytes, over the %d-byte argv limit; using "
+            "file-backed bootstrap %s", prompt_bytes(prompt),
+            PROMPT_ARG_LIMIT, path)
+        return _bootstrap_prompt(path), path
+    except OSError as e:
+        raise PromptTooLargeError(prompt_bytes(prompt), PROMPT_ARG_LIMIT,
+                                  "claude prompt") from e
+
+
 def launch_claude(prompt: str, session_key: str, pm_root: Path,
                   cwd: str | None = None, resume: bool = True,
                   provider: str | None = None,
@@ -403,7 +725,8 @@ def launch_claude(prompt: str, session_key: str, pm_root: Path,
     Args:
         provider: Name of the LLM provider to use. See providers.py.
         model: Explicit model ID to pass via --model (overrides provider model).
-        effort: Effort level to pass via --effort (low, medium, high).
+        effort: Effort level to pass via --effort (low, medium, high,
+            xhigh, max).
     """
     import uuid
 
@@ -414,10 +737,10 @@ def launch_claude(prompt: str, session_key: str, pm_root: Path,
     if not claude and fc_config is None:
         raise FileNotFoundError("claude CLI not found. Install it first.")
 
-    # Resolve provider for env vars and model flag
-    _, provider_model_flag, run_env = _resolve_provider(provider)
-    # Explicit model param overrides provider's model_flag
-    model_flag = model or provider_model_flag
+    # Resolve provider for env vars and model flag (explicit model wins)
+    provider_env, model_flag, run_env = _resolve_provider(
+        provider, model, effort)
+    run_env = _drop_ambient_effort(run_env, effort, provider_env)
 
     # Try to resume existing session, or generate new session ID
     session_id = None
@@ -434,10 +757,15 @@ def launch_claude(prompt: str, session_key: str, pm_root: Path,
         save_session(pm_root, session_key, session_id)
         _log.info("Generated new session_id=%s for key=%s", session_id, session_key)
 
+    # Over-limit prompts are written to a file and delivered via a short
+    # bootstrap argv entry (see _materialize_oversized_prompt); the file is
+    # removed once the process exits.
+    cleanup_paths: list[str] = []
     if fc_config is not None:
         cmd = [_FAKE_CLAUDE_BIN]
         cmd.extend(_fake_claude_args(fc_config, session_type=session_type))
     else:
+        prepare_workspace(cwd or os.getcwd())
         cmd = [claude]
         if _skip_permissions():
             cmd.append("--dangerously-skip-permissions")
@@ -450,39 +778,57 @@ def launch_claude(prompt: str, session_key: str, pm_root: Path,
             # Don't pass prompt when resuming - Claude already has the conversation
         else:
             cmd.extend(["--session-id", session_id])
-            cmd.append(prompt)
+            argv_prompt, _tmp = _materialize_oversized_prompt(
+                prompt, cwd=cwd, session_id=session_id)
+            if _tmp:
+                cleanup_paths.append(_tmp)
+            cmd.append(argv_prompt)
 
     _log.info("launch_claude: cmd=%s (cwd=%s, session_key=%s, session_id=%s)",
               cmd[:6], cwd, session_key, session_id[:8] + "...")
 
     log_shell_command(cmd, prefix="claude")
-    # Log the environment variables passed to the claude CLI (filtered for ANTHROPIC_/OPENAI_ prefixes)
-    _log.debug("Claude env vars: %s", {k: v for k, v in (run_env or {}).items() if k.startswith('ANTHROPIC_') or k.startswith('OPENAI_')})
-    result = subprocess.run(cmd, cwd=cwd, env=run_env)
-    returncode = result.returncode
-    if returncode != 0:
-        log_shell_command(cmd, prefix="claude", returncode=returncode)
-
-    # If session failed (possibly invalid/corrupted), try with a fresh session.
-    # Skip the retry when using fake-claude — it always exits 0.
-    if returncode != 0 and resume and fc_config is None:
-        _log.warning("Session failed (rc=%d), retrying with fresh session", returncode)
-        session_id = str(uuid.uuid4())
-        save_session(pm_root, session_key, session_id)
-        cmd = [claude]
-        if _skip_permissions():
-            cmd.append("--dangerously-skip-permissions")
-        if model_flag:
-            cmd.extend(["--model", model_flag])
-        if effort:
-            cmd.extend(["--effort", effort])
-        cmd.extend(["--session-id", session_id])
-        cmd.append(prompt)
-        log_shell_command(cmd, prefix="claude")
+    # Log the names (never the values) of the provider env vars passed to
+    # the claude CLI: this is a debug log and API keys live here.
+    _log.debug("Claude env vars: %s", sorted(
+        k for k in (run_env or {})
+        if k.startswith("ANTHROPIC_") or k.startswith("OPENAI_")))
+    try:
         result = subprocess.run(cmd, cwd=cwd, env=run_env)
         returncode = result.returncode
         if returncode != 0:
             log_shell_command(cmd, prefix="claude", returncode=returncode)
+
+        # If session failed (possibly invalid/corrupted), try with a fresh session.
+        # Skip the retry when using fake-claude — it always exits 0.
+        if returncode != 0 and resume and fc_config is None:
+            _log.warning("Session failed (rc=%d), retrying with fresh session", returncode)
+            session_id = str(uuid.uuid4())
+            save_session(pm_root, session_key, session_id)
+            cmd = [claude]
+            if _skip_permissions():
+                cmd.append("--dangerously-skip-permissions")
+            if model_flag:
+                cmd.extend(["--model", model_flag])
+            if effort:
+                cmd.extend(["--effort", effort])
+            cmd.extend(["--session-id", session_id])
+            argv_prompt, _tmp = _materialize_oversized_prompt(
+                prompt, cwd=cwd, session_id=session_id)
+            if _tmp:
+                cleanup_paths.append(_tmp)
+            cmd.append(argv_prompt)
+            log_shell_command(cmd, prefix="claude")
+            result = subprocess.run(cmd, cwd=cwd, env=run_env)
+            returncode = result.returncode
+            if returncode != 0:
+                log_shell_command(cmd, prefix="claude", returncode=returncode)
+    finally:
+        for _p in cleanup_paths:
+            try:
+                os.unlink(_p)
+            except OSError:
+                pass
 
     return returncode
 
@@ -518,8 +864,11 @@ def launch_claude_print(prompt: str, cwd: str | None = None,
     if not claude and fc_config is None:
         raise FileNotFoundError("claude CLI not found. Install it first.")
 
-    # Resolve provider
-    _, model_flag, run_env = _resolve_provider(provider)
+    # Resolve provider (explicit model wins over the provider's)
+    provider_env, effective_model, run_env = _resolve_provider(
+        provider, model, effort)
+    run_env = _drop_ambient_effort(run_env, effort, provider_env)
+    cleanup_path: str | None = None
     if fc_config is not None:
         cmd = [_FAKE_CLAUDE_BIN]
         cmd.extend(_fake_claude_args(fc_config, session_type=session_type))
@@ -527,8 +876,6 @@ def launch_claude_print(prompt: str, cwd: str | None = None,
         cmd = [claude]
         if _skip_permissions():
             cmd.append("--dangerously-skip-permissions")
-        # Explicit model takes precedence over provider model_flag
-        effective_model = model or model_flag
         if effective_model:
             cmd.extend(["--model", effective_model])
         if effort:
@@ -536,7 +883,9 @@ def launch_claude_print(prompt: str, cwd: str | None = None,
         if allowed_tools:
             for tool in allowed_tools:
                 cmd.extend(["--allowedTools", tool])
-        cmd.extend(["-p", prompt])
+        argv_prompt, cleanup_path = _materialize_oversized_prompt(
+            prompt, cwd=cwd)
+        cmd.extend(["-p", argv_prompt])
 
     done = threading.Event()
 
@@ -572,6 +921,11 @@ def launch_claude_print(prompt: str, cwd: str | None = None,
     finally:
         done.set()
         spinner_thread.join()
+        if cleanup_path:
+            try:
+                os.unlink(cleanup_path)
+            except OSError:
+                pass
 
     return result.stdout
 
@@ -580,9 +934,10 @@ def _claude_project_dir(cwd: str) -> Path:
     """Compute Claude's project directory for a given working directory.
 
     Claude Code stores transcripts in ~/.claude/projects/{mangled-path}/
-    where the path has '/' replaced with '-' and '.' replaced with '-'.
+    where every character of the path other than ASCII letters and digits
+    (``/``, ``.``, ``_``, spaces, ...) is replaced with '-'.
     """
-    mangled = cwd.replace("/", "-").replace(".", "-")
+    mangled = re.sub(r"[^a-zA-Z0-9]", "-", cwd)
     return Path.home() / ".claude" / "projects" / mangled
 
 
@@ -598,6 +953,8 @@ def build_claude_shell_cmd(
     effort: str | None = None,
     write_dir: str | None = None,
     session_type: str | None = None,
+    container: bool = False,
+    env_out: dict[str, str] | None = None,
 ) -> str:
     """Build a claude shell command string with proper flags and logging.
 
@@ -624,13 +981,34 @@ def build_claude_shell_cmd(
             Resolves via providers.yaml config. When set, injects the
             appropriate environment variables and --model flag for the
             provider. None uses the default resolution order.
-        effort: Effort level to pass via ``--effort`` flag (low, medium, high).
+        effort: Effort level to pass via ``--effort`` flag (low, medium,
+            high, xhigh, max).
         write_dir: Host filesystem path where the prompt file should be
             written.  Defaults to ``cwd``.  When ``cwd`` is a
             container-internal path (e.g. ``/workspace``) that does not
             exist on the host, pass the corresponding host path here so
             the file can be written.  The command will still reference the
             file via ``cwd`` (the path claude sees at runtime).
+        container: The command runs inside a pm container.  Only matters
+            for ``router`` providers (pm_core.router_route): the command
+            then starts the in-container bridge forwarder first and never
+            starts claude if it fails; on the host a router provider's
+            ``launcher`` replaces the ``claude`` executable.
+        env_out: Receives the provider environment variables.  They are
+            **never** interpolated into the returned command: that string is
+            logged (``log_shell_command``), stored as the tmux
+            ``#{pane_start_command}`` and kept in the pane registry.  Callers
+            must transport the values through the launched process's
+            environment: ``tmux`` pane helpers write a private env file the
+            pane sources (``env=`` argument), foreground launches use
+            ``os.execvpe(..., env=...)``, and ``send_keys`` sources the same
+            kind of file.  Only the names of the routing variables the
+            launch unsets (``env -u NAME``) appear in the command.  A router
+            provider requires it (ValueError otherwise).
+
+    An explicitly named *provider* that is not configured raises
+    :class:`~pm_core.providers.ProviderNotFoundError` instead of silently
+    launching on the built-in claude provider.
     """
     # When transcript is requested, generate a UUID and create a symlink
     if transcript and cwd:
@@ -647,14 +1025,57 @@ def build_claude_shell_cmd(
         transcript_path.symlink_to(target)
         _log.info("transcript: symlink %s -> %s", transcript_path, target)
 
-    # Resolve provider configuration
-    provider_env, model_flag, _ = _resolve_provider(provider)
+    # Resolve provider configuration.  Values stay out of the command string
+    # (see ``env_out``); the caller transports them via the process env.
+    from pm_core.providers import get_provider, launch_env
+    provider_cfg = get_provider(provider, strict=bool(provider))
+    # Explicit model param overrides provider's model_flag
+    effective_model = model or provider_cfg.model_flag()
 
-    # Build env prefix for non-claude providers
-    env_prefix = ""
+    # Router providers (pm_core.router_route): command-scoped, never global.
+    if provider_cfg.type == "router":
+        from pm_core import router_route
+        route_prefix, provider_env, exe = router_route.launch_parts(
+            provider_cfg, container=container)
+    else:
+        route_prefix, provider_env, exe = "", provider_cfg.env_vars(), "claude"
+    # The routing environment comes from this selection alone: what it
+    # needs is assigned (subagents pinned to the session's model included),
+    # every other routing variable is unset (not emptied), so nothing the
+    # caller's environment carries -- pm run inside a routed session -- picks
+    # this session's model or account (providers.launch_env).
+    provider_env, unset = launch_env(provider_cfg, provider_env,
+                                     effective_model)
+    if effort:
+        # CLAUDE_CODE_EFFORT_LEVEL overrides --effort inside the CLI
+        # (claude 2.1.316).  pm's own selection is authoritative, so the
+        # ambient value is removed from the session.  A provider that
+        # assigns it explicitly is the user's own configuration: leave it
+        # and say so, rather than silently dropping a configured variable.
+        # Only a level that actually differs from --effort is a conflict:
+        # "auto"/"unset"/blank mean "no override" (the CLI ignores an
+        # unknown value), and an assignment equal to pm's level changes
+        # nothing.  model_config's effort notes make the same distinction.
+        if provider_env.get(AMBIENT_EFFORT_ENV) is None:
+            # A provider's unset_env may already list it; emit it once.
+            unset = tuple(dict.fromkeys((*unset, AMBIENT_EFFORT_ENV)))
+        _warn_effort_conflicts(provider_cfg, effort, provider_env)
     if provider_env:
-        parts = [f"{k}={shlex.quote(v)}" for k, v in provider_env.items()]
-        env_prefix = " ".join(parts) + " "
+        if env_out is not None:
+            env_out.update(provider_env)
+        elif provider_cfg.type == "router":
+            # Without its environment (ANTHROPIC_BASE_URL) a routed session
+            # would run on whatever account the launching shell carries.
+            raise ValueError(
+                f"provider {provider!r} is a router: the caller must pass "
+                "env_out so its environment reaches the launched process")
+        else:
+            _log.warning(
+                "provider %r needs env vars (%s) but the caller did not pass "
+                "env_out; they will not reach the launched process",
+                provider or "<default>", ", ".join(sorted(provider_env)))
+    # Only names: unsetting carries no value.
+    env_prefix = ("env " + "".join(f"-u {v} " for v in unset)) if unset else ""
 
     from pm_core.paths import skip_permissions_enabled, fake_claude_config_for_type
     fc_config = fake_claude_config_for_type(session_type, session_tag)
@@ -670,11 +1091,24 @@ def build_claude_shell_cmd(
         log_shell_command(cmd, prefix="claude")
         return cmd
     else:
+        # Host launches establish workspace trust here, at the one boundary
+        # every workflow role goes through.  Container launches pass the
+        # host path as ``write_dir`` and a container-internal ``cwd``; their
+        # trust is seeded into the container's config copy at creation
+        # (container.create_container).
+        cd_prefix = ""
+        if cwd and (write_dir is None
+                    or os.path.realpath(write_dir) == os.path.realpath(cwd)):
+            prepare_workspace(cwd)
+            # Run Claude in the directory that was just bootstrapped, not
+            # wherever the pane happens to start (a tmux split without -c
+            # starts in the *caller's* cwd — the review pane once launched
+            # in the TUI's pm/ dir and sat at the trust prompt there).
+            if os.path.isdir(cwd):
+                cd_prefix = f"cd {shlex.quote(cwd)} && "
         skip = " --dangerously-skip-permissions" if skip_permissions_enabled(session_tag) else ""
-        cmd = f"{env_prefix}claude{skip}"
+        cmd = f"{cd_prefix}{route_prefix}{env_prefix}{exe}{skip}"
 
-    # Explicit model param overrides provider's model_flag
-    effective_model = model or model_flag
     if effective_model:
         cmd += f" --model {shlex.quote(effective_model)}"
 
@@ -702,16 +1136,39 @@ def build_claude_shell_cmd(
                     _prompts_subdir = _host_dir / "pm" / "prompts"
                     _prompts_subdir.mkdir(parents=True, exist_ok=True)
                     _fname = f"pm_prompt_{session_id or uuid.uuid4()}.txt"
-                    (_prompts_subdir / _fname).write_text(prompt)
+                    # Explicit UTF-8 — see _materialize_oversized_prompt: the
+                    # prompt is measured in UTF-8 bytes and may be non-ASCII,
+                    # so the locale default must not decide its encoding.
+                    (_prompts_subdir / _fname).write_text(prompt,
+                                                          encoding="utf-8")
                     _ref_base = Path(cwd) if cwd else _host_dir
                     _prompt_ref = _ref_base / "pm" / "prompts" / _fname
-                    # Delete the temp file after claude reads it via $(cat ...).
-                    # The semicolon ensures cleanup runs whether claude succeeds or fails.
-                    cmd += f' "$(cat {_prompt_ref})"; rm -f {shlex.quote(str(_prompt_ref))}'
+                    # Delete the temp file after claude reads it.  The
+                    # semicolon ensures cleanup runs whether claude succeeds
+                    # or fails.
+                    if _prompt_is_oversized(prompt):
+                        # "$(cat file)" still expands to one oversized argv
+                        # entry, so it does NOT avoid E2BIG.  Pass a short
+                        # bootstrap that points claude at the full prompt
+                        # file instead — every instruction is preserved.
+                        bootstrap = _bootstrap_prompt(str(_prompt_ref))
+                        cmd += (f' {shlex.quote(bootstrap)}; '
+                                f'rm -f {shlex.quote(str(_prompt_ref))}')
+                        _log.warning(
+                            "prompt is %d bytes, over the %d-byte argv limit; "
+                            "using file-backed bootstrap %s",
+                            prompt_bytes(prompt), PROMPT_ARG_LIMIT, _prompt_ref)
+                    else:
+                        cmd += f' "$(cat {_prompt_ref})"; rm -f {shlex.quote(str(_prompt_ref))}'
                     _prompt_written = True
             except Exception:
                 pass
         if not _prompt_written:
+            if _prompt_is_oversized(prompt):
+                # No writable location for file-backed delivery: fail with a
+                # clear error rather than letting execve raise a raw E2BIG.
+                raise PromptTooLargeError(prompt_bytes(prompt),
+                                          PROMPT_ARG_LIMIT, "claude prompt")
             escaped = prompt.replace("'", "'\\''")
             cmd += f" '{escaped}'"
 
@@ -758,6 +1215,61 @@ def transcript_path_for(cwd: str, session_id: str) -> Path:
     return _claude_project_dir(cwd) / f"{session_id}.jsonl"
 
 
+_PANE_SESSION_RE = re.compile(
+    r"--(?:session-id|resume)[ =]"
+    r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})")
+# shlex.quote() output: a bare word, or a single-quoted one (spaces).
+_PANE_CD_RE = re.compile(r'^"?cd ((?:\'[^\']*\'|[^\s\'])+) && ')
+_PANE_CONTAINER_RE = re.compile(r"\b(?:podman|docker) exec\b")
+
+
+def pane_transcript_path(pane_id: str, workdir: str | None) -> Path | None:
+    """Claude's native transcript for the session a pane was launched with.
+
+    A restarted TUI can't find the transcript symlinks an earlier TUI made
+    (they live in that TUI's run dir), so it would never track, idle-detect
+    or trust-watch those panes again.  The session id is in the pane's own
+    start command (``--session-id``/``--resume``), and the directory Claude
+    runs in is the ``cd`` prefix of a host launch, ``/workspace`` for a
+    container exec, else *workdir*.  Returns None when no session id shows.
+    """
+    from pm_core import tmux as tmux_mod
+    from pm_core.container import _CONTAINER_WORKDIR
+    cmd = tmux_mod.pane_start_command(pane_id)
+    m = _PANE_SESSION_RE.search(cmd)
+    if not m:
+        return None
+    cd = _PANE_CD_RE.match(cmd)
+    if cd:
+        try:
+            cwd = shlex.split(cd.group(1))[0]
+        except (ValueError, IndexError):
+            return None
+    elif _PANE_CONTAINER_RE.search(cmd):
+        cwd = _CONTAINER_WORKDIR
+    elif workdir:
+        cwd = workdir
+    else:
+        return None
+    return transcript_path_for(cwd, m.group(1))
+
+
+def pane_runs_transcript(pane_id: str, workdir: str | None,
+                         transcript_path: str | Path) -> bool:
+    """Whether *pane_id* runs the session the *transcript_path* symlink names.
+
+    Drivers keep one ``impl-<pr>.jsonl`` symlink per run dir, so a pane
+    another driver launched meets this driver's symlink to an *earlier*
+    session.  A pane whose start command shows no session id cannot be
+    checked and counts as a match.
+    """
+    own = pane_transcript_path(pane_id, workdir)
+    if own is None:
+        return True
+    return session_id_from_transcript(own) == \
+        session_id_from_transcript(transcript_path)
+
+
 def finalize_transcript(transcript_path: Path) -> None:
     """Replace a transcript symlink with a copy of the target file.
 
@@ -784,20 +1296,52 @@ def launch_claude_in_tmux(pane_target: str, prompt: str, cwd: str | None = None,
     ``build_claude_shell_cmd``).
     """
     from pm_core.tmux import send_keys
-    cmd = build_claude_shell_cmd(prompt=prompt, cwd=cwd, session_type=session_type)
-    send_keys(pane_target, cmd)
+    env: dict[str, str] = {}
+    cmd = build_claude_shell_cmd(prompt=prompt, cwd=cwd,
+                                 session_type=session_type, env_out=env)
+    if env:
+        # send_keys types into an existing shell, which has no pane-env
+        # channel, so the values are handed over in a 0600 file that the
+        # command sources and removes before claude starts.  sh -c so the
+        # POSIX prefix also works when the pane's shell is fish.
+        prefix, path = write_env_file(env)
+        try:
+            send_keys(pane_target, f"sh -c {shlex.quote(prefix + cmd)}")
+        except Exception:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+            raise
+    else:
+        send_keys(pane_target, cmd)
 
 
 def launch_bridge_in_tmux(prompt: str | None, cwd: str, session_name: str) -> str:
-    """Launch a bridge in a tmux pane. Returns the socket path."""
+    """Launch a bridge in a tmux pane. Returns the socket path.
+
+    The prompt is handed to the bridge as a shell argument, so it is one argv
+    entry like every other prompt this module launches: an over-limit one
+    would make the pane fail with a raw "Argument list too long" (E2BIG)
+    before the bridge starts — the same failure ``build_claude_shell_cmd``
+    guards against.  Above ``PROMPT_ARG_LIMIT`` the complete prompt is written
+    to a file and passed with ``--prompt-file``, which the bridge reads (and
+    removes) for its first turn, so every instruction is preserved.
+    """
     import uuid
     from pm_core.tmux import split_pane_background
 
     socket_path = f"/tmp/pm-bridge-{uuid.uuid4().hex[:12]}.sock"
     bridge_cmd = f"python3 -m pm_core.bridge {socket_path} --cwd '{cwd}'"
     if prompt:
-        escaped = prompt.replace("'", "'\\''")
-        bridge_cmd += f" --prompt '{escaped}'"
+        # The bridge reads the prompt file itself, so only its path matters
+        # here (the returned bootstrap text is for claude-as-argv launches).
+        _bootstrap, prompt_file = _materialize_oversized_prompt(prompt, cwd=cwd)
+        if prompt_file:
+            bridge_cmd += f" --prompt-file {shlex.quote(prompt_file)}"
+        else:
+            escaped = prompt.replace("'", "'\\''")
+            bridge_cmd += f" --prompt '{escaped}'"
 
     split_pane_background(session_name, "v", bridge_cmd)
     return socket_path
@@ -820,38 +1364,48 @@ def launch_claude_print_background(prompt: str, cwd: str | None = None,
     fc_config = _fake_claude_config_for_type(session_type)
 
     def _run():
-        if fc_config is not None:
-            cmd = [_FAKE_CLAUDE_BIN]
-            cmd.extend(_fake_claude_args(fc_config, session_type=session_type))
-        else:
-            claude = find_claude()
-            if not claude:
-                if callback:
-                    callback("", "claude CLI not found", 1)
-                return
-            cmd = [claude]
-            if _skip_permissions():
-                cmd.append("--dangerously-skip-permissions")
-            if model_flag:
-                cmd.extend(["--model", model_flag])
-            cmd.extend(["-p", prompt])
-        log_shell_command(cmd, prefix="claude-print")
-        # Print mode is one-shot; close stdin so a no-verdict fake-claude
-        # (e.g. under "_all" mode) hits EOF in _hold_open instead of blocking
-        # forever on inherited stdin.  Real `claude -p` gets its prompt via
-        # argument, so it never needs stdin either.
-        result = subprocess.run(
-            cmd,
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            env=run_env,
-            stdin=subprocess.DEVNULL,
-        )
-        if result.returncode != 0:
-            log_shell_command(cmd, prefix="claude-print", returncode=result.returncode)
-        if callback:
-            callback(result.stdout, result.stderr, result.returncode)
+        cleanup_path = None
+        try:
+            if fc_config is not None:
+                cmd = [_FAKE_CLAUDE_BIN]
+                cmd.extend(_fake_claude_args(fc_config, session_type=session_type))
+            else:
+                claude = find_claude()
+                if not claude:
+                    if callback:
+                        callback("", "claude CLI not found", 1)
+                    return
+                cmd = [claude]
+                if _skip_permissions():
+                    cmd.append("--dangerously-skip-permissions")
+                if model_flag:
+                    cmd.extend(["--model", model_flag])
+                argv_prompt, cleanup_path = _materialize_oversized_prompt(
+                    prompt, cwd=cwd)
+                cmd.extend(["-p", argv_prompt])
+            log_shell_command(cmd, prefix="claude-print")
+            # Print mode is one-shot; close stdin so a no-verdict fake-claude
+            # (e.g. under "_all" mode) hits EOF in _hold_open instead of blocking
+            # forever on inherited stdin.  Real `claude -p` gets its prompt via
+            # argument, so it never needs stdin either.
+            result = subprocess.run(
+                cmd,
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+                env=run_env,
+                stdin=subprocess.DEVNULL,
+            )
+            if result.returncode != 0:
+                log_shell_command(cmd, prefix="claude-print", returncode=result.returncode)
+            if callback:
+                callback(result.stdout, result.stderr, result.returncode)
+        finally:
+            if cleanup_path:
+                try:
+                    os.unlink(cleanup_path)
+                except OSError:
+                    pass
 
     t = threading.Thread(target=_run, daemon=True)
     t.start()

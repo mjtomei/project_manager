@@ -15,11 +15,13 @@ one for any pane whose verdict a loop will poll) it also:
   * emits (and, while held open, periodically refreshes) the
     ``idle_prompt`` hook event the poller waits on.
 
-Without a ``session_id`` (CLI / unit-test use) it just writes to stdout.
+Without a ``session_id`` (CLI / unit-test use) it just writes to stdout,
+staying open afterwards only when stdin is a terminal (a live tmux pane).
 """
 
 import json
 import os
+import re
 import select
 import sys
 import time
@@ -38,6 +40,11 @@ SINGLE_LINE_VERDICTS = (
     "READY",             # watcher loop: iteration complete
     "FINALIZE_DONE",     # qa finalize: push + fast-forward succeeded
     "FINALIZE_BLOCKED",  # qa finalize: a prerequisite blocked completion
+    "SIGNOFF_MERGE",     # sign-off router: verified PASS -> merge / gate
+    "SIGNOFF_REQA",      # sign-off router: harness/misframed -> re-qa
+    "SIGNOFF_REVIEW",    # sign-off router: code changed in QA -> review + qa
+    "SIGNOFF_IMPL",      # sign-off router: real gap -> implementation
+    "SIGNOFF_BLOCKED",   # sign-off router: ambiguity / out-of-scope -> escalate
 )
 
 # Block-style verdicts: emitted as START … END pairs
@@ -88,16 +95,21 @@ SESSION_TYPE_VERDICTS: dict[str, tuple[str, ...]] = {
     "qa_concretize":   ("REFINED_STEPS", "REFINER_REJECT"),
     "qa_verification": ("VERIFIED", "FLAGGED"),
     "qa_finalize":     ("FINALIZE_DONE", "FINALIZE_BLOCKED"),
+    # Model targeting for scenario 0 only; its fake still launches as
+    # qa_scenario so existing fake configs keep covering it.
+    "qa_interactive":  (),
+    "signoff":         ("SIGNOFF_MERGE", "SIGNOFF_REQA", "SIGNOFF_REVIEW",
+                        "SIGNOFF_IMPL", "SIGNOFF_BLOCKED"),
     "watcher":         ("READY", "INPUT_REQUIRED"),
-    "merge":           (),   # merge conflict: no verdict, interactive
+    "merge":           (),   # post-merge repo update: no verdict, interactive
     # --- non-loop interactive sessions: no verdict, fake-claude routing only ---
     "plan":            (),   # pm plan: add / breakdown / review / deps / import
     "meta":            (),   # pm meta: work on pm itself
     "guide":           (),   # pm guide: onboarding / getting-started
     "cluster":         (),   # pm cluster: cross-repo exploration
     "container":       (),   # pm container build session
-    "qa_author":       (),   # pm qa: author / debug / launch / standalone
-    "qa_regression":   (),   # pm qa regression authoring
+    "qa_author":       (),   # pm qa: author / debug / standalone, launch of an instruction
+    "qa_regression":   (),   # regression test runs: pm qa regression (also via TUI / pm qa launch)
     "discuss":         (),   # TUI ad-hoc Claude / discuss panes
     "watcher_review":  (),   # TUI chat-driven watcher-loop review
 }
@@ -319,13 +331,13 @@ def _claude_transcript_path(session_id: str) -> Path:
 
     Mirrors ``claude_launcher._claude_project_dir`` — Claude Code stores
     transcripts under ``~/.claude/projects/<mangled-cwd>/<session-id>.jsonl``
-    with ``/`` and ``.`` in the path replaced by ``-``.  The fake runs in the
+    with every non-alphanumeric character replaced by ``-``.  The fake runs in the
     pane's cwd, which is the cwd pm passed to ``build_claude_shell_cmd``, so
     the launcher-side ``transcript_path_for`` resolves to the same file.
     (``verdict_transcript._read_transcript_text`` additionally globs by
     session-id, so minor cwd drift is tolerated.)
     """
-    mangled = os.getcwd().replace("/", "-").replace(".", "-")
+    mangled = re.sub(r"[^a-zA-Z0-9]", "-", os.getcwd())
     return Path.home() / ".claude" / "projects" / mangled / f"{session_id}.jsonl"
 
 
@@ -375,7 +387,15 @@ def _emit_idle_hook(session_id: str) -> None:
         pass
 
 
-def _hold_open(hold: float | None, session_id: str | None = None) -> None:
+def _stdin_is_tty() -> bool:
+    try:
+        return sys.stdin.isatty()
+    except (AttributeError, ValueError, OSError):
+        return False
+
+
+def _hold_open(hold: float | None, session_id: str | None = None,
+               idle_once_after: float | None = None) -> None:
     """Keep the process alive after the session's output.
 
     A real Claude session does not exit when it finishes a turn — it stays
@@ -391,6 +411,11 @@ def _hold_open(hold: float | None, session_id: str | None = None) -> None:
     ``_HOOK_REFRESH`` seconds while held open, so a poller with a grace
     period eventually observes an event newer than its grace window.  With no
     *session_id* there is nothing to refresh — the original simple wait.
+
+    *idle_once_after* (with *session_id*) replaces the refresh with a single
+    idle hook that many seconds after the output, like real Claude's one
+    ``idle_prompt`` per finished turn: a loop that keeps waiting on the same
+    pane (e.g. after INPUT_REQUIRED) then sees no further idle events.
     """
     if not session_id:
         if hold is None:
@@ -400,6 +425,10 @@ def _hold_open(hold: float | None, session_id: str | None = None) -> None:
                 pass
         elif hold > 0:
             time.sleep(hold)
+        return
+
+    if idle_once_after is not None:
+        _hold_with_single_idle(hold, session_id, idle_once_after)
         return
 
     # session_id set — refresh the idle hook while held open.
@@ -428,6 +457,40 @@ def _hold_open(hold: float | None, session_id: str | None = None) -> None:
                 return
 
 
+def _hold_with_single_idle(hold: float | None, session_id: str,
+                           idle_once_after: float) -> None:
+    """Stay open per *hold*, emitting the idle hook once after *idle_once_after*
+    seconds.  Without *hold*, input on stdin (or EOF) ends the session, as in
+    :func:`_hold_open`."""
+    start = time.monotonic()
+    emit_at = start + max(0.0, idle_once_after)
+    deadline = None if hold is None else start + max(0.0, hold)
+    emitted = False
+    while True:
+        now = time.monotonic()
+        if not emitted and now >= emit_at:
+            _emit_idle_hook(session_id)
+            emitted = True
+        if deadline is not None and now >= deadline:
+            return
+        waits = [t - now for t in ((None if emitted else emit_at), deadline)
+                 if t is not None]
+        timeout = max(0.0, min(waits)) if waits else None
+        if hold is not None:
+            time.sleep(timeout)
+            continue
+        try:
+            ready, _, _ = select.select([sys.stdin], [], [], timeout)
+        except (OSError, ValueError):
+            try:
+                sys.stdin.read()
+            except (KeyboardInterrupt, OSError):
+                pass
+            return
+        if ready:
+            return
+
+
 def run_fake_claude(
     verdict: str | None,
     preamble: int = 3,
@@ -441,6 +504,8 @@ def run_fake_claude(
     char_delay: float = 0.015,
     hold: float | None = None,
     session_id: str | None = None,
+    display_bullet: str | None = None,
+    idle_once_after: float | None = None,
 ) -> None:
     """Execute the fake Claude session.
 
@@ -471,12 +536,19 @@ def run_fake_claude(
             :func:`_hold_open`.  ``None`` (default) stays open until the pane
             closes; a number stays open that many seconds then exits.
             Applies to no-verdict sessions always, and to verdict sessions
-            whenever *session_id* is set (so the poller has a live pane).
+            whenever *session_id* is set (so the poller has a live pane) or
+            stdin is a terminal (a manual review pane).
         session_id: Claude session id.  When set, the fake also writes a
             Claude-format JSONL transcript and emits the ``idle_prompt`` hook
             event — the inputs production verdict detection actually reads —
             and stays open afterwards so the poller can observe them.  When
             ``None`` the fake only writes to stdout (CLI / unit-test use).
+        idle_once_after: Emit the idle hook once, this many seconds after the
+            output, instead of refreshing it — see :func:`_hold_open`.
+        display_bullet: Render stdout like Claude Code's pane: the first
+            non-blank line is prefixed with this bullet (e.g. ``"● "``) and
+            later non-blank lines are indented to match.  Display only — the
+            JSONL transcript keeps the raw text, as with real Claude.
     """
     no_verdict = verdict is None or verdict.upper() == NO_VERDICT
     upper = "" if no_verdict else verdict.upper()
@@ -484,9 +556,24 @@ def run_fake_claude(
     # into the JSONL transcript as the assistant turn's content.
     captured: list[str] = []
 
+    bullet_shown = False
+
+    def _display(text: str) -> str:
+        nonlocal bullet_shown
+        if not display_bullet:
+            return text
+        out = []
+        for line in text.splitlines(keepends=True):
+            if line.strip():
+                line = ((" " * len(display_bullet)) if bullet_shown
+                        else display_bullet) + line
+                bullet_shown = True
+            out.append(line)
+        return "".join(out)
+
     def _w(text: str) -> None:
         captured.append(text)
-        _write(text, stream=stream, char_delay=char_delay)
+        _write(_display(text), stream=stream, char_delay=char_delay)
 
     # 1. Preamble lines
     for i in range(preamble):
@@ -538,7 +625,12 @@ def run_fake_claude(
     #    - verdict sessions stay open when a session_id was provided, so the
     #      poller has a live pane and a refreshed hook to detect against —
     #      the loop kills the pane once it has read the verdict.
-    #    Without a session_id a verdict session exits immediately (CLI /
-    #    unit-test use), preserving the original drop-in behaviour.
-    if no_verdict or session_id:
-        _hold_open(hold, session_id=session_id)
+    #    - verdict sessions launched on a terminal (e.g. a manual
+    #      ``pm pr review`` pane, which gets no session_id) stay open too:
+    #      a real interactive Claude does, and exiting would collapse the
+    #      review window to its diff pane.
+    #    Otherwise (no session_id, stdin not a tty — CLI pipes / unit tests)
+    #    a verdict session exits immediately, preserving the original
+    #    drop-in behaviour.
+    if no_verdict or session_id or _stdin_is_tty():
+        _hold_open(hold, session_id=session_id, idle_once_after=idle_once_after)

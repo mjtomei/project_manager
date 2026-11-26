@@ -2,6 +2,10 @@
 
 Run as: python3 -m pm_core.bridge <socket_path> --cwd <dir> --prompt "initial prompt"
 
+Pass ``--prompt-file <path>`` instead when the initial prompt is too large for
+one argv entry (the launcher writes it to a file rather than exceeding
+``MAX_ARG_STRLEN``); the file is read once and removed.
+
 Manages a Claude session in a tmux pane, allowing both an orchestrating agent
 (via Unix socket) and a human (via stdin) to send messages.
 """
@@ -13,6 +17,7 @@ import os
 import signal
 import sys
 import uuid
+from pathlib import Path
 
 
 class Bridge:
@@ -194,12 +199,19 @@ class Bridge:
             "message": {"role": "user", "content": message},
         })
 
+        # No model is selected here, so no routing variable a caller's
+        # environment carries (pm run inside a routed session) may pick one.
+        from pm_core.providers import BUILTIN_CLAUDE, ProviderConfig, launch_env
+        _, unset = launch_env(ProviderConfig(name=BUILTIN_CLAUDE), {}, None)
+        env = {k: v for k, v in os.environ.items() if k not in unset}
+
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=self.cwd,
+            env=env,
         )
 
         proc.stdin.write(stdin_msg.encode() + b"\n")
@@ -258,14 +270,43 @@ class Bridge:
         return result_text
 
 
+def _resolve_initial_prompt(args) -> str | None:
+    """The bridge's first-turn prompt, from ``--prompt`` or ``--prompt-file``.
+
+    ``--prompt-file`` carries a prompt too large for one argv entry (the
+    launcher writes it to a file rather than passing it as a shell argument,
+    which would fail ``execve`` with E2BIG).  The file is a one-shot handoff
+    from the launcher, so it is removed once read.
+    """
+    if not args.prompt_file:
+        return args.prompt
+    try:
+        # The launcher writes the file as UTF-8 (prompt_bytes measures UTF-8
+        # bytes); read it the same way so a non-ASCII prompt does not depend on
+        # the pane's locale encoding.
+        text = Path(args.prompt_file).read_text(encoding="utf-8")
+    except OSError as e:
+        print(f"[bridge] ERROR: cannot read prompt file "
+              f"{args.prompt_file}: {e}", flush=True)
+        return args.prompt
+    try:
+        os.unlink(args.prompt_file)
+    except OSError:
+        pass
+    return text
+
+
 def main():
     parser = argparse.ArgumentParser(description="Agent Bridge")
     parser.add_argument("socket_path", help="Unix socket path")
     parser.add_argument("--cwd", default=".", help="Working directory for Claude")
     parser.add_argument("--prompt", default=None, help="Initial prompt to send")
+    parser.add_argument("--prompt-file", default=None,
+                        help="File holding the initial prompt, for a prompt "
+                             "too large to pass as one argument")
     args = parser.parse_args()
 
-    bridge = Bridge(args.socket_path, args.cwd, args.prompt)
+    bridge = Bridge(args.socket_path, args.cwd, _resolve_initial_prompt(args))
 
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)

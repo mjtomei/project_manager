@@ -1,17 +1,19 @@
-"""Tests for pr-ca6981c: pm merge's stash/pop must not corrupt project.yaml.
+"""Tests for pr-ca6981c: a merge's auto-stash must not corrupt project.yaml.
 
-Covers three symptoms of using git's *text* stash/pop to reconcile concurrent
-project.yaml edits across a merge:
+Using git's *text* stash/pop to carry pm's live registry (``pm/project.yaml``)
+across a fast-forward of the main repo wrote conflict markers into it, leaked
+``pm: auto-stash for merge`` entries, and raced concurrent pm writers (#253
+S74).  The fix keeps the registry out of the text stash (captured, reverted,
+re-applied structurally with ``store.merge_3way``) and holds the registry lock
+across the whole fast-forward.
 
-1. CORRUPTION — conflict markers written into project.yaml.
-2. STASH LEAK — a conflicted pop leaves the auto-stash behind.
-3. store.load giving a cryptic YAML traceback instead of a clear message.
-
-Plus the structured-merge core (store.three_way_merge) and the
-_dirty_file_paths path-mangling regression that the fix depends on.
+Real-git tests drive :func:`pr_mod._ff_with_autostash`, the helper both
+production call sites (``_publish_local`` and ``_pull_after_merge``) use.
 """
 
 import subprocess
+import threading
+import time
 from pathlib import Path
 from unittest import mock
 
@@ -22,16 +24,74 @@ from pm_core.cli import pr as pr_mod
 
 
 def _git(*args, cwd):
-    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
+    return subprocess.run(["git", *args], cwd=cwd, capture_output=True,
+                          text=True)
 
 
 def _init_repo(tmp_path) -> Path:
     repo = tmp_path / "repo"
     repo.mkdir()
-    _git("init", "-q", cwd=repo)
+    _git("init", "-q", "-b", "master", cwd=repo)
     _git("config", "user.email", "t@t", cwd=repo)
     _git("config", "user.name", "t", cwd=repo)
     return repo
+
+
+def _seed_project(repo) -> Path:
+    pm = repo / "pm"
+    pm.mkdir()
+    store.save(
+        {"project": {"name": "x", "base_branch": "master", "backend": "local"},
+         "prs": [{"id": "pr-001", "title": "one", "status": "in_review",
+                  "updated_at": "2026-01-01T00:00:00"},
+                 {"id": "pr-002", "title": "two", "status": "pending"}],
+         "plans": []},
+        pm,
+    )
+    (repo / ".gitignore").write_text("pm/project.yaml.lock\n")
+    _git("add", "-A", cwd=repo)
+    _git("commit", "-q", "-m", "base", cwd=repo)
+    return pm
+
+
+def _edit(pm, fn):
+    d = store.load(pm)
+    fn(d)
+    store.save(d, pm)
+
+
+def _pr(d, pr_id):
+    return store.get_pr(d, pr_id)
+
+
+def _incoming(repo, pm, fn=None, files=None):
+    """Commit an `incoming` branch one commit ahead of master (ff-able)."""
+    _git("checkout", "-q", "-b", "incoming", cwd=repo)
+    if fn:
+        _edit(pm, fn)
+    for name, text in (files or {}).items():
+        (repo / name).write_text(text)
+    _git("add", "-A", cwd=repo)
+    _git("commit", "-q", "-m", "incoming", cwd=repo)
+    _git("checkout", "-q", "master", cwd=repo)
+
+
+def _stash_list(repo):
+    return _git("stash", "list", cwd=repo).stdout
+
+
+def _backups(repo):
+    return list((repo / ".git").glob("pm-premerge-project-*.yaml"))
+
+
+def _add_note(note_id, text, ts="2026-05-05T05:05:05"):
+    def fn(d):
+        pr = _pr(d, "pr-001")
+        pr.setdefault("notes", []).append(
+            {"id": note_id, "text": text, "created_at": ts,
+             "last_edited": ts})
+        pr["updated_at"] = ts
+    return fn
 
 
 # ---------------------------------------------------------------------------
@@ -51,12 +111,13 @@ class TestConflictMarkerGuard:
             ">>>>>>> Stashed changes\n"
         )
         hits = store.find_conflict_markers(text)
-        linenos = [n for n, _ in hits]
-        assert linenos == [2, 4, 6, 8]
+        assert [n for n, _ in hits] == [2, 4, 6, 8]
 
     def test_benign_equals_in_value_not_flagged(self):
-        # A value containing '===' or trailing equals must not trip the check.
-        text = "key: 'a======='\ntoken: ab==\nbar: '======= not a marker'\n"
+        # A value containing '===' or trailing equals must not trip the check,
+        # nor marker text quoted inside an (indented) note.
+        text = ("key: 'a======='\ntoken: ab==\nbar: '======= not a marker'\n"
+                "notes:\n  - text: '<<<<<<< Updated upstream\n    ======='\n")
         assert store.find_conflict_markers(text) == []
 
     def test_load_raises_clear_error_on_markers(self, tmp_path):
@@ -79,121 +140,48 @@ class TestConflictMarkerGuard:
         assert "conflict markers" in msg
         assert "line 5" in msg  # the <<<<<<< line
 
-
-# ---------------------------------------------------------------------------
-# store.three_way_merge
-# ---------------------------------------------------------------------------
-
-class TestThreeWayMerge:
-    def test_only_theirs_changed_takes_theirs(self):
-        base = {"a": 1}
-        ours = {"a": 1}
-        theirs = {"a": 2}
-        assert store.three_way_merge(base, ours, theirs) == {"a": 2}
-
-    def test_only_ours_changed_takes_ours(self):
-        base = {"a": 1}
-        ours = {"a": 9}
-        theirs = {"a": 1}
-        assert store.three_way_merge(base, ours, theirs) == {"a": 9}
-
-    def test_both_changed_prefers_ours(self):
-        base = {"updated_at": "t0"}
-        ours = {"updated_at": "t1"}
-        theirs = {"updated_at": "t2"}
-        assert store.three_way_merge(base, ours, theirs) == {"updated_at": "t1"}
-
-    def test_prs_origin_only_pr_added(self):
-        base = {"prs": [{"id": "pr-001", "status": "in_review"}]}
-        # ours gained pr-002 (e.g. merged in from origin)
-        ours = {"prs": [{"id": "pr-001", "status": "in_review"},
-                        {"id": "pr-002", "status": "merged"}]}
-        theirs = {"prs": [{"id": "pr-001", "status": "in_review"}]}
-        merged = store.three_way_merge(base, ours, theirs)
-        ids = {p["id"] for p in merged["prs"]}
-        assert ids == {"pr-001", "pr-002"}
-
-    def test_prs_local_only_pr_kept(self):
-        base = {"prs": [{"id": "pr-001", "status": "in_review"}]}
-        ours = {"prs": [{"id": "pr-001", "status": "in_review"}]}
-        # theirs (local) started pr-003
-        theirs = {"prs": [{"id": "pr-001", "status": "in_review"},
-                          {"id": "pr-003", "status": "in_progress"}]}
-        merged = store.three_way_merge(base, ours, theirs)
-        ids = {p["id"] for p in merged["prs"]}
-        assert ids == {"pr-001", "pr-003"}
-
-    def test_same_pr_field_level_merge(self):
-        # ours advanced status; theirs touched a different field.
-        base = {"prs": [{"id": "pr-001", "status": "in_review", "note": "a"}]}
-        ours = {"prs": [{"id": "pr-001", "status": "merged", "note": "a"}]}
-        theirs = {"prs": [{"id": "pr-001", "status": "in_review", "note": "b"}]}
-        merged = store.three_way_merge(base, ours, theirs)
-        pr = merged["prs"][0]
-        assert pr["status"] == "merged"  # only ours changed it
-        assert pr["note"] == "b"         # only theirs changed it
-
-    def test_concurrent_notes_unioned(self):
-        # notes is a nested id-keyed list: a note added on each side must be
-        # unioned, not have one side clobber the whole list.
-        base = {"prs": [{"id": "pr-001",
-                         "notes": [{"id": "n1", "text": "a"}]}]}
-        ours = {"prs": [{"id": "pr-001",
-                         "notes": [{"id": "n1", "text": "a"},
-                                   {"id": "n2", "text": "from disk"}]}]}
-        theirs = {"prs": [{"id": "pr-001",
-                           "notes": [{"id": "n1", "text": "a"},
-                                     {"id": "n3", "text": "from overlay"}]}]}
-        merged = store.three_way_merge(base, ours, theirs)
-        note_ids = {n["id"] for n in merged["prs"][0]["notes"]}
-        assert note_ids == {"n1", "n2", "n3"}
+    def test_missing_file_is_still_file_not_found(self, tmp_path):
+        with pytest.raises(FileNotFoundError):
+            store.load(tmp_path)
+        with pytest.raises(store.ProjectYamlMissingError):
+            store.load(tmp_path)
 
 
 # ---------------------------------------------------------------------------
-# _dirty_file_paths regression (fix the off-by-one path mangling)
+# _dirty_file_paths
 # ---------------------------------------------------------------------------
 
 class TestDirtyFilePaths:
     def test_worktree_only_change_path_intact(self, tmp_path):
         repo = _init_repo(tmp_path)
-        pm = repo / "pm"
-        pm.mkdir()
-        store.save({"project": {}, "prs": [], "plans": []}, pm)
-        _git("add", "-A", cwd=repo)
-        _git("commit", "-q", "-m", "base", cwd=repo)
+        pm = _seed_project(repo)
         # Worktree-only modification → porcelain " M pm/project.yaml"
-        store.save({"project": {"x": 1}, "prs": [], "plans": []}, pm)
+        _edit(pm, lambda d: d["project"].update(x=1))
+        assert pr_mod._dirty_file_paths(repo) == ["pm/project.yaml"]
+
+    def test_raw_paths_and_renames(self, tmp_path):
+        repo = _init_repo(tmp_path)
+        _seed_project(repo)
+        (repo / "old name.txt").write_text("x\n")
+        _git("add", "-A", cwd=repo)
+        _git("commit", "-q", "-m", "f", cwd=repo)
+        _git("mv", "old name.txt", "new name.txt", cwd=repo)
+        (repo / "café \"q\".txt").write_text("u\n")
         paths = pr_mod._dirty_file_paths(repo)
-        assert paths == ["pm/project.yaml"]
+        # Not C-quoted, rename gives the new path only.
+        assert sorted(paths) == ["café \"q\".txt", "new name.txt"]
 
 
 # ---------------------------------------------------------------------------
-# Real-git integration: stash reconciliation across a merge
+# pr start: persist a created GitHub PR with backoff (#210 class)
 # ---------------------------------------------------------------------------
-
-def _seed_project(repo) -> Path:
-    pm = repo / "pm"
-    pm.mkdir()
-    store.save(
-        {"project": {"name": "x", "base_branch": "master", "backend": "local"},
-         "prs": [{"id": "pr-001", "status": "in_review",
-                  "updated_at": "2026-01-01T00:00:00"}],
-         "plans": []},
-        pm,
-    )
-    _git("add", "-A", cwd=repo)
-    _git("commit", "-q", "-m", "base", cwd=repo)
-    return pm
-
 
 class TestPersistWithBackoff:
-    """pr-d887f4c class: a transient lock timeout must not orphan a just-created
-    GitHub PR (persist the gh_pr_number with backoff)."""
-
     def test_succeeds_after_transient_timeout(self, tmp_path):
         root = tmp_path / "pm"
         root.mkdir()
-        store.save({"project": {}, "prs": [{"id": "pr-001"}], "plans": []}, root)
+        store.save({"project": {}, "prs": [{"id": "pr-001"}], "plans": []},
+                   root)
         calls = {"n": 0}
         real = store.locked_update
 
@@ -221,264 +209,411 @@ class TestPersistWithBackoff:
                 pr_mod._persist_with_backoff(root, lambda d: None, attempts=3)
 
 
-class TestStashReconciliation:
-    def test_concurrent_edit_across_merge_no_corruption(self, tmp_path):
-        """The core pr-ca6981c repro: concurrent project.yaml edits across a
-        merge must not corrupt the file or leak a stash."""
+# ---------------------------------------------------------------------------
+# _ff_with_autostash: registry reconciliation across a fast-forward
+# ---------------------------------------------------------------------------
+
+class TestRegistryAcrossFastForward:
+    def test_overlapping_registry_edits_reconcile_without_markers(
+            self, tmp_path):
+        """The pr-ca6981c repro: incoming and local both change pr-001's
+        updated_at (a text conflict), plus disjoint edits on each side."""
         repo = _init_repo(tmp_path)
         pm = _seed_project(repo)
 
-        # An "incoming" branch changes updated_at (simulates merged-in change).
-        _git("checkout", "-q", "-b", "incoming", cwd=repo)
-        d = store.load(pm)
-        d["prs"][0]["updated_at"] = "2026-02-02T02:02:02"
-        store.save(d, pm)
-        _git("commit", "-qam", "incoming", cwd=repo)
-        _git("checkout", "-q", "master", cwd=repo)
+        def incoming(d):
+            _add_note("note-in", "from the branch",
+                      "2026-02-02T02:02:02")(d)
+            _pr(d, "pr-002")["description"] = "branch edit"
+        _incoming(repo, pm, incoming)
 
-        # Local concurrent (uncommitted) edit with a DIFFERENT updated_at.
-        d = store.load(pm)
-        d["prs"][0]["updated_at"] = "2026-03-03T03:03:03"
-        store.save(d, pm)
+        def local(d):
+            _pr(d, "pr-001")["updated_at"] = "2026-03-03T03:03:03"
+            _pr(d, "pr-001")["status"] = "sign_off"
+            _pr(d, "pr-002")["title"] = "local title"
+        _edit(pm, local)
 
-        info = pr_mod._stash_for_merge(repo, lock_tui=False)
-        assert info is not None
-        # project.yaml was reverted (clean) before merge — not text-stashed.
-        assert info["py"] is not None
-        assert info["stashed"] is False
-
-        merge = _git("merge", "--no-ff", "incoming", "-m", "merge", cwd=repo)
-        assert merge.returncode == 0
-
-        clean = pr_mod._unstash_after_merge(repo, info)
-        assert clean is True
+        r = pr_mod._ff_with_autostash(repo, "incoming")
+        assert r.returncode == 0, r.stderr
 
         text = (pm / "project.yaml").read_text()
-        assert "<<<<<<<" not in text           # (b) no conflict markers
-        assert store.find_conflict_markers(text) == []
-        data = store.load(pm)                   # (a) valid YAML
-        assert data["prs"][0]["status"] == "in_review"
-        stash_list = _git("stash", "list", cwd=repo).stdout
-        assert stash_list.strip() == ""         # (c) no stash left behind
+        assert store.find_conflict_markers(text) == []     # no markers
+        d = store.load(pm)                                  # valid YAML
+        one, two = _pr(d, "pr-001"), _pr(d, "pr-002")
+        assert [n["id"] for n in one["notes"]] == ["note-in"]  # merged in
+        assert two["description"] == "branch edit"            # merged in
+        assert one["updated_at"] == "2026-03-03T03:03:03"     # live wins
+        assert one["status"] == "sign_off"                    # live kept
+        assert two["title"] == "local title"                  # live kept
+        assert _stash_list(repo) == ""                        # no stash
+        assert _git("rev-parse", "HEAD", cwd=repo).stdout == \
+            _git("rev-parse", "incoming", cwd=repo).stdout
+        assert _backups(repo) == []                           # copy removed
+        # The live delta is uncommitted again, not staged.
+        assert _git("diff", "--cached", "--name-only",
+                    cwd=repo).stdout == ""
 
-    def test_finalize_succeeds_after_reconciliation(self, tmp_path):
-        """(d) After reconciliation the PR finalizes to status=merged with
-        merged_at set — the load that previously died on conflict markers now
-        succeeds."""
+    def test_merged_pr_finalizes_after_reconcile(self, tmp_path):
+        """(d) The finalize after the update succeeds: status=merged and
+        merged_at set (a marker-corrupted file used to make it raise)."""
         repo = _init_repo(tmp_path)
         pm = _seed_project(repo)
+        _incoming(repo, pm, _add_note("note-in", "x", "2026-02-02T02:02:02"))
+        _edit(pm, lambda d: _pr(d, "pr-001").update(
+            updated_at="2026-03-03T03:03:03"))
 
-        _git("checkout", "-q", "-b", "incoming", cwd=repo)
-        d = store.load(pm)
-        d["prs"][0]["updated_at"] = "2026-02-02T02:02:02"
-        store.save(d, pm)
-        _git("commit", "-qam", "incoming", cwd=repo)
-        _git("checkout", "-q", "master", cwd=repo)
-
-        d = store.load(pm)
-        d["prs"][0]["updated_at"] = "2026-03-03T03:03:03"
-        store.save(d, pm)
-
-        info = pr_mod._stash_for_merge(repo, lock_tui=False)
-        _git("merge", "--no-ff", "incoming", "-m", "merge", cwd=repo)
-        pr_mod._unstash_after_merge(repo, info)
-
-        pr_entry = store.load(pm)["prs"][0]
+        assert pr_mod._ff_with_autostash(repo, "incoming").returncode == 0
+        pr_entry = store.get_pr(store.load(pm), "pr-001")
         with mock.patch.object(pr_mod, "trigger_tui_refresh"), \
              mock.patch("pm_core.cli.helpers._find_tui_pane",
                         return_value=(None, None)):
             pr_mod._finalize_merge(pm, pr_entry, "pr-001")
-
-        final = store.load(pm)["prs"][0]
+        final = store.get_pr(store.load(pm), "pr-001")
         assert final["status"] == "merged"
         assert final.get("merged_at")
 
-    def test_leaked_auto_stash_reaped(self, tmp_path):
-        """A previously-leaked 'pm: auto-stash for merge' is reaped; unrelated
-        WIP stashes are left alone."""
-        repo = _init_repo(tmp_path)
-        pm = _seed_project(repo)
-
-        # Pre-existing unrelated WIP stash.
-        (repo / "wip.txt").write_text("wip")
-        _git("add", "wip.txt", cwd=repo)
-        _git("stash", "push", "-m", "important WIP refactor", cwd=repo)
-        # A leaked auto-stash from a prior failed merge.
-        (repo / "leak.txt").write_text("leak")
-        _git("add", "leak.txt", cwd=repo)
-        _git("stash", "push", "-m", "pm: auto-stash for merge", cwd=repo)
-
-        # Run a clean reconciliation (only project.yaml dirty → no new stash).
-        d = store.load(pm)
-        d["prs"][0]["updated_at"] = "2026-04-04T04:04:04"
-        store.save(d, pm)
-        info = pr_mod._stash_for_merge(repo, lock_tui=False)
-        pr_mod._unstash_after_merge(repo, info)
-
-        listing = _git("stash", "list", cwd=repo).stdout
-        assert "auto-stash for merge" not in listing  # reaped
-        assert "important WIP refactor" in listing     # preserved
-
-    def test_stash_pop_conflict_launches_merge_window(self, tmp_path):
-        """R5: a genuine (non-project.yaml) stash-pop conflict launches a
-        resolution window, retains the stash, and still reconciles
-        project.yaml structurally (no corruption)."""
-        repo = _init_repo(tmp_path)
-        pm = _seed_project(repo)
-        (repo / "code.txt").write_text("base\n")
-        _git("add", "code.txt", cwd=repo)
-        _git("commit", "-qam", "add code", cwd=repo)
-
-        # Local: dirty project.yaml AND dirty code.txt.
-        d = store.load(pm)
-        d["prs"][0]["updated_at"] = "2026-03-03T03:03:03"
-        store.save(d, pm)
-        (repo / "code.txt").write_text("local edit\n")
-
-        info = pr_mod._stash_for_merge(repo, lock_tui=False)
-        assert info["stashed"] is True
-
-        # Simulate the merge bringing in a CONFLICTING change to code.txt so the
-        # subsequent stash pop conflicts.
-        (repo / "code.txt").write_text("incoming edit\n")
-        _git("commit", "-qam", "incoming code", cwd=repo)
-
-        with mock.patch.object(pr_mod, "_launch_merge_window") as mock_launch:
-            clean = pr_mod._unstash_after_merge(
-                repo, info, data={"prs": [info]}, pr_entry={"id": "pr-001"})
-
-        assert clean is False
-        mock_launch.assert_called_once()
-        # The window is framed as a stash-pop recovery, not a pull failure.
-        assert mock_launch.call_args.kwargs.get("stash_pop_conflict") is True
-        # project.yaml still reconciled & valid despite the code conflict.
-        assert "<<<<<<<" not in (pm / "project.yaml").read_text()
-        store.load(pm)
-        # The conflicted stash is retained for manual resolution (not reaped).
-        assert "auto-stash for merge" in _git("stash", "list", cwd=repo).stdout
-
-    def test_stash_pop_conflict_prompt_describes_stash_not_pull(self):
-        """The stash-pop variant of generate_merge_prompt describes the actual
-        stash-pop recovery and takes precedence over a forwarded pull_* flag."""
-        from pm_core import prompt_gen
-        data = {"project": {"name": "x", "base_branch": "master",
-                            "backend": "local"},
-                "prs": [{"id": "pr-001", "title": "T", "branch": "pm/pr-001"}],
-                "plans": []}
-        prompt = prompt_gen.generate_merge_prompt(
-            data, "pr-001", "CONFLICT (content): code.txt",
-            stash_pop_conflict=True, pull_from_origin=True)
-        # Describes the successful merge + stash recovery, not a pull failure.
-        assert "auto-stash" in prompt
-        assert "**succeeded**" in prompt
-        assert "git stash drop" in prompt
-        # Must not fall through to the pull-from-origin framing.
-        assert "pushed to origin" not in prompt
-
-    def test_non_project_file_also_dirty_stashed_and_restored(self, tmp_path):
-        """When a non-project.yaml file is also dirty it is stashed normally and
-        restored, while project.yaml is reconciled structurally."""
+    def test_other_dirty_files_stashed_and_restored(self, tmp_path):
         repo = _init_repo(tmp_path)
         pm = _seed_project(repo)
         (repo / "code.txt").write_text("v1\n")
         _git("add", "code.txt", cwd=repo)
-        _git("commit", "-qam", "add code", cwd=repo)
-
-        # incoming changes project.yaml only
-        _git("checkout", "-q", "-b", "incoming", cwd=repo)
-        d = store.load(pm)
-        d["prs"][0]["updated_at"] = "2026-02-02T02:02:02"
-        store.save(d, pm)
-        _git("commit", "-qam", "incoming", cwd=repo)
-        _git("checkout", "-q", "master", cwd=repo)
-
-        # local: dirty project.yaml AND dirty code.txt (no overlap with merge)
-        d = store.load(pm)
-        d["prs"][0]["updated_at"] = "2026-03-03T03:03:03"
-        store.save(d, pm)
+        _git("commit", "-q", "-m", "code", cwd=repo)
+        _incoming(repo, pm, _add_note("note-in", "x"))
+        _edit(pm, lambda d: _pr(d, "pr-001").update(updated_at="local"))
         (repo / "code.txt").write_text("v1\nlocal change\n")
+        (repo / "scratch file.txt").write_text("untracked\n")
 
-        info = pr_mod._stash_for_merge(repo, lock_tui=False)
-        assert info["py"] is not None
-        assert info["stashed"] is True
-
-        _git("merge", "--no-ff", "incoming", "-m", "merge", cwd=repo)
-        clean = pr_mod._unstash_after_merge(repo, info)
-        assert clean is True
-
-        assert "<<<<<<<" not in (pm / "project.yaml").read_text()
+        r = pr_mod._ff_with_autostash(repo, "incoming")
+        assert r.returncode == 0, r.stderr
         assert (repo / "code.txt").read_text() == "v1\nlocal change\n"
-        assert _git("stash", "list", cwd=repo).stdout.strip() == ""
+        assert (repo / "scratch file.txt").read_text() == "untracked\n"
+        assert _pr(store.load(pm), "pr-001")["updated_at"] == "local"
+        assert _stash_list(repo) == ""
 
-    def test_writer_redirty_in_window_excluded_from_text_stash(
-            self, tmp_path, monkeypatch):
-        """pr-ca6981c residual race (QA scenario 3): even if a concurrent writer
-        re-dirties project.yaml in the unguarded window between the revert and
-        the stash, project.yaml must NEVER be swept into the text stash (it is
-        excluded by explicit pathspec), so the later pop cannot corrupt it with
-        conflict markers or leak the auto-stash."""
+    def test_failed_ff_restores_exact_local_registry(self, tmp_path):
+        """A fast-forward that still fails after stashing (diverged base)
+        leaves the registry byte-identical and the other files restored."""
+        repo = _init_repo(tmp_path)
+        pm = _seed_project(repo)
+        _incoming(repo, pm, _add_note("note-in", "x"))
+        # master diverges from incoming: no fast-forward possible.
+        (repo / "other.txt").write_text("m\n")
+        _git("add", "other.txt", cwd=repo)
+        _git("commit", "-q", "-m", "diverge", cwd=repo)
+        _edit(pm, lambda d: _pr(d, "pr-001").update(updated_at="local"))
+        (repo / "other.txt").write_text("m\nlocal\n")
+        before = (pm / "project.yaml").read_bytes()
+        head = _git("rev-parse", "HEAD", cwd=repo).stdout
+
+        r = pr_mod._ff_with_autostash(repo, "incoming")
+        assert r.returncode != 0
+        assert (pm / "project.yaml").read_bytes() == before
+        assert (repo / "other.txt").read_text() == "m\nlocal\n"
+        assert _git("rev-parse", "HEAD", cwd=repo).stdout == head
+        assert _stash_list(repo) == ""
+        assert _backups(repo) == []
+
+    def test_stash_failure_restores_registry(self, tmp_path):
+        repo = _init_repo(tmp_path)
+        pm = _seed_project(repo)
+        _incoming(repo, pm, _add_note("note-in", "x"))
+        _edit(pm, lambda d: _pr(d, "pr-001").update(updated_at="local"))
+        (repo / "loose.txt").write_text("x\n")
+        before = (pm / "project.yaml").read_bytes()
+        real = pr_mod.git_ops.run_git
+
+        def run_git(*args, **kw):
+            if args[:2] == ("stash", "push"):
+                return subprocess.CompletedProcess(args, 1, "", "boom")
+            return real(*args, **kw)
+
+        with mock.patch.object(pr_mod.git_ops, "run_git",
+                               side_effect=run_git):
+            r = pr_mod._ff_with_autostash(repo, "incoming")
+        assert r.returncode != 0
+        assert (pm / "project.yaml").read_bytes() == before
+        assert _backups(repo) == []
+
+    def test_recovery_copy_exists_until_reapplied(self, tmp_path):
+        """A crash between the revert and the re-apply loses nothing: the
+        live registry is copied into the git dir first."""
+        repo = _init_repo(tmp_path)
+        pm = _seed_project(repo)
+        _edit(pm, lambda d: _pr(d, "pr-001").update(updated_at="local"))
+        live = (pm / "project.yaml").read_text()
+
+        with store._lock(pm):
+            info = pr_mod._stash_for_merge(repo, lock_tui=False)
+            (backup,) = _backups(repo)
+            assert backup.read_text() == live
+            # The registry is reverted to HEAD meanwhile.
+            assert _git("status", "--porcelain", cwd=repo).stdout == ""
+            assert pr_mod._unstash_after_merge(repo, info) is True
+        assert _backups(repo) == []
+        assert (pm / "project.yaml").read_text() == live
+
+    def test_writer_redirty_never_enters_text_stash(self, tmp_path,
+                                                     monkeypatch):
+        """Even a write that re-dirties the registry right after the revert
+        (the QA scenario 3 window) cannot reach the text stash: it is
+        excluded by explicit pathspec."""
         repo = _init_repo(tmp_path)
         pm = _seed_project(repo)
         (repo / "code.txt").write_text("base\n")
         _git("add", "code.txt", cwd=repo)
-        _git("commit", "-qam", "add code", cwd=repo)
-
-        # Local: dirty project.yaml AND a dirty non-project file (so a real
-        # auto-stash gets created and we can inspect what went into it).
-        d = store.load(pm)
-        d["prs"][0]["updated_at"] = "2026-03-03T03:03:03"
-        store.save(d, pm)
+        _git("commit", "-q", "-m", "code", cwd=repo)
+        _edit(pm, lambda d: _pr(d, "pr-001").update(updated_at="local"))
         (repo / "code.txt").write_text("local change\n")
+        real = pr_mod._capture_registry
 
-        # Simulate the concurrent writer: re-dirty project.yaml right AFTER the
-        # real revert inside _project_yaml_dirty_entry — the exact TOCTOU the
-        # bug exploited.  (Writes directly, modelling a writer that slipped in.)
-        real_entry = pr_mod._project_yaml_dirty_entry
-
-        def racing_entry(cwd, dirty):
-            result = real_entry(cwd, dirty)   # captures + reverts project.yaml
+        def racing(cwd, dirty):
+            result = real(cwd, dirty)
             py = pm / "project.yaml"
-            py.write_text(py.read_text() + "# concurrent writer re-dirty\n")
+            py.chmod(0o644)
+            py.write_text(py.read_text() + "# writer re-dirty\n")
             return result
 
-        monkeypatch.setattr(pr_mod, "_project_yaml_dirty_entry", racing_entry)
-
+        monkeypatch.setattr(pr_mod, "_capture_registry", racing)
         info = pr_mod._stash_for_merge(repo, lock_tui=False)
-        assert info is not None
-        assert info["stashed"] is True
-        stashed_files = _git("stash", "show", "--name-only", cwd=repo).stdout
-        assert "code.txt" in stashed_files
-        # The fix: project.yaml is excluded by explicit pathspec even though it
-        # was re-dirtied in the window.  Pre-fix this contained project.yaml.
-        assert "project.yaml" not in stashed_files
+        assert info["stash"]
+        stashed = _git("stash", "show", "--include-untracked",
+                       "--name-only", cwd=repo).stdout
+        assert "code.txt" in stashed
+        assert "project.yaml" not in stashed
+        assert pr_mod._unstash_after_merge(repo, info) is True
+        assert store.find_conflict_markers(
+            (pm / "project.yaml").read_text()) == []
+        assert _stash_list(repo) == ""
 
-        pr_mod._unstash_after_merge(repo, info)
-        text = (pm / "project.yaml").read_text()
-        assert store.find_conflict_markers(text) == []          # no corruption
-        store.load(pm)                                          # valid YAML
-        assert "auto-stash for merge" not in \
-            _git("stash", "list", cwd=repo).stdout              # no leak
 
-    def test_merge_reconcile_lock_held_then_released(self, tmp_path):
-        """When project.yaml is dirty, _stash_for_merge holds its lock across
-        the reconcile (so concurrent writers serialize) and _unstash_after_merge
-        releases it."""
+# ---------------------------------------------------------------------------
+# Locking: concurrent writers serialize against the whole fast-forward
+# ---------------------------------------------------------------------------
+
+class TestRegistryLock:
+    def test_lock_held_during_every_git_step(self, tmp_path):
+        """Held during the first fast-forward too (no overlap needed): a
+        writer that loaded before git rewrote the registry must not save over
+        the merged file."""
         repo = _init_repo(tmp_path)
         pm = _seed_project(repo)
+        _incoming(repo, pm, _add_note("note-in", "x"))
+        _edit(pm, lambda d: _pr(d, "pr-002").update(title="local"))
+        probes = []
+        real = pr_mod.git_ops.run_git
+
+        def run_git(*args, **kw):
+            # Every step that rewrites files; the read-only reaping of leaked
+            # stashes runs after the lock is released.
+            if args[0] in ("merge", "checkout") or args[:2] in (
+                    ("stash", "push"), ("stash", "pop")):
+                try:
+                    with store._lock(pm, timeout=0):
+                        probes.append((args[:2], "free"))
+                except store.StoreLockTimeout:
+                    probes.append((args[:2], "held"))
+            return real(*args, **kw)
+
+        with mock.patch.object(pr_mod.git_ops, "run_git",
+                               side_effect=run_git):
+            assert pr_mod._ff_with_autostash(repo, "incoming").returncode == 0
+        assert probes and all(state == "held" for _, state in probes), probes
+        with store._lock(pm, timeout=0):
+            pass                                  # released afterwards
+
+    def test_busy_lock_leaves_checkout_untouched(self, tmp_path, capsys):
+        repo = _init_repo(tmp_path)
+        pm = _seed_project(repo)
+        _incoming(repo, pm, _add_note("note-in", "x"))
+        _edit(pm, lambda d: _pr(d, "pr-001").update(updated_at="local"))
+        before = (pm / "project.yaml").read_bytes()
+        head = _git("rev-parse", "HEAD", cwd=repo).stdout
+
+        with store._lock(pm), \
+             mock.patch.object(pr_mod, "_MERGE_STASH_LOCK_TIMEOUT", 0.2):
+            r = pr_mod._ff_with_autostash(repo, "incoming")
+        assert r.returncode != 0
+        assert "Could not acquire lock" in r.stderr
+        assert (pm / "project.yaml").read_bytes() == before
+        assert _git("rev-parse", "HEAD", cwd=repo).stdout == head
+        assert _stash_list(repo) == ""
+
+    def test_concurrent_writer_notes_all_survive(self, tmp_path):
+        """#253 S74 / QA S3 shape: a pm writer adding notes in a loop while
+        the merge reconciles.  Every note survives, the merged-in note too,
+        and no marker or stash is ever left."""
+        for attempt in range(3):
+            base = tmp_path / f"run{attempt}"
+            base.mkdir()
+            repo = _init_repo(base)
+            pm = _seed_project(repo)
+            (repo / "code.txt").write_text("v1\n")
+            _git("add", "code.txt", cwd=repo)
+            _git("commit", "-q", "-m", "code", cwd=repo)
+            _incoming(repo, pm, _add_note("note-in", "branch"))
+            _edit(pm, lambda d: _pr(d, "pr-001").update(updated_at="local"))
+            (repo / "code.txt").write_text("v1\nlocal\n")
+            stop = threading.Event()
+            written, errors = [], []
+
+            def writer():
+                i = 0
+                while not stop.is_set() or i < 5:
+                    nid = f"note-w{i}"
+
+                    def fn(d, nid=nid):
+                        _pr(d, "pr-002").setdefault("notes", []).append(
+                            {"id": nid, "text": nid})
+                    try:
+                        store.locked_update(pm, fn, timeout=10)
+                        written.append(nid)
+                    except Exception as e:      # pragma: no cover
+                        errors.append(e)
+                    i += 1
+                    # Real writers are separate `pm` processes; a thread that
+                    # re-takes the lock instantly would starve the merge's
+                    # polling acquire (it then fails safe after 10 s).
+                    time.sleep(0.02)
+
+            t = threading.Thread(target=writer)
+            t.start()
+            try:
+                r = pr_mod._ff_with_autostash(repo, "incoming")
+            finally:
+                stop.set()
+                t.join(30)
+            assert r.returncode == 0, r.stderr
+            assert not errors
+            d = store.load(pm)
+            ids = [n["id"] for n in _pr(d, "pr-002").get("notes", [])]
+            assert ids == written
+            assert [n["id"] for n in _pr(d, "pr-001")["notes"]] == ["note-in"]
+            assert store.find_conflict_markers(
+                (pm / "project.yaml").read_text()) == []
+            assert (repo / "code.txt").read_text() == "v1\nlocal\n"
+            assert _stash_list(repo) == ""
+
+
+# ---------------------------------------------------------------------------
+# Stash restore failures and leaked-stash reaping
+# ---------------------------------------------------------------------------
+
+class TestStashRestoreAndReap:
+    def test_conflicted_pop_keeps_stash_and_registry_valid(self, tmp_path,
+                                                           capsys):
+        repo = _init_repo(tmp_path)
+        pm = _seed_project(repo)
+        (repo / "code.txt").write_text("base\n")
+        _git("add", "code.txt", cwd=repo)
+        _git("commit", "-q", "-m", "code", cwd=repo)
+        _incoming(repo, pm, _add_note("note-in", "x"),
+                  files={"code.txt": "incoming edit\n"})
+        _edit(pm, lambda d: _pr(d, "pr-001").update(updated_at="local"))
+        (repo / "code.txt").write_text("local edit\n")
+
+        with mock.patch.object(pr_mod, "_launch_merge_window") as launch:
+            r = pr_mod._ff_with_autostash(repo, "incoming")
+        assert r.returncode == 0                  # the update itself landed
+        launch.assert_not_called()                # no merge-time session
+        err = capsys.readouterr().err
+        assert "conflicted in: code.txt" in err
+        assert "git stash drop stash@{0}" in err
+        assert "auto-stash for merge" in _stash_list(repo)   # kept
         d = store.load(pm)
-        d["prs"][0]["updated_at"] = "2026-03-03T03:03:03"
-        store.save(d, pm)
+        assert _pr(d, "pr-001")["updated_at"] == "local"
+        assert [n["id"] for n in _pr(d, "pr-001")["notes"]] == ["note-in"]
 
-        info = pr_mod._stash_for_merge(repo, lock_tui=False)
-        assert info["_lock"] is not None
-        # A concurrent writer cannot acquire the lock while it is held.
-        with pytest.raises(store.StoreLockTimeout):
-            cm = store._lock(pm, timeout=0.2)
-            cm.__enter__()
+    def test_refused_pop_keeps_stash_intact(self, tmp_path, capsys):
+        """git refuses the pop outright (an untracked stashed file now exists
+        from the merge): nothing applied, nothing lost, stash kept."""
+        repo = _init_repo(tmp_path)
+        pm = _seed_project(repo)
+        _incoming(repo, pm, files={"new.txt": "from the branch\n"})
+        (repo / "new.txt").write_text("mine\n")
 
-        pr_mod._unstash_after_merge(repo, info)
-        assert info["_lock"] is None
-        # Lock is free again afterwards.
-        cm = store._lock(pm, timeout=1.0)
-        cm.__enter__()
-        cm.__exit__(None, None, None)
+        r = pr_mod._ff_with_autostash(repo, "incoming")
+        assert r.returncode == 0
+        err = capsys.readouterr().err
+        assert "Nothing was lost" in err
+        assert "auto-stash for merge" in _stash_list(repo)
+        shown = _git("show", "stash@{0}^3:new.txt", cwd=repo).stdout
+        assert shown == "mine\n"
+
+    def test_leaked_auto_stashes_reaped_only_when_already_applied(
+            self, tmp_path, capsys):
+        repo = _init_repo(tmp_path)
+        pm = _seed_project(repo)
+        for name in ("a.txt", "b.txt"):
+            (repo / name).write_text("base\n")
+        _git("add", "-A", cwd=repo)
+        _git("commit", "-q", "-m", "files", cwd=repo)
+        msg = "pm: auto-stash for merge"
+        # Unrelated WIP stash: never touched.
+        (repo / "a.txt").write_text("wip\n")
+        _git("stash", "push", "-m", "important WIP refactor", cwd=repo)
+        # Leaked auto-stash whose change was applied since → reaped.
+        (repo / "a.txt").write_text("applied\n")
+        _git("stash", "push", "-m", msg, cwd=repo)
+        (repo / "a.txt").write_text("applied\n")
+        _git("commit", "-qam", "applied by hand", cwd=repo)
+        # Leaked auto-stash whose change is NOT in the tree → kept.
+        (repo / "b.txt").write_text("never restored\n")
+        _git("stash", "push", "-m", msg, cwd=repo)
+        lost = _git("rev-parse", "stash@{0}", cwd=repo).stdout.strip()
+        # Leaked auto-stash holding a registry note that is in the live
+        # registry now (with newer bookkeeping) → reaped structurally.
+        _edit(pm, _add_note("note-old", "x", "2026-02-02T00:00:00"))
+        _git("stash", "push", "-m", msg, cwd=repo)
+        _edit(pm, _add_note("note-old", "x", "2026-02-02T00:00:00"))
+        _edit(pm, lambda d: _pr(d, "pr-001").update(updated_at="newer"))
+        _git("commit", "-qam", "registry", cwd=repo)
+        _incoming(repo, pm, files={"c.txt": "c\n"})
+
+        r = pr_mod._ff_with_autostash(repo, "incoming")
+        assert r.returncode == 0
+        listing = _stash_list(repo)
+        assert listing.count(msg) == 1
+        assert "important WIP refactor" in listing
+        assert _git("rev-parse", "stash@{0}", cwd=repo).stdout.strip() == lost
+        out = capsys.readouterr()
+        assert "Dropped 2 leaked pm auto-stash" in out.out
+        assert "stash@{0}" in out.err
+
+
+# ---------------------------------------------------------------------------
+# _resolve_project_yaml_pop (registry reached a text stash some other way)
+# ---------------------------------------------------------------------------
+
+class TestResolveProjectYamlPop:
+    def test_resolves_registry_conflict_from_a_text_stash(self, tmp_path):
+        repo = _init_repo(tmp_path)
+        pm = _seed_project(repo)
+        _edit(pm, lambda d: _pr(d, "pr-001").update(updated_at="live"))
+        _git("stash", "push", "-m", "user stash", cwd=repo)
+        _edit(pm, _add_note("note-c", "committed", "2026-02-02T00:00:00"))
+        _git("commit", "-qam", "committed", cwd=repo)
+        assert _git("stash", "pop", cwd=repo).returncode != 0
+
+        assert pr_mod._resolve_project_yaml_pop(repo) is True
+        d = store.load(pm)
+        assert _pr(d, "pr-001")["updated_at"] == "live"
+        assert [n["id"] for n in _pr(d, "pr-001")["notes"]] == ["note-c"]
+        assert _stash_list(repo) == ""
+
+    def test_leaves_a_non_registry_project_yaml_alone(self, tmp_path):
+        repo = _init_repo(tmp_path)
+        _seed_project(repo)
+        cfg = repo / "docs" / "project.yaml"
+        cfg.parent.mkdir()
+        cfg.write_text("name: base\n")
+        _git("add", "-A", cwd=repo)
+        _git("commit", "-q", "-m", "cfg", cwd=repo)
+        cfg.write_text("name: mine\n")
+        _git("stash", "push", cwd=repo)
+        cfg.write_text("name: theirs\n")
+        _git("commit", "-qam", "theirs", cwd=repo)
+        assert _git("stash", "pop", cwd=repo).returncode != 0
+
+        assert pr_mod._resolve_project_yaml_pop(repo) is False
+        assert "<<<<<<<" in cfg.read_text()        # left for the user
+        assert _stash_list(repo) != ""

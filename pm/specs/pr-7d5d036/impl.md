@@ -1,0 +1,327 @@
+# pr-7d5d036 — Retire legacy regression scenarios and reuse the container/recipe launch path
+
+Spec generated 2026-11-01 against branch head `1f407574` (master `c1fcecc5`).
+The current PR description governs; the 2026-05 notes on captures-in-Git and
+the exhaustive instruction audit are superseded (user notes 2026-11-01).
+
+## 1. Requirements (grounded)
+
+### R1 — Remove the legacy definitions from the active library
+
+- `pm/qa/regression/*.md` holds 20 old-style monolithic agent scenarios
+  (command-dedup, guide-progress, help-keybindings, init-empty, init-github,
+  init-local, launch-dedup, log-viewer, meta-launch, mobile-mode,
+  multi-window-registry, pane-layout, plans-pane, pr-interaction,
+  restart-dedup, session-resume, status-filter, sync-refresh,
+  tech-tree-visual, window-resize).
+- Discovery inputs are all `qa_instructions._list_dir(regression_dir(root))`
+  (`list_regression_tests`, `list_all`, `get_instruction(..., "regression")`,
+  `resolve_instruction_ref`) plus the discovery-supervisor prompt's
+  `ls pm/qa/regression/*.md` (`prompt_gen.generate_discovery_supervisor_prompt`).
+  Deleting the files with `git rm` removes them from every one of these. No
+  code, test or fixture reads any of the 20 files (checked by grepping each
+  stem: only unrelated widget ids such as `#plans-pane` match).
+- Record a durable inventory: new `pm/qa/retired-regressions.md` (pm/qa root,
+  so `_list_dir` never discovers it; same place as the historical
+  `pm/qa/pr-d60d185.md`). It records the recovery revision
+  `c1fcecc58b09695602043094b44c8d96ca66bfe0` (master; the files are
+  byte-identical on this branch), every path with its blob SHA, title and
+  description, recovery commands, and the explicit coverage-gap statement
+  (removal is not equivalent coverage or a passing rerun).
+- Hand off to the deferred port: a pm PR note on `pr-c77561b` pointing at the
+  inventory and revision.
+
+### R2 — Keep what must stay
+
+Untouched: `tests/**` (unit/integration), `pm/qa/instructions/` (setup recipe
+`tui-manual-test.md`), `pm/qa/artifacts/` (capture recipes), fakes
+(`fake_claude`, `fake_github`), `pm/qa/pr-d60d185.md`, `pm/specs/**`,
+`~/.pm/sessions/*/captures/**` (never touched), plan docs. The regression
+*mechanism* stays: `pm qa add-regression`, `pm qa author-regression`, the QA
+pane's Regression section, `regression_dir()`, the discovery watcher.
+
+### R3 — Remove live-PM targeting from the regression launch surface; reuse the QA container/recipe path
+
+Current launch surfaces and their stale targeting:
+
+| Surface | Today |
+|---|---|
+| `pm qa regression <id>` (`cli/qa.py:qa_regression`) | `_find_tui_pane`; exits "No pm tmux session found" without a session; prompt says "You are testing against tmux session: X"; `launch_claude(cwd=None)` on the host in the caller's cwd. |
+| `pm qa launch regression:<id>` (`cli/qa.py:qa_launch`, used by discovery) | Prompt targets `$PM_SESSION`/current session; host Claude in the project root. |
+| TUI Enter on a regression item (`tui/pane_ops.launch_qa_item`) | Prompt targets the TUI's session + `$TMUX_PANE`; host Claude. |
+| `pm qa standalone <id>` falls back to regression items | Host workdir + `tui_section(live session)`. |
+
+Change:
+
+- `pm qa regression <id> [--file-prs] [--branch B]` becomes the single
+  regression launcher. It prepares a run with the primitives `pm qa debug`
+  and the QA scenario path already use — `qa_loop.create_qa_workdir`,
+  `qa_loop.create_scenario_workdir` (fresh local `git clone` + empty
+  scratch; see E13), `qa_loop._setup_clone_override`, `container.create_qa_container`,
+  `claude_launcher.build_claude_shell_cmd`, `container.build_exec_cmd(cleanup=True)`
+  — and runs the session in the foreground (`os.execvpe`, like
+  `pm qa debug --foreground`). No new runner, sandbox or recipe mechanism.
+  - Container mode enabled: `container_preflight_error()` is checked before
+    anything is created; failure exits 1 with `container_unavailable_message`.
+    Container creation failure releases only that container and exits 1 with
+    `container_retry_remedy`. Never falls back to the host.
+  - Container mode disabled: runs on the host in the clone (the documented
+    non-container QA fallback), with `PM_PROJECT`/`PM_SESSION` scrubbed from
+    the session environment so `pm` commands inside the disposable project
+    cannot resolve to the user's project. `TMUX`, `TMUX_PANE`,
+    `PM_POPUP_SESSION` and `PM_IN_TMUX_SESSION` are scrubbed too
+    (`_REGRESSION_SCRUBBED_ENV`, 634a4c05): pm resolves "the current pm
+    session" from `$TMUX_PANE` before the cwd, so a `pm session` the test
+    started in its own project reused and rebalanced the user's session
+    (QA S12, R28). `PM_SHARE_MODE` is scrubbed as well (a7b2e4c4): a run
+    launched from a `pm session --global`/`--group` session inherited it,
+    and `get_session_tag` mixes it into every project's hash, so `pm tui
+    view` in the test's own project missed that project's session and fell
+    back to the user's TUI (QA S16, R7/R34). With TMUX gone, a finding filed with
+    `pm -C <registry> pr add` resolves the TUI to reload from the `-C`
+    project (`_find_tui_pane` tries its session before the cwd), not from
+    the clone or test-project cwd, which reloaded another project's TUI
+    (QA S14, R35). That includes a `pm session --global`/`--group` user
+    session: with `PM_SHARE_MODE` dropped the run computes the plain tag,
+    which names no session, so `_find_tui_pane` then looks for the session
+    that persisted the `-C` pm dir as its `pm_root`
+    (`helpers._project_sessions`, review 0140 i2). Before that, a filing
+    from the test project reloaded the test project's own TUI again.
+  - No pm session is required. The old `--session/-s` option is kept,
+    hidden, only so existing invocations still parse: it is ignored with
+    a note on stderr, because a regression run never targets a pm session.
+- Recipes: copy the project's `pm/qa/instructions/*.md` into
+  `<scratch>/qa-instructions/` and `pm/qa/artifacts/*.md` into
+  `<scratch>/qa-artifacts/` — the directories and convention the QA scenario
+  path (`_install_instruction_file` / `_install_artifact_files`) uses.
+- Prompt (`regression_prompts.build_regression_test_prompt`): the
+  "Session Context / testing against tmux session" block is replaced by a
+  Test Environment block (workdir clone at branch@sha, scratch dir, container
+  or host), a statement that the target is a disposable project created with
+  the setup recipes and never the user's project/session, the recipe paths,
+  the exact per-run captures dir, then the unchanged test body and filing
+  addendum. Prompt edits are limited to this targeting replacement.
+- Captures: `paths.captures_dir("regression", session_tag=...)` →
+  `~/.pm/sessions/<tag>/captures/regression/<test-id>/<run-id>/` (the
+  documented layout). In container mode
+  `create_qa_container(pr_id="regression/<test-id>/<run-id>")` mounts only
+  that run's directory at `/pm-captures` with `PM_CAPTURES_PR` set to the
+  same key, so the in-container path is `/pm-captures` (review fc31 i4). A
+  session cannot reach other tests' or earlier runs' evidence, and a nested
+  regression run inside the container gets no mount for its own captures
+  (the key differs; `captures_dir` fails closed). The assembled prompt is
+  saved there as `prompt.md` (mirrors
+  `_write_scenario_capture_file(..., "prompt.md")`). `prompt.md` is written
+  only once the session command is built (container created), immediately
+  before exec; if setup fails after container creation made the empty run
+  dir, the runner removes it (and the test's dir if it is empty), so a run
+  that never launched leaves no evidence of one. The clone's pm_core
+  override (`qa_loop._setup_clone_override`, written under
+  `~/.pm/sessions/`) is likewise set only as the last setup step (review
+  fc31 i9). Never committed to Git.
+- `pm qa launch regression:<id>` and the TUI regression launch run
+  `pm -C <root> qa regression <id> --file-prs` in their pane/window (the TUI
+  already launches `pm qa debug --foreground <id>` the same way), so all three
+  surfaces share one environment builder and produce identical runs.
+  Every such pane command, including the command bar's typed options below,
+  is built by `regression_prompts.regression_command` (review 596b i2).
+- `qa regression <args>` typed in the TUI command bar also runs in a pane
+  (`pane_ops.launch_regression_command`, same pre-launch check). The command
+  bar's default path is a captured subprocess with a 30 s timeout, which
+  would block the TUI and then SIGKILL the foreground session before its
+  container cleanup trap runs (review fc31 i4). The typed args are parsed
+  by the `qa_regression` click command itself (no help option, which would
+  print to the TUI's stdout), so the test id matches what the run uses and
+  a malformed command is logged instead of handed to a pane that exits at
+  once (review fc31 i9).
+- `pm qa standalone <id>` refuses a regression id and points at
+  `pm qa regression <id>`, so it is no longer a host/live-session path for
+  regression tests. `pm qa run` / `pm qa debug` keep their regression
+  fallback (both already use the QA workdir/container path).
+
+### R4 — Empty library is handled honestly; references reconciled
+
+- `pm qa regression <id>` with no definitions: exit 1, "No regression tests
+  in the library (pm/qa/regression/ is empty)…" with the authoring commands.
+  Unknown id with a non-empty library keeps "Unknown regression test".
+- `pm qa list` regression section shows `(none)` plus the authoring hint.
+- TUI QA pane already renders "Regression Tests (0)" with no items
+  (unchanged). A regression launch for an absent id logs the
+  empty-library / unknown-id message (`regression_launch_problem`).
+- Discovery supervisor prompt: inventory with `2>/dev/null`; an empty
+  listing means nothing is scheduled this tick (logged), never a run/PASS; a
+  failed `pm qa launch` is recorded as not run. Step 4 describes the
+  isolated launch instead of implying the test shares the watcher's session.
+  Step 2 lists `#{pane_start_command}` too: a regression pane's current
+  command is no longer always `claude` (in container mode it is the runtime's
+  `exec`), and its start command names the test (`qa regression <id>`)
+  (review fc31 i4). `pm qa launch` returns 0 once the pane opens, so a run
+  that then fails during setup (the clone, or building/creating its
+  container) is only visible as a pane that exited. Step 4 tells the
+  supervisor that a run whose session started has a `prompt.md` in its run
+  dir (`ls -t ~/.pm/sessions/*/captures/regression/<id>/*/prompt.md`), and
+  that a pane that exited with no `prompt.md` newer than the launch is
+  recorded as not run, never as a run with no findings (review fc31 i7).
+- Docs: `pm_core/docs/qa_library.md` — remove the `[!CAUTION]` callout (PR
+  note), rewrite the Regression tests section for the isolated run, update the
+  directory table, captures text and the surfaces table. CLI help
+  (`cli/__init__.py`), `qa_instructions` module docstring, `qa_regression` /
+  `qa_standalone` docstrings.
+
+### R5 — Supersede old notes
+
+No captures in Git (prompt and docs already say so; kept). No instruction
+library audit. Nothing is ported.
+
+## 2. Implicit requirements
+
+- I1: `--file-prs` must still reach the project's real registry. Running in a
+  clone, a bare `pm pr add` writes the clone's `project.yaml`, which is
+  discarded — filings would be silently lost. The addendum therefore names
+  the registry explicitly (`pm -C <registry> …`): the host pm dir in host
+  mode; in container mode the project's pm state dir is bind-mounted rw at
+  `/pm-project` **only when filing is requested** (the 2026-05-08 containment
+  note lists filed PRs in `pm/project.yaml` as an intended output; nothing
+  else of the project is mounted). The store saves by rename in that dir and
+  locks `project.yaml.lock` beside it, so the dir must be rw; every other
+  entry already in it (specs, plans, the QA library, notes, a pm repo's
+  `.git`) is overlaid read-only (`regression_prompts.registry_mounts`, review
+  fc31 i5), which keeps the note's boundary: only the registry is writable.
+  Residual: new top-level files can be created, and symlinks are not
+  overlaid. Needs optional `extra_rw_mounts` / `extra_ro_mounts` on
+  `create_qa_container`.
+- I2: Regression runs must not push. `allowed_push_branch=None` → no push
+  proxy. The clone helper points `origin` at the real upstream, and in host
+  mode the user's credentials reach it, so the runner also sets origin's push
+  URL to a nonexistent path (`/regression-runs-never-push`) in both modes; a
+  stray `git push` fails (review fc31 i2). Fetch is unchanged. This guards
+  against accidents; the container is the boundary.
+- I3: The workdir/container naming must not collide with QA runs or with each
+  other: workdir `~/.pm/workdirs/qa/regression-<id>-<run-id>/`, container
+  `qa_container_name("regression-<id>", run_id, 0, session_tag)` (inside the
+  `pm-<tag>-` prefix that `cleanup_session_containers` sweeps). Run id is a UTC
+  timestamp plus a short random suffix.
+- I4: QA-workdir scanners (`qa_run.json`, `qa_status.json`, resume files)
+  must ignore regression runs — they write none of those files.
+- I5: Session type stays `qa_regression` (already in the fake-claude
+  catalogue), so fake-claude configs can drive regression sessions.
+- I6: The pane launchers should fail visibly before spawning a pane for the
+  common failures (unknown id / empty library / container runtime unusable):
+  `pm qa launch` exits 1 with the message (the discovery session sees it); the
+  TUI logs it. Shared helper `regression_launch_problem()`. An id must be one
+  of the listed library stems (a path such as `../instructions/<x>` is an
+  unknown id). The TUI runs the check in a worker thread
+  (`asyncio.to_thread` under `app.run_worker`): with container mode enabled
+  it runs `<runtime> info` (up to 10 s), which must not block the event loop.
+- I7: Prompt-size: test bodies are inlined whole (existing behavior); the
+  launcher's file-backed bootstrap covers oversized prompts.
+
+## 3. Ambiguities (resolved)
+
+- A1 — Branch under test: default to `project.base_branch` (fallback
+  `master`); `--branch` overrides. Regression runs are not PR-bound and the
+  discovery supervisor runs against the base branch. A clone failure exits 1
+  with the git error.
+- A2 — Foreground vs window: `pm qa regression` stays foreground/blocking as
+  it was; the pane surfaces wrap it. No new `--window` mode.
+- A3 — Filing from a container (see I1): mount the pm state dir only for
+  `--file-prs`, read-only except the registry files. Alternatives rejected: writing findings to captures and adding
+  a host filing step (a new mechanism; changes the discovery workflow), or
+  host-only filing (silently drops container findings).
+- A4 — Where to record the inventory: `pm/qa/retired-regressions.md` (not
+  discovered, beside the library) plus a PR note on `pr-c77561b`. It is
+  project data, so the shipped `qa_library.md` does not mention it.
+- A5 — Retired ids get no special "retired" error in code: the library
+  mechanism is generic across projects. The empty-library/unknown messages are
+  honest; the inventory file names the retired ids.
+- A6 — Plan docs (`plan-delivery.md`, `plan-regression.md`) still describe
+  porting the corpus. They are user-owned planning records; not edited here.
+  Reported to the user instead.
+- A7 — Tests: no regression scenario is run (none remain). Bounded checks are
+  unit/CLI tests with fakes/mocks plus one real launch-preparation check.
+
+No [UNRESOLVED] items.
+
+## 4. Edge cases
+
+- E1: Library dir absent after removal (Git does not track empty dirs):
+  `regression_dir()` recreates it on demand; `ls … 2>/dev/null` in the
+  discovery prompt prints nothing.
+- E2: A `README.md` under `pm/qa/regression/` would be listed as a test — so
+  the inventory lives at the pm/qa root.
+- E3: Container mode enabled + runtime down: no workdir, clone or container is
+  created (preflight first), exit 1. Pane launchers report it before spawning.
+- E4: `create_qa_container` raising any exception: remove only that container,
+  exit 1, nothing launched on the host. A clone or session-build failure
+  likewise removes this run's own just-created QA workdir; no captures dir is
+  created.
+- E5: `pm qa regression` invoked from the TUI command bar has `PM_PROJECT` set;
+  the host-mode session env scrubs it. In container mode only the provider env
+  names are passed to `exec -e`.
+- E6: No session tag (not in a git repo): `state_root()` already requires a
+  pm project; the captures dir falls back per `captures_dir`; if `None`, exit 1
+  rather than giving the session no captures location.
+- E7: Fake-claude configs keyed on `qa_author` used to apply to TUI/headless
+  regression launches; they now use `qa_regression` like the CLI did. The
+  session-type catalogue comments in `pm_core/fake_claude.py` say so
+  (review fc31 i3), so a fake config picks the right key.
+- E8: `pm qa run`/`pm qa debug` still resolve regression ids; with the library
+  empty they report "Instruction not found".
+- E9: Workdir clones from regression runs are left in place, like
+  `pm qa debug`; the container is removed by the exec trap when the session
+  exits.
+- E10: Router providers. The session is built with `container=True`, so a
+  router provider starts the in-container bridge first. That step needs the
+  host bridge's socket dir mounted, which the container did not get, so every
+  container-mode run on a router died at the bridge step (QA S28, R41).
+  `cli/qa.py:_regression_route_mounts` resolves the provider the session
+  launches on (`PM_PROVIDER`, the session provider file, `pm provider
+  default`), runs `router_route.require_setup(container=True)`, skips the
+  mount for a `qa_regression` fake, and passes
+  `router_route.container_mounts(strict=True)` as `create_qa_container`
+  `route_mounts`, as QA scenario containers get it (ef4f5c19). A router
+  that cannot launch, or whose host bridge cannot start, is refused before
+  any container exists. The refusal gives the provider's own error and
+  remedy, without the container retry advice (review f51f i1). Model
+  routing is unchanged: no per-type model resolution, as before.
+- E11: Host mode (container mode off) shares the user's tmux server, as QA
+  host scenarios do. The prompt requires explicit `-s <session>` and forbids
+  driving sessions the test did not start. Container mode is the boundary.
+  `PM_TMUX_SOCKET` is kept, but with `TMUX` scrubbed a plain `tmux` command
+  ignores it and reaches the default server, while `pm` uses the socket. So
+  when it is set, the host-mode prompt names it and tells the session to run
+  plain tmux as `tmux -S <socket>` (`tmux_socket`, review a1f7 i1).
+- E12: Standalone pm repo (`pm init --dir`, project.yaml at the root of a
+  repo that holds only pm state). The code repo to clone is resolved with the
+  shared `cli.helpers._resolve_repo_dir` (the parent of an in-repo `pm/` dir,
+  else project.repo when it is a local checkout, else the cwd), the same
+  resolution `pm cluster`, `pm plan` and PR sync use. Cloning `root.parent`
+  would fail, or clone an unrelated repo, for that layout (review fc31 i6).
+- E13: Project checkout on another filesystem than `~/.pm` (QA S3/S4). The
+  clone is a plain path `git clone`, not an explicit `--local`: git then
+  hardlinks the objects when it can and copies them otherwise, where an
+  explicit `--local` dies with "Invalid cross-device link" before any
+  container check (fixed in 2f6c2fc9; `test_clone_does_not_force_hardlinks`).
+
+## 5. Verification (bounded)
+
+- Unit/CLI: `tests/test_regression_prompts.py`, `tests/test_regression_launch.py`
+  (real git clone, host + container wiring, fail-closed runtime/create,
+  empty library, unknown id, bad branch, `pm qa launch`, TUI, standalone,
+  `pm qa list`, discovery prompt, real `podman run` argv), plus
+  `TestCreateQAContainer.test_passes_extra_rw_mounts`.
+- One real host-mode launch with a stub `claude`: the process ran in the clone
+  with `PM_PROJECT`/`PM_SESSION` unset, `prompt.md` was written to
+  `captures/regression/demo/<run-id>/`, and the source project was left clean.
+- Repo check: the 20 inventory ids are not listed, resolved or present; every
+  blob matches at `c1fcecc5`; the instructions/artifacts recipes and fakes are
+  unchanged against master. The implementation session had no pm-dev image,
+  so it did not do a real container run. QA did (S3, S6, S7, S12): nested
+  podman 3.4.4 with a slim image, covering mounts, captures isolation, the
+  push block, the registry-only filing mount and container removal.
+- Registry overlay (review fc31 i5): on podman 3.4.4 with pm's nested flags
+  (`--uts=host --userns=keep-id --security-opt label=disable`), a busybox
+  container with the pm dir rw plus its entries ro (children listed before the
+  parent, as `create_container` emits them) could rename a temp file over
+  `project.yaml` and append to its lock, and could not write, create in or
+  remove the ro entries.

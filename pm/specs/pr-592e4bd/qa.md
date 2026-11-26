@@ -1,0 +1,3040 @@
+# pr-592e4bd — QA spec: route QA refiners/workers through a host account router
+
+Grounding: `pm/specs/pr-592e4bd/impl.md` (R1–R13), diff `master...HEAD`
+(`pm_core/worker_route.py`, `pm_core/route_bridge.py`, `pm_core/providers.py`
+router type, `pm_core/claude_launcher.py` launcher boundary,
+`pm_core/qa_loop.py` setup checks / `qa_interactive` (the route gates and
+stall watch were removed 2026-10-27),
+`pm_core/cli/provider.py`, `pm_core/cli/model.py`, `pm_core/container.py`
+env-by-name).
+
+Scope update (2026-10-24, impl.md header, R1/R5, items 40–41): the
+refiner/worker-only split stays the project default, and a PR may now
+put *every* role on the route (`model: provider:<route>`) or single
+roles (`session_models: {<type>: …}`). Implementation, review and
+sign-off containers use the same router bridge and fail closed. RQ2/RQ6
+describe the project default; RQ39–RQ41 cover the PR-level routing.
+
+Scope update (2026-10-27, impl.md header and R10–R13; user decisions
+note-985fb4d, note-e3ca18a, note-7131c29, note-0c8ce8a; commits
+bbabcb8d, 87fd093f, ff5db9c8): router providers are generic and pm no
+longer manages credentials. RQ48–RQ51 cover this. Where older Thens
+below name the retired behaviour, RQ48–RQ51 win:
+- No credential checks or refresh anywhere (RQ1 credentials path/expiry,
+  RQ3 "credentials not expired", RQ9/RQ40 "sign-in expired", E3 and the
+  credentials-file fixture are retired). A pane on an expired upstream
+  sign-in shows the router's own API error.
+- Wording is neutral. Messages say "route '<name>'", not "work route".
+  The stop reason is "stopped while waiting for the route". Unrouted
+  sessions show `route=none` (formerly `route=main`). The remedy says
+  "move it off this route: change the PR's model setting if it selects
+  this route ('pm pr model show <pr>') …". The literal strings in RQ10,
+  RQ40 and older passes are historical.
+- QA fixtures may keep a `work/`-prefix stub contract, but the R10
+  stories use a router whose model has another name, to show that nothing
+  in pm assumes `work/`.
+
+Scope update (2026-10-27, user decision: route failure simplification;
+impl.md header and R6). pm keeps no route-specific waiting or recovery. A
+routed provider that is unavailable fails through the same launch /
+API-failure handling as the default provider. The user resolved S101's
+open point (route-wait vs container) by removing the route wait. RQ52–RQ54
+state the new behaviour and win over every older Then that describes route
+waits, deferrals, stall/recovery nudges or a refusal because the router is
+down. Those Thens are rewritten (RQ9–RQ14) or marked "(superseded …)" in
+place: RQ16, RQ20–RQ22, RQ25, the route-gate clauses of RQ24, RQ26, RQ27,
+RQ40, RQ45, RQ46 and RQ48–RQ51, and the S98 host-gate and S101 route-wait
+stories. Evidence recorded for them (S3/S5, S13/S14, S22, S52/S55, S53,
+S64/S65, S88, S94, S98, S101) is historical. It is not a passing result
+under RQ52–RQ54 and must not be counted as one. Unrelated open acceptance
+criteria stay open:
+- the S73 double-drive question (pr-bddda0f);
+- S101's recording limitation (no mp4: `agg` was not installed, so the
+  casts and transcripts are the recordings);
+- S102, frozen mid-run by the user. Its worktree and evidence are kept,
+  and it has no verdict.
+
+Scope update (2026-10-29, master integration 67353d44 of origin/master
+4a74d880; impl.md "Master integration 2026-10-29"; note-3ce8529; user
+authorization note-user-restart-all-20261029). Where an older Then names
+the replaced mechanism, the integrated behaviour wins:
+- Provider values reach a pane only through master's private env file
+  (`~/.pm/run/env-*.sh`, sourced and deleted by the pane's shell; #268).
+  The secret-file expansion is gone. Commands, `#{pane_start_command}`,
+  pm logs and the pane registry carry names only. This closes pr-740ae41.
+- `providers.yaml` is always saved 0600, and a symlinked file is replaced
+  by a regular file (#273 A3). This supersedes S98's write-through.
+- The sign-off REQA is owed on disk (#276, pr-db3bf10). RQ56 states the
+  contract. The in-memory deferral and its "waiting for project.yaml to
+  be unlocked" sticky line are gone.
+- A held INPUT_REQUIRED run keeps being polled (#271, pr-2c67d50). The
+  user's answer in the worker pane gives a follow-up verdict that is
+  recorded as a new result.
+- A review launch that fails is LAUNCH_FAILED (retryable, one error line,
+  an artifact), not ERROR (#259). This supersedes S84's one-shot ERROR.
+- Test isolation is mandatory for every scenario
+  (note-user-restart-all-20261029). Use a private HOME/`~/.pm` and a
+  private tmux socket, scrub `TMUX`/`TMUX_PANE` and routing vars, and
+  kill only sessions the scenario created.
+
+## 1. Requirements (Given / When / Then)
+
+### Route definition and visibility
+- **RQ1** Given a host with a router listening on `127.0.0.1:<port>`,
+  When the user adds a provider with `pm provider add <route> --type router
+  --api-base http://127.0.0.1:<port> --model work/claude-opus-5-5
+  [--credentials-file F] [--launcher L] [--refresh-command C]`,
+  Then it is saved in `~/.pm/providers.yaml` without a connectivity check,
+  and `pm provider list` shows type=router, URL, model, launcher, the
+  credentials file *path* and its expiry (never token contents).
+- **RQ2** Given the router provider, When the user runs
+  `pm model set qa_concretize provider:<route> --effort high --project` and
+  the same for `qa_scenario`, Then `pm model show` lists a "Routes" section
+  naming exactly those two session types with `route=<route>
+  model=work/claude-opus-5-5 effort=high via=…`; `qa_interactive`,
+  `qa_planning`, `qa_verification`, `qa_finalize`, `review`, `impl`, … are
+  not in it.
+- **RQ3** Given the route configured, When the user runs
+  `pm provider test <route>`, Then the preflight prints OK (router
+  reachable, credentials not expired, launcher executable if set); with
+  `--live` it sends one harmless tools-disabled prompt and reports the
+  reply, the requested model(s) (all `work/…`), the transcript path and its
+  models, and the hook event (Stop); exit 0.
+- **RQ3a** Given a live probe whose cwd contains characters other than
+  letters/digits (e.g. a `mkdtemp` suffix ending in `_`, as in supervisor
+  smoke `host-work-route-smoke-20261022T194946Z`, session
+  `f87c899f-…`, where Claude wrote `-tmp-pm-route-probe-020ea4s-/`),
+  When `pm provider test <route> --live` runs, Then it finds the transcript
+  Claude actually wrote (all non-alphanumerics mangled to `-`) and reports
+  its path and models. When the transcript or the pm hook event is
+  genuinely absent, Then the result is `Live: FAILED — missing evidence:
+  …` naming the expected path(s) and exit 1, never `Live: OK` with
+  `Transcript: (none)`.
+- **RQ4** Given container mode is available, When the user runs
+  `pm provider test <route> --container [--live]`, Then a throwaway
+  container is created with the bridge socket mount, the in-container
+  route reports OK (127.0.0.1 in container → host socket → router), the
+  live probe (if requested) reaches the router with the `work/` model, and
+  the throwaway container is removed afterwards (also on failure).
+
+### Routed QA launches (host / tmux mode)
+- **RQ5** Given a project whose refiner and worker types are on the route
+  and a reachable router, When the user starts QA on a PR from the TUI,
+  Then each scenario's refiner and worker run real Claude pointed at the
+  router (every request the router sees uses the `work/` model, including
+  background/title calls), with `ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN`
+  absent from their environment, and the QA status line names the refiner
+  and worker routes; normal hooks fire and transcripts appear in
+  `~/.claude/projects/<mangled-cwd>/<session-id>.jsonl`; verdicts are
+  collected as usual.
+- **RQ6** Given the same project, When QA starts, Then scenario 0 (the
+  interactive QA session), the planner, verifier and finalizer launch with
+  plain `claude` on the main account (no `ANTHROPIC_BASE_URL` to the
+  router, no `work/` model, no `env -u`), and review / impl / sign-off
+  launches are likewise unchanged.
+- **RQ7** Given a route with `launcher: <path>` and host (non-container)
+  QA, When a worker/refiner launches, Then that executable replaces
+  `claude` in the command, with the router env still prefixed (the
+  launcher cannot fall back to the main account endpoint by itself).
+
+### Routed QA launches (container mode)
+- **RQ8** Given container mode (slirp4netns) and a router only on the
+  host loopback, When QA starts, Then each QA container is created with
+  the bridge dir bind-mounted at `/run/pm-route` (no published ports, no
+  network change), the worker/refiner command first ensures the
+  in-container forwarder and then runs plain `claude` against
+  `http://127.0.0.1:<port>` inside the container, and the router sees the
+  `work/` model; containers for unrouted runs get no such mount.
+
+### Failure and no-fallback (rewritten 2026-10-27; impl.md R6)
+- **RQ9** Given a refiner/worker (or any role) routed to a router that
+  is down, When QA (or the role) launches it, Then it launches at once:
+  - There is no "waiting — …", "deferred — …" or "available — launching"
+    line and no reachability check first.
+  - The session runs Claude against the router's `ANTHROPIC_BASE_URL`,
+    so the pane shows Claude Code's own API errors and retries. Nothing
+    is sent to another provider or account (the main stub gets no
+    request for the routed role).
+  - pm then treats the session as on the default provider. A worker
+    whose turn ends without a verdict gets the ordinary verdict reminder.
+    A refiner follows its normal marker timeout and fallback. A pane that
+    exits is relaunched by the ordinary dead-worker retry ("Scenario N
+    window died — retry n/10", backoff, retry budget spent).
+  - When the router comes back, a session that is still retrying, or one
+    relaunched later, reaches it. No pm message announces the recovery.
+- **RQ10** Given a provider setup error for a QA role (provider not
+  configured, invalid entry, unreadable providers.yaml, or a router with
+  no `model`, an `api_base` with no host, or a host `launcher` that is
+  not executable), When QA starts from the TUI, `zz t` or a `pm pr
+  auto-sequence` tick, Then the error is reported once with its remedy.
+  It is `QA stopped: … then start QA again` in the TUI, or one `Error:`
+  line rc 1 from the tick with no driver spawned. No window or container
+  is left for a scenario that never launched, no verdict is recorded,
+  and nothing launches elsewhere.
+- **RQ11** Given more scenarios than the concurrency cap and a router
+  that is down, When QA runs, Then queued scenarios are launched as slots
+  free up, exactly as for an unrouted run. There is no "Queued scenario
+  launch deferred" line and no extra launch retry each tick.
+- **RQ12** Given a routed worker whose window dies (router down or not),
+  When the loop notices, Then it takes the ordinary relaunch with retries
+  and backoff, spending a retry. There is no "relaunch deferred".
+- **RQ13** Given a routed worker/refiner mid-run, When the router goes
+  away, Then there is no "stalled", "recovered — resumed" or "answers
+  again — resumed" line and no "The model route is available again…"
+  nudge. The worker's idle turn gets the ordinary verdict reminder
+  (submitted, as RQ24), however its last turn ended.
+- **RQ14** Given container-mode QA with a routed refiner/worker, When a
+  scenario container is created, Then it has the bridge mount. If the
+  bridge cannot be used (socket missing, container created without the
+  mount, e.g. adopted after a resume), the pane's `ensure` step prints
+  `pm route: …` with its remedy and exits, Claude never starts there, and
+  the poll loop's ordinary dead-worker handling applies. Impl, review and
+  sign-off containers refuse a bridge they cannot set up, or a running
+  container without the mount, with one `ContainerError` line (rc 1).
+
+Superseded Thens (historical, 2026-10-22 to 2026-10-27). The old RQ9
+waited at the initial launch. The old RQ10 left a scenario stopped in that
+wait as "stopped while waiting for the route". The old RQ11 and RQ12
+deferred queued launches and relaunches. The old RQ13 suppressed the
+reminder and nudged the session after recovery. The old RQ14 gated
+resumed relaunches against the adopted container. Evidence: S3, S4, S5,
+S13, S14, S22, S101.
+
+### Credential hygiene
+- **RQ15** Given any of the above flows, When the user inspects generated
+  commands, QA logs (`pm.worker_route`, `pm.qa_loop`, `pm.container`),
+  pane scrollback, `pm provider list`/`test` output and captures, Then no
+  token/secret value appears (only paths, URLs, model names); container
+  create passes env vars as `-e NAME` and a failed `podman create` error
+  does not contain their values.
+
+### Fixed in scope during QA (pre-existing on master or found in QA)
+- **RQ16** (superseded 2026-10-27, RQ11: nothing is deferred) Given
+  container mode and a route that fails while a scenario
+  is queued, When the queued launch reaches the refiner or worker route
+  gate and is deferred, Then the container created for that launch is
+  removed (no `pm-qa-…-sN` container left running, its push proxy gone);
+  after the route recovers the scenario relaunches in a freshly created
+  container whose `/workspace` mount is the new clone (53419df2).
+- **RQ17** Given `qa-max-scenarios` below the scenario count, When the
+  initial capped launch or a queued launch runs, Then the QA status
+  dashboard keeps counting every scenario and shows the not-yet-launched
+  ones as "queued", not "pending" or missing (b97c0e3d).
+- **RQ18** Given a project whose root contains its own `pm_core/`
+  package, When container QA starts, Then each container's push proxy
+  comes up (no "did not become ready within 3s") (dbb88ea8).
+- **RQ19** Given a PR with more than one QA snapshot (a run superseded by
+  a fresh start, a stopped run's late write, an older orphan beside a
+  newer run that completed while the TUI was down, a newer run whose
+  planner produced no scenarios, a newer run with fewer scenarios than an
+  older run's queued tail), When the TUI restarts and resumes incomplete
+  QA, Then it resumes the newest *run* (ordered by its first scenario
+  index / persisted `scenario_start`, then unfinished, then mtime), a
+  completed newer run's result is processed rather than dropped, and
+  superseded snapshots are cleared unless a live loop elsewhere owns them
+  (60574f28, aea1fb8a, review loop acdb i1–i3).
+- **RQ20** (superseded 2026-10-27, RQ13: an API-error turn gets the
+  ordinary reminder, routed or not) Given a routed refiner or worker
+  whose turn ended on a Claude
+  Code API error (e.g. "API Error: Connection dropped" or a 4xx/5xx from
+  the router) while the router already answers again, When its idle
+  notification arrives without a verdict, Then the session is resumed with
+  the route nudge (submitted), the status reads "<what>: turn ended on
+  \"<error>\" and work route '<route>' answers again — resumed", and it
+  finishes with its verdict. Each error record is resumed at most once and
+  a session at most 3 times; after that the usual idle reminder applies
+  (no endless loop). An *unrouted* (main-account) worker's API error is
+  never answered with a route nudge and never mentions "work route
+  'None'"; it gets the usual reminder (7c401141, review 8a99 i1).
+- **RQ21** (superseded 2026-10-27, RQ13) Given a routed worker that used
+  up resumes (or was stalled)
+  and whose window then dies, When it is relaunched, Then the new session
+  has a fresh resume budget and no later "recovered — resumed" message
+  refers to the dead pane (review 8a99 i1).
+- **RQ22** (superseded 2026-10-27, RQ11) Given a route that failed,
+  recovered, and fails again with the
+  same problem, When a queued or initial launch is deferred the second
+  time, Then the TUI shows the deferral again (not only the pm log)
+  (7c401141).
+- **RQ23** Given a running QA (container mode, possibly mid-snapshot
+  write), When the user starts QA afresh (`z t`) or stops it, Then the
+  stopped loop announces no "relaunch deferred" / "retry n/10" for the
+  windows the new run kills (1b6e2c68), the old run's `qa_resume.json` is
+  gone at once and is not rewritten by the stopped thread, and a TUI
+  restart at any point during the new run's planning or execution resumes
+  only the new run (or nothing), never the superseded one, and records no
+  stale "Recovered completed QA" note naming the old workdir (ea78b9d1,
+  review 8a99 i2 lock). The next run's numbering follows the launched-index
+  rule in the harness notes (never-launched queued indices may be reused),
+  not "above the stopped run's last planned index". The pm log line for a reused shared push proxy is
+  plain text (no NUL; `grep` does not report "binary file matches")
+  (c23a2021).
+- **RQ24** Given a QA run with PASS verification on (routed real-Claude
+  workers, verifier on main/fake), When the pm sends a message into a
+  Claude pane (route nudge, verdict-format reminder, flagged-verification
+  follow-up to the worker, re-verification request to the verifier), Then
+  it is submitted (a new turn starts; nothing is left typed in the prompt
+  box). When the target pane dies around that send, Then the QA run
+  goes on and does not end in "QA thread crashed" or "verification thread
+  crashed":
+  a reminder to a vanished worker leads to the usual relaunch (no route
+  gate since 2026-10-27), a flag follow-up to a vanished worker window settles the
+  scenario INPUT_REQUIRED ("window gone during PASS verification…"), a
+  re-verify request to a vanished verifier runs the check in a fresh
+  verifier pane, and a verifier that dies while re-verifying ends that
+  wait (no hang, finalize runs) (887a0b18, ff2c2474). Known and filed
+  separately: a verifier death mid-check counts as FLAGGED against the
+  worker (pr-04dfffb). When only the worker *pane* dies and the refiner
+  (host pane 0) or verifier pane is still in the window, the flag
+  follow-up must not land in either: QA S15 found it typed into the
+  refiner via the `find_claude_pane` first-pane fallback, and a dead
+  worker whose relaunch was route-deferred taken for that refiner (never
+  relaunched); fixed in 32961096. A relaunched worker must be a new
+  pane in the scenario's own window, never the surviving refiner and
+  never a second window of the same name (S15/S16 saw the relaunch
+  re-find the old window by name and record the refiner as the
+  worker; fixed in 296c08a7). The settled reason is the scenario's
+  verdict reason (qa_status.json / dashboard); the pm log line is
+  "Cannot send follow-up to scenario N — window gone, marking
+  INPUT_REQUIRED". Resuming a snapshot written by older pm (dead worker
+  saved as `pane_id: null`) still hits the fallback: pr-d1d0139.
+- **RQ25** (superseded 2026-10-27, RQ13: there is no stall watch or
+  nudge) Given a routed worker or refiner stalled on a route outage (or
+  idle on an API-error turn), When its pane dies before the route answers
+  again and the nudge can be sent, Then no "… recovered — resumed" or
+  "… — resumed" status appears for it (the pm log says "pane … gone — not
+  resumed"); the only follow-up is the usual dead-window relaunch through
+  the route gate (QA5 planner fix 5432f736; review 590d i3 observation).
+- **RQ26** Given container-mode QA on a PR, whose scenario containers
+  share one host push proxy per (session, PR), When the PR's last QA
+  container is removed and a new one is created right away (a fresh start
+  `z t` over a running run, stop then start, parallel scenario creates;
+  a launch deferred at the route gate no longer exists, RQ11),
+  Then within a few seconds exactly one push-proxy daemon serves the PR's
+  socket path: a replaced daemon exits by itself ("Push proxy socket
+  removed, exiting") and never removes the newer socket; parallel creates
+  log one "Push proxy subprocess started" per socket (the others "Reusing
+  live shared push proxy", plain text); a `git push` of the allowed branch
+  from inside every live scenario container goes through the proxy and a
+  push to another branch is refused; and repeated start/stop cycles leave
+  no accumulating proxy processes. A second PR's proxy is never touched
+  (75649ae4, review b62f i1 8a3d3412, i2 130e8ab9).
+- **RQ27** Given a QA run (host or container mode, initial or queued
+  launch) whose refiner has produced its steps, When the worker pane
+  cannot be split off the refiner, Then no "Launched scenario N" line is
+  logged for that attempt. The scenario is never left looking like a
+  running worker. If the refiner window was already closed (TUI PR
+  cleanup `Y`, a fresh-start sweep, or the user closing it), the pm log
+  has a plain warning "Scenario N: refiner pane %X is gone (window
+  closed) — worker not launched" with no Traceback (a2ff954c). If the
+  refiner pane is still alive (the split was refused, e.g. tmux "no
+  space for new pane" in a window shrunk to two lines), the warning
+  "Failed to split scenario pane for scenario N — closing refiner pane
+  %X so the worker is relaunched" carries its traceback, whose last
+  line names tmux's reason (`pm_core.tmux.TmuxCommandError: ... tmux:
+  no space for new pane`, 2314f1a8), and that refiner pane is closed
+  (ded27fcd). A closed refiner builds no worker command (2314f1a8, S20;
+  the worker route gate it used to skip was removed 2026-10-27). In both
+  cases a *running* loop then takes the dead-worker path: "Scenario N
+  window died — retry 1/10" (since 2026-10-27 never deferred on the
+  route, RQ12). The worker is relaunched in a fresh
+  `qa-<pr>-sN` window (container mode: the same container, still
+  running). The refiner is never polled or reminded as if it
+  were the worker, and never yields a verdict for the scenario. Only
+  the relaunched worker's verdict counts. Sibling scenarios launched in
+  parallel, and another PR's run, are unaffected. A *stopping* loop
+  (`zz t`/`z t`) relaunches nothing and announces no retry or deferral.
+- **RQ28** Given an all-PASS QA run (host or container mode, routed
+  workers), When it finishes, Then the finalizer runs on main Claude and
+  the TUI reads "QA complete: PASS [finalize: FINALIZE_DONE]" (pm log
+  "QA complete for <pr>: PASS (finalize=FINALIZE_DONE)"), whatever
+  `qa-verify-pass` is set to. With verification off no verifier pane
+  opens, and the pm log has no "QA finalize: skipping — PASS verdicts
+  [...] have not been verified yet" (ee3d0644, found in S21). The run
+  follows `qa-verify-pass` as its verdict poll read it when it started
+  ("PASS verdict verification is enabled/disabled" log line). Changing
+  the setting mid-run neither adds verifiers to that run nor skips its
+  finalize: started off and switched on, later PASSes stay unverified
+  and finalize still runs; started on and switched off, later PASSes are
+  still verified before finalize (3ce6 i2, 54ff5a68). A run started
+  after the change, for example another PR, uses the new value. A
+  resumed run (TUI restart) reads the setting again when its poll
+  restarts. If a PASS was accepted unverified before the restart and
+  verification is on now, the resumed run must still finalize. It may
+  verify that PASS first or trust it. It must never end with
+  `finalize=None` because of that gate. Planner code reading (QA9): a
+  scenario that already has a verdict is dropped from the resumed poll
+  without verification, so the gate may skip finalize in this case.
+  The scenario that exercises it decides.
+- **RQ29** Given a QA run that is stopped (`zz t`) or superseded by a
+  fresh start (`z t`) while workers are mid-turn or after the last
+  verdict, When the stopped loop winds down, Then it spawns no finalizer.
+  The pm log says "QA finalize: skipped for <pr> — QA was stopped" and
+  has no "QA finalize: polling pane=…" from the old loop. After `z t`,
+  the new run's `qa-<pr>` window holds only its own planner, and the
+  "Planner pane: %X" it logs is that planner session, not a finalizer.
+  A second PR's QA window and finalizer are untouched (2ff602fc, found
+  in S22). Pre-existing and out of scope (impl.md §5 item 21): a stop
+  that arrives *during* the finalizer poll leaves that finalizer pane in
+  the stopped run's own window until the next run's window cleanup.
+  Record it as an observation. Ordering (S25): `z t` does not wait for the
+  old loop. The old loop sees the stop at its next poll tick, while the new
+  run starts planning at once, so its "skipped … QA was stopped" line can
+  come before or after the new run's "Planner pane:" line. In S25 it came
+  2 s after. Assert that the line exists and that no finalizer spawns. Do
+  not assert where it falls relative to the planner line. Router-log
+  Thens: Claude's own startup `GET /api/hello` (no model, 404) from routed
+  sessions is not a `/v1/messages` request.
+- **RQ30** Given a TUI session where nothing else keeps the shared poll
+  timer alive (no other active PR has a workdir, no review loop or
+  watcher running), When a QA run finishes (a PR's first `t` run, a
+  `zz t` self-driving run, or a run resumed after a TUI restart), Then
+  the TUI processes the finish within a few seconds, not at the next
+  300 s background sync: the "QA PASS for <pr> — press i to sign off" /
+  "QA NEEDS_WORK … returning to review" / "QA INPUT_REQUIRED …" message
+  and the lifecycle transition follow the pm "QA complete for <pr>"
+  line, the run's `qa_resume.json` is removed, one QA note is recorded,
+  and the popup action picker's qa row reads `[done <VERDICT>]` (the
+  second processing tick, which also drops the finished loop). A
+  `zz t` pass that needs another pass restarts QA at once. With two
+  PRs, the first to finish is processed while the other still runs, and
+  the second is processed fully after the first has gone. After every
+  finished run is processed, a TUI restart resumes or recovers nothing
+  and records no second note (89414241 found in S24, review 433b i1
+  fb7af748).
+  RQ30 clarification (S27, 2026-10-23): the "no other active PR has a
+  workdir" condition only holds until a PR's first QA run starts. QA
+  itself persists `prs[].workdir`: `run_qa_sync` calls
+  `_ensure_workdir` (qa_loop.py ~4212) before planning, and the PR is
+  then in status `qa`. On disk, every PR that has been QA'd has a workdir
+  from then on. The timer, however, reads the TUI's cached `app._data`.
+  It starts whenever a `_load_state` (`_update_display` →
+  `ensure_animation_timer`) sees an active PR with a workdir: another
+  PR's `start_qa`, a reload or a TUI restart. A persisted workdir on
+  disk therefore does not show that the timer was alive. Only the cache
+  at that moment decides. Live data, S27 (head 023d9cf6 vs a scratch
+  tree with 89414241 and fb7af748 reverted, same flow): two PRs started
+  0.6 s / 3.6 s apart, each finishing about 1 s before the TUI "QA PASS"
+  line, in BOTH trees. A run resumed after a TUI restart was processed
+  1 s after its "QA complete" in BOTH trees. So the two-PR and resume
+  stories do not discriminate the fixes: B's `start_qa` reload caches
+  A's workdir, and the restarted TUI loads the resumed PR's workdir. The
+  discriminating case remains a single PR's first run with no other
+  active PR workdir in the cache (S24). Whether the
+  `_resume_incomplete_qa` timer start matters when the cache has no
+  workdir (for example a workdir cleared during the run) was not
+  exercised. Do not count these stories as coverage of that path. After
+  any QA run, the "no other active PR has a workdir" Given for a later
+  story is false on disk unless that PR leaves the active statuses or
+  its workdir is cleared (`pm pr cleanup`).
+
+- **RQ31** Given a QA run whose finish the TUI processes (RQ30), When
+  the verdict is NEEDS_WORK (plain `t` or `zz t`), Then the PR's
+  tech-tree box shows `in_review` at once, together with the "QA
+  NEEDS_WORK for <pr> — returning to review" line, not at the next 300 s
+  background sync (f57c500c, found in S26: 111 s live). With `zz t` the
+  self-driving review loop then starts on main Claude (never the work
+  route). When a `zz t` pass is PASS but below `qa-pass-count`, Then the
+  log line shows "QA PASS for <pr> (N/M consecutive) — restarting QA"
+  for about `CONFIRM_HOLD_SECONDS` (3 s) before start_qa's own messages
+  replace it (991addf9), also while another PR's sticky line (for
+  example a review loop "INPUT_REQUIRED … interact with Claude in the
+  review pane", sticky 30 s) is showing (0697e450, review 1298 i1). Two
+  held lines arriving together (two PRs' passes finishing in the same
+  tick) are each shown in turn, not one replacing the other. Every
+  message, shown or deferred, is in the `L` command log. The final pass
+  (N = M) reads "… press i to sign off" with no restart.
+
+- **RQ32** Given a PR in `qa` whose node also carries review-loop or
+  merge state from this TUI process, When its QA panes are active (a
+  scenario mid-turn) or waiting (a QA pane on a permission prompt), Then
+  the node shows the live QA marker (spinner / `⏸`), not a *finished*
+  review loop's badge (`⟳N✓`, `⟳N⏸`, …) (9cc2fb6b, found in S29). A
+  *running* review loop's marker (`⟳N`+spinner, `⏸N`+spinner,
+  `⏹N`+spinner) still wins over QA. A merge INPUT_REQUIRED marker
+  (`⏸M`+spinner) is not cleared by live QA (review 4f28 i1, 84662f7f;
+  the 9cc2fb6b render-time clearing dropped it). Once QA is idle (all
+  scenarios finished, e.g. after QA PASS while the PR is still `qa`) the
+  finished loop's badge returns: known limitation kept on purpose
+  (impl.md §5 item 24(a), cf. pr-97614ed), so record "● qa ⟳1⏸" after
+  QA PASS as expected, not a failure. In `sign_off` the badge stays
+  hidden (b290ebcb, unchanged). Each node shows only its own PR's state;
+  a second PR's QA or loop never changes it. `_review_loops` and
+  `_merge_input_required_prs` are TUI-process memory, so a TUI restart
+  drops finished badges and `⏸M` (expected).
+
+- **RQ33** Given a PR whose QA run has scenario panes mid-turn (or a
+  `zz t` pass that restarts QA), When the run is replaced in the TUI (a
+  fresh start `z t`, or the self-driving restart), Then the replaced
+  run's scenario panes stop counting for the PR's node and picker: while
+  the new run is planning the picker's qa row reads `qa [open]` with no
+  `[working]`/`[idle]` badge from the old run's dead panes, and once the
+  new run finishes (e.g. QA PASS) the node stops spinning within a poll
+  tick or two and shows the idle state (`● qa`, or the finished loop
+  badge `● qa ⟳1⏸` of RQ32 / item 24(a)), not a spinner kept until a
+  TUI restart. The new run's own panes still spin while they work.
+  Another PR's QA panes and markers are never dropped by this
+  (94f36a18, found in S30; impl.md §5 item 26). Observation only, filed
+  as pr-b2db183: qa panes already left in `~/.pm/runtime/<pr>.json` by a
+  killed TUI survive a restart and show `[working]` in the next run's
+  picker row until that run completes.
+- **RQ34** Given auto-start on with a transcript run directory, When
+  auto-start turns off (the user turns it off, removes its last target,
+  or the last target completes and auto-start reports "all targets
+  complete — auto-start OFF"), Then sessions that are still live keep
+  being read: a merge window waiting on INPUT_REQUIRED (`⏸M`) still has
+  its later MERGED detected (`⏸M` clears, "✓ Merged", PR merged), a
+  running review loop still sees its iteration verdict, and an impl or
+  review pane still has its idle/active state tracked. Their transcript
+  files in the run directory stay links to Claude's live transcript (pm
+  log "transcript: … is still read live — not finalized"); finished
+  sessions, including an idle sign-off whose pane is still open, are
+  archived as regular files as before. QA runs of other PRs in the same
+  TUI (their routed workers, verdicts and markers) are unaffected
+  (c97aaf9c, found in S31; impl.md §5 item 25). Out of scope, filed as
+  pr-237d610: copies frozen by an earlier pm, and a merge window left by
+  an earlier TUI process, are not repaired.
+- **RQ35** Given an impl, review or QA pane that went idle (`[idle]`),
+  When the user types a new turn into it, Then its node and picker row
+  read as working again within a few seconds, and idle again at the
+  turn's next `idle_prompt` (af19cfcf; impl.md §5 item 27, which also
+  records the ~60 s limitation for a prompt blocked by a user hook). Given
+  a `~/.claude/settings.json` with user hooks, When pm (re)installs its
+  hooks at `pm session`/TUI start, Then pm's `UserPromptSubmit` entry is
+  appended next to the user's `UserPromptSubmit` hooks. Every user hook
+  is kept byte-identical, including commands that only mention or also
+  run pm's receiver (e.g. `echo 'pm_core.hook_receiver observed' >> log`,
+  `python3 <receiver> user_prompt && notify-send …`). A user command on
+  pm's Notification `idle_prompt`/`permission_prompt` matchers or on
+  `Stop` is refused as a conflict and left in place (review loop a183
+  i1). The receiver stores no prompt text and prints nothing.
+  *Which panes* (reconciled after S36): "QA pane" means a scenario
+  worker pane (`sc.pane_id`, tracker key `qa:<pr>:s<N>`), the only QA
+  pane the node and picker have tracked since 162442ec. Refiner, s0,
+  planner, verifier and finalizer panes are not tracked by design, so a
+  turn typed into one changes neither node nor picker; that is not an
+  RQ35 failure. S36's "typed refiner question reads as working" Then
+  tested an untracked pane and is classified out of scope here, not
+  waived: the refiner's `user_prompt` record and pane isolation are
+  still required. Showing refiner turns on the node is a separate
+  improvement (pr-eee7483). A Stop that replaced its
+  `user_prompt` between two polls (a turn answered in under the poll
+  interval) also counts as a new turn (ebf919e8, S35).
+  *Timing* (S38): "within a few seconds" follows the TUI's poll cadence.
+  Impl panes are polled every fifth 1 s tick, so a node change follows its
+  hook event by up to one 5 s poll plus render and observation overhead. S38
+  measured 0.8–4.2 s over 16 transitions sampled every 0.1 s, and one return
+  that fell between 4.9 and 5.4 s with 0.5 s sampling. A scenario's "≤ 5 s"
+  means "by the next impl poll", not a hard deadline. A transition that is
+  materially later than one poll, or never comes, still needs investigating.
+- **RQ36** Given two projects whose TUIs share one `~/.pm` (runtime
+  mirror `~/.pm/runtime/<pr>.json`, QA run dirs `~/.pm/workdirs/qa`),
+  When one project's TUI mounts, restarts or runs its resume scan, Then
+  it never sweeps, resumes or deletes another project's runtime entries
+  or `qa_resume.json` snapshots. When a project's TUI is killed with a
+  run mid-turn and restarted while the other TUI keeps running, Then its
+  restart logs `Resuming QA for <pr>`, its node spins again and its
+  picker row reads `[working]` (93dca6ae mount sweep; a711f411 resume
+  scan, impl.md §5 item 29, S39). The scan remembers PR ids it found to
+  be another project's and forgets them whenever its own project.yaml
+  changes (inode, mtime or size: a `git pull`/`store.save` replacement or
+  an in-place rewrite by an editor under `pm edit`). So when a PR whose
+  orphaned snapshot was already seen arrives in this project later (for
+  example pulled from another clone of the same project, whose TUI died
+  mid-run, with the PR in status `qa`), the next scan treats it like its
+  own PR: it resumes the run once, keeps adopted live workers rather than
+  starting second ones, and leaves it alone while another live TUI owns
+  the snapshot (7968f576, cbf9941c; review loop 5e26 i1/i2). S41 ran it
+  live (impl.md §5 item 30). The adopted run is driven in the session
+  that holds its windows: its workers, finalizer and any relaunch stay in
+  the other clone's session, and the adopting TUI collects verdicts and
+  writes the one note. The adopted PR's node shows within seconds of the
+  pull. A conflicted pull does not kill the TUI. Adoption is an atomic
+  claim, so two TUIs never both adopt one run.
+  *Load failures* (db1eb982, review loop 2b8a i1): a project.yaml that
+  cannot be loaded for any reason (conflict markers, a plan whose parent
+  or hierarchy does not validate after a merge, the file briefly absent
+  during a checkout or rebase) never escapes the scan. The TUI and every
+  QA loop it drives keep running, the pm log has one "QA resume scan
+  skipped until project.yaml loads again: …" per file state (not one
+  per 5 s scan), and the orphan is adopted on the first scan after the
+  file loads again.
+  *Provenance, not status* (59d15fea, review loop 2b8a i2, impl.md §5
+  item 30(e)): a snapshot whose `session_tag` names another pm session
+  (another clone) is never deleted by this TUI's "left QA" cleanup when
+  this clone has the PR at a non-`qa` status, whether that session is up
+  or gone. It is left until this project.yaml changes. The clone that
+  launched the run resumes it after its own TUI restart. If a pull or
+  edit brings the PR here in `qa`, this TUI adopts it, driven in the
+  launching session if it is still up, else in this TUI's own session.
+  A snapshot from this TUI's own session (or with no tag) whose PR has
+  left QA here is still dropped and never revived. Accepted cost: a
+  foreign snapshot whose PR really left QA stays until its own clone
+  drops it.
+- **RQ37** Given a TUI driving routed QA (own runs and adopted ones),
+  When project.yaml cannot be loaded (conflict markers, plans that do
+  not validate, or the file absent) while a run is in any phase or
+  finishes, or while the user presses a QA key, Then (QA18 planner
+  decision, 2026-10-24, extends RQ36 after review c1d4 i1/i2 made every
+  keep-state handler survive invalid plans and a missing file):
+  - *No run is ended by the load failure.* A run in planning (its
+    periodic merge guard, `qa_loop.py` ~4537, and the post-planning
+    spec-gate load ~4687) or in execution keeps going and is not ended
+    "QA thread crashed" / ERROR. It continues once the file loads again.
+  - *No result is lost.* A run that finishes during the failure keeps
+    its result. Its lifecycle transition (NEEDS_WORK → `in_review`), its
+    one QA note, a `zz t` restart or self-driving review loop, and the
+    `[done <VERDICT>]` picker state are applied once the file loads
+    again (processing may simply wait for it). The TUI never reports
+    "returning to review", "restarting QA" or "press i to sign off" for
+    a step that did not take effect without saying so. The snapshot
+    stays until the result is recorded, so a TUI restart in between
+    still recovers it once (no second note).
+  - *Keys refuse cleanly.* `t`, `z t`, `zz t` and the other QA actions
+    pressed during the failure show an `Error: …` line and start nothing
+    (no `qa-<pr>` window without a loop). They work normally once the
+    file loads.
+  - The CLI is unchanged: `pm` commands print `Error: <reason>` and exit
+    1, and a missing file still reads as "no project" where it did
+    before.
+  Code reading (QA18 planner) for the first two points: the planning
+  guards call `store.load` unguarded, so the QA thread raises.
+  `_on_qa_complete` → `_transition_pr_status` / `_record_qa_note`
+  only log a warning, and `poll_qa_state` then clears the snapshot, so
+  the PR stays `qa` with no note, and nothing retries. That was already
+  true on master for conflict markers. Before c1d4 it was a TUI exit for
+  invalid plans. The scenarios decide, with a pre-existing control.
+  Decided live (S45/S46, fixes e11b952a … 195889a5, a9b966ec, 54c88ad8,
+  e52e8fac; impl.md items 33, 34). Clarifications from those runs:
+  the "QA resume scan skipped …" line appears only when the scan has an
+  untracked snapshot to look at (an orphan), and once per file state
+  *per TUI process*; a run already driven in memory reports the failure
+  through its completion wait ("result kept until project.yaml loads
+  again: …") instead. Release to "QA complete" takes ~90 s in the
+  S41–S46 harness (worker idle ~60 s + fake finalizer), so a failure
+  window meant to span a completion must outlast that.
+  *One note per run across restarts* (review loop 7026 i1, ba5dd6e7,
+  impl.md item 33(d)): once the transition and note are written, a
+  follow-up that then fails (sign-off hand-off, `zz t` restart, review
+  loop start, tree reload) keeps the snapshot for its retry. A TUI
+  restart in that gap recovers the run once more; the restarted TUI must
+  not write a second note for it (`_record_qa_note` skips a note with
+  the same verdict that ends in this run's `(workdir: …)`; pm log "QA
+  note for <pr> already recorded"), and the remaining follow-up is
+  applied once. Distinct runs, including consecutive `zz t` passes with
+  the same verdict, each keep their own note. A TUI started on an
+  unloadable file clears only its own "project.yaml cannot be loaded"
+  line when the file loads: a newer message on the log line is not
+  blanked. Self-driving `zz t` state is TUI memory (documented
+  limitation in `_resume_incomplete_qa`), so after a restart a recovered
+  `zz t` pass is processed like a plain `t` run.
+- **RQ38** Given a TUI driving routed QA, When another pm process holds
+  the project lock for a long time (the user has `pm edit` open, which
+  holds it "until you quit") while a run finishes, a follow-up is
+  pending, or a review → QA hand-off waits, Then (QA19 planner decision,
+  2026-10-24, same principle as RQ37) no result is lost: the transition,
+  the one note and the follow-ups are applied once after the editor
+  quits, and the snapshot stays until then. The TUI stays usable while
+  it waits: its tree, spinners and keys keep responding (every TUI write
+  waits up to `LOCK_TIMEOUT_SECONDS` = 2 s for the lock, and those
+  writes run on the TUI's poll timer, so a retry on every 1 s tick could
+  keep it busy). The pm log does not repeat a lock warning on every
+  tick. Code reading (QA19 planner): `_transition_pr_status`,
+  `_record_qa_note`, `start_signoff` and the pending hand-off treat
+  `StoreLockTimeout` like a load failure and are retried on each poll
+  tick, while `_completion_waits_for_project` checks only that the file
+  loads, so each tick may block for 2 s. On master the same completion
+  blocked once and lost its note. The scenarios decide, with a
+  pre-existing control.
+  Decided live (S48, 716d6ce1 + 006d7b4d; impl.md §5 item 38(a)/(b)):
+  writes retried on the poll timer make one non-blocking lock attempt
+  (`store.NO_WAIT`), say "waiting for project.yaml to be unlocked …"
+  once per wait and land on the first tick after the editor quits. User
+  keys and the CLI keep the 2 s wait. *One-shot hand-offs* (review loop
+  679d i1, 64b41a91, item 38(c)): a hand-off that nothing retries keeps
+  the 2 s wait instead. That is the skip_qa review PASS → sign-off
+  hand-off (`_maybe_auto_merge`). So a pm process that holds the lock
+  for a moment (a `pm pr note add` from a pane, a CLI write) does not
+  lose it, and a hold past 2 s is reported once as `Error: …`. The TUI
+  never shows a "waits" line that promises a retry nobody makes. That
+  longer hold, or an unloadable file, still loses the skip_qa hand-off.
+  This is pre-existing on master and filed as pr-7cf1fe4: record it as
+  an observation, not a pr-592e4bd failure. The retried callers (the QA
+  completion's sign-off follow-up, the scheduler pass `advance_all`)
+  stay non-blocking. The "waits" line is said once per wait, not once
+  per PR, so a later hand-off of the same PR (for example after a
+  sign-off REQA round) that meets a held lock says so again (679d i4).
+  Once the result is recorded and only a follow-up waits for an
+  unloadable file, the completion line reads "QA <V> for <pr> recorded —
+  follow-up waiting for project.yaml to load: …", not "… to load to
+  record it" (S49 observation, 64b41a91).
+
+### All-role and per-role routing (2026-10-24 scope update)
+- **RQ39** Given a router provider and container mode, When a PR's
+  `model: provider:<route>` selects the route for every role, Then its
+  implementation, review, sign-off and every QA session (planner, s0,
+  refiner, worker, verifier, finalizer) reach only the router with the
+  `work/` model, and none reaches the main endpoint. Each impl, review and
+  sign-off container is created with the route-bridge mount at
+  `/run/pm-route`, with no published ports and no network change. Its
+  command runs the in-container ensure step, then plain `claude` with the
+  in-container router URL and `ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN`
+  unset. Hooks and transcripts work as for QA workers (c1c08d83). When a
+  PR instead sets `session_models` exceptions (`model: <main or other
+  provider>` plus `session_models: {signoff: provider:<route>}`, or the
+  reverse), Then only the named role and its children
+  (`qa_*` → `qa`, `signoff` → `review`) follow the exception. Every
+  other role keeps the PR model or the project default. `PM_MODEL` still
+  wins over both. s0 never follows a worker exception (f1865615, 0c577dd2,
+  021f2810). In a second PR of the same TUI with no override, impl, review
+  and sign-off containers get no bridge mount and stay on main. Review and
+  sign-off relaunches remove their old session-tagged container
+  (`pm-<tag>-review-<pr>`, `pm-<tag>-signoff-<pr>`) and create a fresh one.
+  An impl relaunch that finds its container running *without* the mount
+  (created before the route was selected) is refused with "running
+  without the route socket mount. Remedy: end the session using it,
+  remove it (… rm -f …) and launch again" (3748691e, c08c7627). The
+  route bridge is shared by these containers and the QA containers of
+  every PR. Each PR keeps one push proxy (RQ26). Host mode: impl/review/
+  sign-off and host QA planner/s0/verifier/finalizer are not gated (impl.md
+  §3). They start with the router env, so a down router shows an API error
+  in the pane, never a main-account fallback.
+- **RQ40** Given a role routed per RQ39 whose provider cannot be set up
+  (provider missing from this host's providers.yaml, a router entry that
+  cannot launch, or in container mode a bridge that cannot be set up or a
+  running container without the mount), When the role is launched from
+  the TUI, the CLI, auto-start or the review loop, Then nothing is
+  launched on another account and the user sees the reason and remedy.
+  (Superseded 2026-10-27, RQ52: a router that is *down* or whose
+  upstream sign-in expired no longer refuses the launch. The role
+  launches and meets API errors. The bullets below describe the setup
+  refusals. Their "router down" evidence, S53, S88 and S98, is
+  historical.)
+  - `pm pr start`, `pm pr review` and `pm pr signoff` print it on stderr
+    and exit 1. No window opens, the per-PR launch lock is released, and no
+    container is left (57f04ee6).
+  - The remedies name the fix (configure the provider, fix its
+    settings, or move its sessions off the route: "change the PR's model
+    setting if it selects this route ('pm pr model show <pr>')" or `pm
+    model set <session-type> <model> --project`). Since 2026-10-27 no
+    remedy promises an automatic QA launch.
+  - The TUI sign-off driver shows "Sign-off launch failed for <pr>: work
+    route … Remedy: …" as plain text. Brackets in the reason are kept, and
+    a `[/…]` does not blank the line (5fbbedad).
+  - An auto-start `pm pr start` failure shows "Auto-start: pm pr start
+    <pr> failed: <last stderr line>", forced and held. It is shown once
+    per reason per PR. An explicit re-arm (`A`, a target re-add,
+    `autostart all`) says it again even when the failing PR is a
+    dependency of the target. Once the setting is fixed and a start goes
+    through, the PR runs routed (d76cc9d5, d361858c, 620327fa).
+  - A provider that is not configured gives one line from every CLI
+    launch: `Error: … ; or change the model setting that selects it ('pm
+    model show' lists them, PR overrides included)`, rc 1, no traceback.
+    A QA run whose planner, s0, verifier or finalizer meets it shows
+    "QA stopped: … then start QA again", not "QA thread crashed"
+    (2d58dea4).
+  - The review loop's error (`stderr[:500]`) contains the remedy.
+- **RQ41** Given a hand-edited project.yaml model setting, When the user
+  runs `pm model show`, `pm model set … --project` or `pm model unset …
+  --project`, or launches any role, Then:
+  - A blank block (`model_config:`, `session_models:` or
+    `session_effort:` with every entry commented out) reads as empty.
+    Launches use the defaults, `show` resolves every type, and `set` and
+    `unset` fill or edit the block (05bfd6c5).
+  - A blank or non-string entry, at project level
+    (`model_config.session_models.signoff:` with no value) or PR level
+    (`session_models: {signoff: }`), counts as absent. The parent type,
+    then the PR model or global setting, applies. A blank effort level
+    counts as absent too. `pm model show` reports each one under
+    "Problems in project.yaml model settings" (97a77383, 52ec17f3).
+  - A non-mapping `model_config` or block is reported by `pm model show`:
+    "Effective config not shown: model_config is malformed", with PR
+    overrides and problems still listed. A non-mapping PR
+    `session_models` is ignored and flagged. An unknown type such as
+    `sign_off` is flagged (0c577dd2, 7a437b79).
+  - Launches with a malformed (non-mapping) block still fail with an
+    error. They never silently fall back.
+  - `pm model show` lists PR overrides (`model`, `session_models`) and a
+    Routes section for every type that resolves to a route.
+  - PR Routes lines (2a6b14d4, S55; review loop 6915 i1/i2): one line per
+    distinct route a PR override selects, never one per effort. The label
+    is "(all types)" when every PR session type follows that route, else
+    the types it covers. The watcher is never listed. When the covered
+    types resolve to different efforts (the project `session_effort`, or
+    the global setting, since a PR has no effort of its own), the line names
+    each non-majority effort with its types and ends "<majority>
+    otherwise". Every type's effort on the line equals what that type's
+    launch passes as `--effort`. With `PM_EFFORT` set every effort is the
+    same and the line has a single `effort=`. With `PM_MODEL` set no PR
+    line is printed (3a0c32e6).
+  - *Open from code reading (QA23 planner, 2026-10-25), decided by S58:*
+    `pm model show` builds every Routes line without container mode
+    (`worker_route.describe(res)` with no `container=`), so it prints
+    `via=host` even when container mode is on. Impl, review, sign-off and
+    QA refiner/worker sessions then reach the router through the
+    container bridge, and their QA launch lines say `via=container-bridge`.
+    Planner, s0, verifier, finalizer and merge run on the host. The S55
+    REPORT shows a `via=host` "(all types)" line in container mode. R7 makes
+    route selection visible, so `pm model show` must not name a path a
+    type does not use.
+    *Decided by S58 (2026-10-25):* confirmed live and fixed (impl.md
+    item 42(l)). In container mode, container-run types say
+    `via=container-bridge` and host-run types say `via=host`. A PR routed
+    for every type then has two lines, one per path. Host mode keeps one
+    "(all types)" line.
+
+### Subagent model enforcement (note-6153fe1, 2026-10-25)
+- **RQ42** Given a session launched with a pm-selected model, Then it is
+  pinned to that effective model (its `--model` value, `work/` prefix and
+  `[1m]` suffix kept) via `CLAUDE_CODE_SUBAGENT_MODEL` plus
+  `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1`. That session may be routed or
+  plain, any role, host or container, new or `--resume`.
+  When the session's Claude starts any of these subagents:
+  - the default general-purpose agent;
+  - built-in Explore or Plan;
+  - a project agent whose frontmatter says `model: fable`;
+  - an `Agent` call that passes `model: "fable"`;
+
+  Then every child request carries the session's model: on a routed
+  session a `work/` model, which the router sends to the work account. No
+  child request names another model (e.g. `claude-fable-5-1`), and the
+  Agent tool offers no `model` parameter. Check the requested model IDs in
+  the stub router's request log, not only the env strings. Before the fix
+  the frontmatter and explicit-Fable children requested `claude-fable-5-1`,
+  which the router sends to the main account
+  (`/pm-captures/subagent-pin-249/`, impl.md R8). When pm selects no model,
+  no pin is set and an inherited one is removed (S61, 3ee69236).
+  *QA24 planner clarifications (2026-10-25):*
+  - The impl evidence used a controlled endpoint standing in for the
+    router (`fake_anthropic.py`). That proves which model each child
+    *requests*. It does not prove that the requests reach the real work
+    account. QA must check the real route too: a child request that pm's
+    real `claude-work` route sends to the work backend and the work
+    backend answers. Use a recording relay in front of the real route. It
+    refuses every model without the `work/` prefix and never forwards
+    one, so a regression is visible and never bills the main account.
+    No real credential is copied or logged.
+  - S57/S58 ran before ba4e830d and do not test RQ42.
+  - A router's explicit `alias_models` entry for
+    `CLAUDE_CODE_SUBAGENT_MODEL` replaces the pinned value and is forced
+    too (impl.md R8).
+  - Open from code reading; the scenarios decide:
+    - (a) pm sets nothing when it selects no model. A pin already in the
+      environment then passes through: for example, pm driven from inside
+      a routed Claude session, whose env carries FORCE and a `work/` model.
+      A main-account session would then pin its children to `work/`.
+    - (b) FORCE covers subagents only. A skill or slash command whose
+      frontmatter says `model:`, or a `/model` switch, changes the
+      *main-loop* model, which may leave the route.
+    - (c) The real host launcher `claude-mixed` adds `--settings` and
+      exports its own `ANTHROPIC_BASE_URL`. The pin must survive it.
+  *S60 clarifications (2026-10-25, live on bd30befc):*
+  - "No relay request contains C's id" means no request from a C
+    session (a C impl/review/QA parent or child) reaches the relay. It
+    does not mean the text never appears. A's own real-Claude review,
+    sign-off and Scenario 0 run `pm pr list` and then quote the other
+    PR's id in their later turns: S60 saw 21 such A-session requests,
+    all forwarded `work/`, and no C-session request. Attribute by
+    session (relay `sess` hash plus parent class), not by substring.
+  - With the pin, the Agent tool has no `model` parameter (relay
+    `agent_has_model: false`). Real-Claude parents therefore drop
+    `model: "fable"` from the fourth call. The scenario's typed request
+    puts the key in the tool input anyway; that child still requested
+    `work/claude-opus-5-5`.
+  - The TUI refuses a second action while one is running. `z d` pressed
+    right after `i` logs "Busy: Sign-off <pr>". Press `z d` again once
+    the sign-off launch has returned.
+  - Container sessions on a main stub run Claude in auto mode. The stub
+    must answer the permission classifier (`<severity>N</severity>`),
+    or Agent calls are denied. Each new session also shows an "auto
+    mode ... classifier billing" notice that needs Enter.
+  *Decided by S59–S61 (2026-10-25, run da5cdfbc6f5e8370):*
+  - (a) Confirmed in S61 and fixed (3ee69236): with no model selected pm
+    now removes `CLAUDE_CODE_SUBAGENT_MODEL` and
+    `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` (`env -u`; dropped from the
+    `claude -p` run env), so the children follow the CLI default.
+  - (b) Confirmed in S61 for the `fable` alias and fixed (79b6ddd7):
+    `ANTHROPIC_DEFAULT_FABLE_MODEL` is pinned with the other router
+    aliases, so skill/command `model: fable` and the `/model` Fable entry
+    stay on `work/`. A full model id typed into `/model` is outside the
+    launch boundary and is not a failure. The auto-mode permission
+    classifier's unprefixed `claude-sonnet-5[1m]` (S59 Finding B, S61,
+    pr-1071c5a) is RQ43.
+  - (c) Held in S59 with a `claude-mixed` stand-in launcher.
+  - S59 also found and fixed ff65f489: `pm provider test --live` passes
+    on a healthy `[1m]` route.
+- **RQ43** (user decision 2026-10-25, review loop c189 i1) Given a
+  session in auto permission mode (not `--dangerously-skip-permissions`),
+  When Claude classifies a tool call, Then the classifier request runs on
+  the session's account: a session on a router provider whose model is a
+  Claude model under a route prefix (`work/claude-…`) requests
+  `<prefix>/claude-sonnet-5` (its launch env carries
+  `CLAUDE_CODE_AUTO_MODE_MODEL=work/claude-sonnet-5`, or the provider's
+  `alias_models` value), which the work account answers; no classifier
+  request names an unprefixed model. A router whose model is not a
+  Claude model (`deepseek/…`, `z-ai/…`, `chatgpt/…`; review loop c189 i2)
+  gets no classifier pin and drops an inherited one: its launch env has
+  no `CLAUDE_CODE_AUTO_MODE_MODEL`, and no classifier request names
+  `<prefix>/claude-sonnet-5`. Its classifier requests Claude's unprefixed
+  default, which the router sends to the main account (not a failure:
+  that session is not on the work account). A main-account (plain or no-model)
+  session sets no classifier model and drops an inherited one (`env -u`),
+  so it classifies on Claude's default on the main account, also when pm
+  runs inside a routed session. `pm provider list` shows the route's
+  classifier model. Check requested models in a work/-only relay's log
+  (S59 method; classifier calls are triggered reliably by a relay-scripted
+  Agent call). Review evidence: `/pm-captures/review-c189-i1/live-classifier/`
+  (host `claude -p`; QA covers interactive host/container panes and the
+  TUI launch paths). The production TUI's routed review container for
+  review loop c189 i3 ran with `CLAUDE_CODE_AUTO_MODE_MODEL=work/claude-sonnet-5`
+  (`/pm-captures/review-c189-i3/session-env-models.txt`, model names only);
+  that is launch env, not classifier traffic.
+  *Relaxed (user decision 2026-10-27, after S91 F1; impl.md §2):* the
+  launch-env Thens above still hold, but classifier traffic on the
+  session's account is no longer required. Claude Code 2.1.311 prefers
+  the account's server-configured classifier (`modelByMainModel`) over
+  `CLAUDE_CODE_AUTO_MODE_MODEL`, so a routed session may request bare
+  `claude-sonnet-5[1m]`, which a real router sends to the main account.
+  That is accepted, not a failure: depending on the main account is
+  avoided where Claude Code allows it, not at any cost. Harness note: a
+  work/-only router stub or relay must answer (or forward to a main stub)
+  the unprefixed classifier request, or the routed session's Agent calls
+  are refused and the scenario fails for harness reasons.
+- **RQ44** (user decision 2026-10-26, review loop c189 i6; impl.md R9)
+  Given a pm process (CLI or TUI) started inside a work-routed session,
+  so its environment holds the route's `ANTHROPIC_DEFAULT_*_MODEL` and
+  `ANTHROPIC_SMALL_FAST_MODEL` aliases, its subagent and classifier pins,
+  `PM_ROUTE_BASE_URL` and the route's `ANTHROPIC_BASE_URL`. When it
+  launches sessions, Then each one's environment comes from that
+  session's own selection:
+  - A main session with no model requests Claude's CLI default (not
+    `work/…`) for its main loop and its children.
+  - A main session with a plain model keeps its `--model`, and its Fable
+    and haiku switches and background calls request plain Claude models.
+  - A main session's auto-mode classifier stays unprefixed.
+  - None of these sessions carries the route's `ANTHROPIC_BASE_URL`, and
+    none reaches the router or relay.
+  - A routed session sets its own route's values, including
+    `PM_ROUTE_BASE_URL`, and leaves no other route's `work/` value
+    behind.
+  - A user's own `ANTHROPIC_BASE_URL` (one that is not a route's, such as
+    a QA main stub) and unrelated variables are kept.
+  This holds for TUI-launched panes, CLI launches, `--resume`, the
+  `claude -p` helpers, and host and container sessions. A main container
+  session's command removes the host route `ANTHROPIC_BASE_URL` and
+  `ANTHROPIC_SMALL_FAST_MODEL` that the container got by name. Review
+  evidence (host `claude -p` against local stubs, pm-built commands,
+  pre-fix vs post-fix):
+  `/pm-captures/review-c189-i6/live-inherited/`. That evidence does not
+  include a live container run or interactive panes.
+- **RQ45** (review loop c189 i8–i11; impl.md R3/R9) Given a hand-edited
+  `~/.pm/providers.yaml`, When pm launches sessions or the user runs the
+  provider/model commands, Then:
+  - An entry that is not a well-formed router (a null or string entry, a
+    non-string `api_base`, a list `alias_models`, `capabilities: 5`) never
+    breaks a launch that does not use it, including main-account launches
+    while an endpoint is inherited (i8).
+  - When the selected provider's entry is such an entry, every surface
+    reports it like a missing provider: one `Error:` line for
+    impl/review/sign-off, `QA stopped: …` for every QA role (since
+    2026-10-27 the refiner/worker too, RQ53; before that their route
+    gate waited with its remedy), `(INVALID ENTRY in
+    providers.yaml)` in `pm model show`, `INVALID ENTRY: <problem>` in
+    `pm provider list` beside the valid entries. Never a traceback, a
+    "QA thread crashed", or a launch on plain claude (i9).
+  - `pm provider add/remove/default` fill a blank `providers:` block and
+    refuse a file they cannot read (not valid YAML, not a mapping, a
+    non-mapping `providers` block) with one `Error: <path> cannot be
+    changed: …` line, rc 1, the file byte-identical (i10).
+  - A named provider in a file pm cannot read (one stray tab, not a
+    mapping, a directory, permission denied) is named as unreadable on
+    every launch surface ("cannot be looked up in <path>: <why>; fix the
+    file by hand"), `(providers.yaml UNREADABLE)` in `pm model show` and
+    `NOT READ: <path>: <problem>` in `pm provider list`, never "not
+    configured, add it with pm provider add". An unopenable file is "it
+    cannot be read (<reason>)", not "not valid YAML". A readable file
+    without the provider still says "add it" (i11).
+  - Concurrent use: `pm provider add`/`default` rewrite the file in place
+    (`save_providers`, not an atomic replace) while QA and other launches
+    read it. A launch that reads it mid-write must end in one of the
+    states above (a clean `Error:` / `QA stopped: …`), never a
+    traceback, a verdict, or a main-account launch for a routed role.
+
+- **RQ46** (review loop a5a3 i1, 3e9f6b19; QA S64 bad02547) Given a PR
+  driven by `pm pr auto-sequence` ticks, When a tick launches QA (review
+  PASS -> qa, a qa tick with no status and no qa window, or a sign-off
+  `qa` hop) while the provider of a QA role (planner, s0, verifier,
+  finalizer; since 2026-10-27 also refiner and worker, RQ53) cannot be
+  looked up (not configured,
+  invalid entry, unreadable providers.yaml; PR `session_models`, PR
+  `model` or project setting), Then:
+  - The tick prints one `Error:` line naming the problem and remedy,
+    rc 1, spawns no `pm pr qa-run-bg` driver, opens no qa window and
+    makes no request to any endpoint. Every later tick says the same
+    until the setting or file is fixed; the first tick after the fix
+    launches QA once and the run reaches its normal verdict.
+  - (Superseded 2026-10-27, RQ53.) A broken routed refiner/worker
+    provider used not to be checked here, and its route gate waited. It
+    is now checked like the others.
+  - A driver that still meets a provider setup error after launch (the
+    file broken mid-run) logs one `QA stopped for <pr>: …` warning in the
+    pm log, no traceback; the same for the TUI `t` path (bad02547).
+  - Open points from code reading (the twenty-sixth pass decides them):
+    (a) the review-PASS path moves the PR to `qa` before the check, so
+    after a failed launch a later qa tick reads the newest
+    `qa_status.json`, which may be an earlier run (a stale NEEDS_WORK
+    bounces back to review; a lingering earlier `qa-<pr>` window reads
+    as "running: qa" and no tick retries the launch). (b) The check
+    resolves the verifier provider even with `qa-verify-pass` off, where
+    the TUI `t` run never launches a verifier. (c) Two concurrent ticks
+    after the fix may each spawn a driver (pre-existing check-then-spawn;
+    S67 confirmed it at the same rate on the pre-fix control, pr-7a83b6d).
+- **RQ47** (QA S93 ad5eed13; review 0639 i1 86c0da90) The runtime mirror
+  read by the popup picker, auto-start's `recorded_qa_verdict` and the
+  spinner is per pm session: `~/.pm/runtime/pm-<tag>/<pr>.json`. This
+  supersedes the `~/.pm/runtime/<pr>.json` path named in RQ36 and the
+  thirty-fifth pass. The session is resolved once per process: the
+  pane's or popup client's pm session inside tmux, with the grouped
+  `~N` suffix stripped, otherwise the session named after the cwd's git
+  root. A user's own view grouped with the pm session under another name
+  (`tmux new-session -t pm-<tag> -s myview`) resolves through its
+  `#{session_group}` everywhere: the TUI's own session name and pidfile,
+  CLI→TUI commands and `_get_current_pm_session` (S118 91b259bd), the
+  `C-b P`/`C-b M` popups, the `after-split-window` and `window-resized`
+  pane hooks (one pane registry, `pm-<tag>.json`; no stray
+  `<view>.json`), and the picker's ● active-window markers for every
+  attached client of the group (S121 89d914a0, c1027cd6). This holds for
+  a view of any name, including one that starts with `pm-` (`pm-laptop`)
+  or contains `~` (`my~view`): `pane_registry.pm_session_name` looks the
+  full name up in `#{session_group}` for every session, and
+  `_get_current_pm_session`, the `_pane-closed` hook (`C-b x`),
+  `pm rebalance` (`C-b R`), the popup dispatch and `pm session home` use
+  it, so `pm session home` typed in a view switches that view's client
+  (S124 920633fe; the forty-third pass's open point is closed). tmux
+  3.2a has no `window-resized` hook, so resize is not drivable there.
+  Only a host without tmux uses the shared path. Given two clones,
+  When one clone's run writes running, done or a verdict, Then the
+  other clone's picker, auto-start and mount sweep never see it (S93).
+  Given records written at the shared path by an older pm, When a
+  session's directory is first created, Then it starts with those
+  records' `done`/`failed` entries only: no in-flight entries and no
+  `suppress_switch`, with `updated_at` kept. So a recorded hold verdict,
+  such as INPUT_REQUIRED, still stops auto-start from relaunching QA
+  after the upgrade, and the picker shows the old verdict and no
+  phantom `[working]` row. The seed happens once per directory. It is
+  built aside and renamed into place, so concurrent first starts within
+  one session yield one complete directory, with no partial reads, no
+  errors and no leftover `.pm-<tag>.<pid>.seed` directories. Later
+  writes to the shared path by an older pm do not leak in. A directory
+  that already exists, for example after a session restart, a `pm tui
+  restart` or a PR cleanup that removed the PR's file, is never
+  re-seeded, so a cleaned-up verdict does not come back.
+  - Accepted trade-off, not a failure: a clone whose session directory
+    is first created after the upgrade inherits whatever the shared
+    file holds at that moment, even if another clone wrote it. Before
+    the upgrade the records had no clone attribution.
+  - Open points (the thirty-sixth pass decides them): (a) a pm process
+    run outside tmux with its cwd in a PR workdir, rather than the
+    clone root, resolves a different tag (that workdir's git root), so
+    its records may land where no TUI reads them. (b) The TUI mount
+    sweep clears in-flight entries in its own session directory,
+    including the `running` entry of a `qa-run-bg` driver still alive in
+    that session. After a `pm tui restart` the picker and auto-start
+    must neither lose that run nor start a second driver.
+  - Decided (fortieth pass): (a) held live in S110 on cd617253. Ticks
+    from a plain terminal, a non-pm tmux session and `-C <clone>` from a
+    PR workdir drive QA in the project's pm session and write their
+    records to `pm-<tag>`. (b) S111 found three gaps (F1–F3), fixed in
+    d35c473a, 609e37b5 and 5e55b707. RQ56 states the behaviour.
+- **RQ56** (S111 d35c473a; review 82f2 i1 609e37b5, i2 5e55b707) One
+  driver per QA run. Given a QA run of a PR, When any mix of drivers
+  could start it, Then exactly one runs it. The possible drivers are a
+  `pm pr auto-sequence` tick's `qa-run-bg`, a TUI auto-start pass, a
+  `pm tui restart`, a TUI review→QA hand-off (`zz d`/`zz t`) and a
+  `pm qa run` CLI run. In detail:
+  - The tick writes the run's start record (naming the tick, then the
+    spawned driver) before the PR shows `qa`. A TUI pass at any point
+    after that says the run is "driven by another process" and starts
+    nothing. This holds while project.yaml is busy for under or over 2 s:
+    `qa-run-bg` locks only while the PR is still `in_review`, and waits
+    out a busy lock instead of dying unseen.
+  - When the provider check or the spawn fails, the tick prints its one
+    `Error:` line (RQ53) and leaves no start record. Once the setting is
+    fixed, the next TUI pass or tick starts QA at once, with no claim
+    expiry wait.
+  - `pm qa run` writes a fresh start record each run and clears its
+    resume snapshot once it has a verdict. A TUI never takes the one
+    instruction's verdict as the PR's QA result, and a second CLI run is
+    seen as live. While a CLI run is live, auto-start re-checks every
+    30 s and starts full QA once the CLI run ends.
+  - A review→QA hand-off that finds a run driven elsewhere stays pending,
+    with the sticky line "Review PASS for <pr> — QA starts once the QA
+    run another process drives ends". It is retried each poll tick, also
+    with auto-start off (`zz t`), and starts QA once the run ends. It
+    keeps the live driver's `[running]` picker entry and panes. It drops
+    a `done` entry from before that run, so an old PASS is never handed
+    to sign-off. When the driver records a verdict (even if a tick lands
+    between the verdict write and the driver's exit), that verdict is
+    the hand-off's QA result: no second full QA, one sign-off hand-off.
+  - The sign-off REQA, rewritten 2026-10-29 for master's durable path
+    (#276, pr-db3bf10, merged in 67353d44). It replaces the in-memory
+    deferral of S117 c9ce4f6a and d7e65156. The owed run is on disk: the
+    PR's `signoff_return` says `awaiting: qa`. Several starters can act on
+    it: the TUI sign-off hop, the TUI poll tick and mount reconciler (not
+    gated by auto-start), an auto-start pass and a `pm pr auto-sequence`
+    tick. Each must win the launch claim with the PR at `qa`, so exactly
+    one starts the run.
+    - While a run is driven elsewhere (a live `pm qa run` or `qa-run-bg`),
+      nothing starts. The TUI shows "Sign-off REQA for <pr> — QA starts
+      once the QA run another process drives ends" once per return
+      episode. A tick's hop prints "sign_off: re-qa deferred: a QA run is
+      in flight" (or `running: qa`).
+    - Once that run ends, one full QA starts: one `qa-<pr>` window set,
+      one verifier, one finalizer and one new `qa_status.json`. This also
+      holds with auto-start off and after a plain `pm tui restart`. This
+      is S127's contract (note-ae7cf29 item 1, note-da2d795), and the
+      sticky line is not part of it.
+    - The live run's windows are never touched. The re-run may replace
+      windows left by a finished CLI or full run of the same PR (user
+      decision note-32a12ee). The one-instruction verdict is never the
+      re-run's result.
+    - When project.yaml is busy as the start fires, the obligation stays
+      on disk and a later tick starts it.
+    - A run whose record has `ended_at` (`end_run_record`) no longer
+      drives the PR, even while its process (a TUI) lives.
+  - An interrupted `pm qa run` (Ctrl-C: no verdict, snapshot kept) is
+    never adopted by the TUI resume scan after a restart. Only a full QA
+    run's snapshot is resumed (S119 b402464e, c774b5af).
+  - A `pm qa run` started before a sign-off REQA is not the re-run's
+    driver, but it holds the PR until it ends (S120 d7e65156, c774b5af).
+    An auto-sequence tick in the awaiting-qa branch, and the tick's
+    sign_off→qa hop, start nothing while any QA run of the PR that this
+    pm session launched still has a live driver, however old; the tick
+    prints `running: qa`. A `pm qa run` holds from its start, while its
+    refiner still runs and before it has a resume snapshot: its start
+    record names its live process (S123 c5af52f0). Only that run's own
+    record (`<pr>-cli-<pr>/qa_run.json`) of this pm session counts, read
+    owner pid first (review 1cfa 3110c6f3). The next tick after the run
+    ends launches one `qa-run-bg`. A one-instruction run's `qa_status.json` (workdir
+    `<pr>-cli-<pr>`) is never the PR's QA status anywhere: ticks never
+    advance on it, and the sign-off prompt's QA verdict and the finalize
+    prompt's pointer name the latest full run. master has the same tick
+    defect (pr-d7d4601, close when this merges).
+  - A TUI mount sweep (`pm tui restart`) keeps the `qa` runtime entry
+    of a run another live process drives (a tick's `qa-run-bg` or a
+    `pm qa run`), so the picker keeps its `[working]` badge until the
+    verdict (S121 89d914a0). An entry whose driver is dead is still
+    swept.
+  - The picker shows the PR's `qa` row as `[working]` while this
+    session's `pm qa run` of that PR is live, from any client or view
+    (S125 ca2a0657). This is display only. The CLI run still writes no
+    `qa` runtime entry, so once its process ends the row shows the last
+    full run's badge again (for example `[done PASS]`), never the one
+    instruction's verdict. A dead (Ctrl-C'd or killed) CLI run, or one
+    from another clone, never shows `[working]`. This supersedes the S124
+    story 4 Then "no `[working]` while `pm qa run` is live" (decided by
+    the QA44 planner; the S124 note-3a217f2 conflict).
+
+### Generic providers and per-PR configuration (2026-10-27; impl.md R10–R13)
+- **RQ48** (R10, 87fd093f) Generic router provider. Given a router
+  provider whose `model` has no `work/` prefix (e.g. `acme-opus`, or
+  `team/x`), When sessions launch on it (host or container), Then:
+  - `ANTHROPIC_BASE_URL` comes only from its `api_base`. Nothing in
+    output, launch commands or help names claude-mixed, `8790`, `work/`,
+    `~/.claude-work` or "main account".
+  - The default launch env has the subagent pin plus FORCE, the
+    unknown-model flag, and unsets `ANTHROPIC_API_KEY` and
+    `ANTHROPIC_AUTH_TOKEN`. `CLAUDE_CODE_AUTO_MODE_MODEL` is present only
+    when `classifier_model` is set, and then has exactly that value. It is
+    never derived as `<prefix>/claude-sonnet-5`.
+  - `env: {VAR: value}` adds or replaces a variable. `VAR: null` drops a
+    default. A null pin drops FORCE too, and a null FORCE keeps the pin.
+    `env` wins over `alias_models`. `unset_env: [...]` replaces the
+    default unset list, and `unset_env: []` lets an exported
+    `ANTHROPIC_API_KEY` through. What the session's claude process
+    actually sees matches `pm provider show`'s "launch env" and
+    "launch unsets", in host and container mode.
+  - A configured `remedy` replaces the router-down hint where that hint
+    appears: `pm provider show`/`test` status and the TUI provider list.
+    (The QA wait/stall line and the router-down `pm pr start/review/
+    signoff` refusal it also replaced were removed 2026-10-27, RQ52.)
+  - `pm provider test <route> --live`: every model Claude requested must
+    be the route's `model`. Without `probe_models`, any model the
+    transcript records is accepted and shown. With `probe_models`, it must
+    be `model` (minus `[...]`) or one of them, otherwise `Live: FAILED`
+    names it, exit 1.
+- **RQ49** (R11) No credential management. Given a providers.yaml entry
+  that still sets `credentials_file` (missing, unreadable or expired) and
+  `refresh_command` (a command that leaves a marker when run), When any
+  launch, preflight, `pm provider test` or TUI view runs, Then the file is
+  never read, the command never runs (no marker), and the outcome depends
+  only on the router. `pm provider list` and `show` warn: "<name>:
+  ignoring credentials_file, refresh_command (pm no longer checks or
+  refreshes credentials …; remove with 'pm provider edit <name> --clear
+  credentials_file --clear refresh_command')". After those clears the
+  warning is gone and nothing else in the entry changed. No credential
+  value or path appears anywhere else.
+- **RQ50** (R12, ff5db9c8) Effort per provider and per PR. The `--effort`
+  every launch passes (impl, review, sign-off, merge, every QA role, host
+  and container) follows: `PM_EFFORT` > PR `session_effort[role]` (with
+  the parent-role fallback, `qa_*` → `qa`, `signoff` → `review`) > PR
+  `effort` > the selected provider's `effort` > project `session_effort`
+  > global > built-in. A model without effort support (haiku) gets no
+  `--effort` at any level. An invalid hand-edited PR level (`effort:
+  extreme`) is ignored at launch, so the next level applies, and `pm model
+  show` reports it under Problems. `pm pr model show`, `pm model show`
+  (PR overrides now include `effort`/`session_effort`) and the TUI `o`
+  rows name the deciding setting ("PR qa", "PR", "provider <name>",
+  "project <type>", "global <type>", "built-in", "PM_EFFORT"), and they
+  agree with what launches use. s0 with only a plain-model project
+  `qa_scenario` shows and runs "<setting> (s0 legacy)". A provider
+  `qa_scenario`, or a PR worker exception, never reaches s0.
+- **RQ51** (R13) View and apply configurations.
+  - CLI providers: `pm provider add` takes every field. `edit` changes
+    only the given fields plus `--clear`, then prints the result. An
+    invalid result (router plus `--api-key`, a router without model or
+    api_base, bad effort, non-string `env`) is refused with one Error line
+    and leaves the file byte-for-byte unchanged. Editing an unknown name
+    says how to add it. `show` prints settings, launch env and status.
+    Values of variables whose names contain KEY, TOKEN, SECRET, PASSWORD,
+    CREDENTIAL, AUTH or HEADER print as `<redacted>`. A literal
+    `api_key` prints as `set`, and a `${VAR}` reference is printed as is.
+  - CLI per PR: `pm pr model show <pr>` lists every PR session type (not
+    the watcher) with model/provider, effort, command (launcher, `claude`,
+    or `claude (container route bridge)`) and what decided each, plus a
+    `!` line for a provider that is not configured. `set <pr> VALUE
+    [--effort] [--role …]` refuses an unconfigured `provider:` before
+    writing; `set` with neither VALUE nor `--effort` is an error. `unset`
+    without `--role` removes the PR-wide setting and keeps role entries.
+    `--role` removes those entries (an emptied mapping disappears).
+    `--model`/`--effort` limit the kind, and `--all` removes everything.
+    Every write goes through the project.yaml lock and keeps unrelated
+    fields, notes and other PRs intact. Running sessions keep their
+    settings, and the next launch uses the new ones.
+  - TUI `o` on a selected PR opens "Model settings for <pr>": row 0 "(all
+    roles)" then one row per role. Enter opens a picker: (clear), every
+    configured provider, then model names already used in the project. `e`
+    cycles the effort of the row's own setting (none → low → medium →
+    high → none). `p` toggles the project view: per-role `model_config`
+    plus the provider list with `[OK]` / `[UNAVAILABLE: …]` route status.
+    In the plans or QA view, `o` opens the project view directly. A save
+    shows "<where>: <kind> for <scope> -> <value> (new launches use it)"
+    and the tree reloads. A PR with settings of its own shows `⇄` on its
+    node, which goes when they are cleared. A busy (locked past the
+    timeout) or unparseable project.yaml shows "Not saved: …" and writes
+    nothing. A provider removed after the popup opened is refused at
+    apply. Esc closes the picker, then the popup.
+  - Open points (the thirty-seventh pass decides them):
+    (a) `save_providers` writes `~/.pm/providers.yaml` in place, with no
+    lock and no atomic rename. Concurrent `pm provider add/edit/remove`
+    may lose an update, and a launch, `pm pr model set` check or TUI
+    provider list reading mid-write may see an empty or partial file
+    ("not configured" / NOT READ). A lost update, or a reader seeing a
+    truncated file, is a finding.
+    (b) The popup keeps the data it loaded until its own next save. A CLI
+    change made while it is open is not shown. A popup save must not
+    undo the CLI's change to another role or PR, because `locked_update`
+    applies the edit to fresh data. `e` computes the next level from the
+    stale value, which is an observation.
+    (c) `⇄` uses truthiness, so a blank hand-edited `session_models:
+    {signoff: }` (absent for launches per RQ41) still shows the badge.
+    This is an observation unless the popup and launches disagree.
+
+### Route failure simplification (2026-10-27; impl.md R6)
+- **RQ52** No route waiting or recovery. Given any role routed to a
+  router that is down, or goes down mid-run, When pm launches or
+  supervises it (TUI, CLI, auto-start, review loop, sign-off, QA in host
+  or container mode), Then:
+  - pm launches it without checking reachability.
+  - It handles failures exactly as for a session on the default
+    provider: Claude Code's API errors and retries in the pane, the
+    ordinary verdict reminder, refiner timeout, dead-worker relaunch with
+    its retry budget, and ERROR for a review iteration that produced no
+    verdict.
+  - It writes no route-specific wait, deferral, stall, recovery or
+    resume line and sends no route nudge.
+  - It sends no request for that role to another provider or account.
+  - Once the router is back, sessions reach it without pm acting.
+- **RQ53** Setup errors fail normally. Given a role whose provider is not
+  configured, whose entry is invalid, whose providers.yaml cannot be
+  read, or whose router has no `model`, an `api_base` with no host, or a
+  host `launcher` that is not executable, When it is launched, Then it is
+  refused when its command is built:
+  - CLI: one `Error: … Remedy: …` line, rc 1.
+  - QA: the TUI shows `QA stopped: …`. An auto-sequence tick prints one
+    `Error:` line and spawns no driver. This now covers the refiner and
+    worker too: every QA role is checked before the run, and the run
+    records no verdict.
+  - No traceback, nothing launched elsewhere, and no wait.
+- **RQ54** The bridge stays. Given container mode and a routed role,
+  When it launches, Then the container has the route bridge mount and
+  Claude reaches the router through the in-container forwarder.
+  Impl, review and sign-off refuse a bridge they cannot set up (or a
+  running container without the mount) with one `ContainerError` line
+  and no container left. A QA worker whose `ensure` fails exits before
+  Claude starts and takes the ordinary relaunch path. `pm provider test
+  [--container] [--live]`, `pm provider show` and the TUI provider list
+  still report the router's live status and configured `remedy`, as
+  diagnostics only.
+- **RQ55** A stopped run keeps what it settled (07cc00f3, 0dad507b,
+  0ad075ae, abd23015). Given a QA run that a provider setup error (RQ53)
+  stops mid-run at a queued launch, a dead-worker relaunch or a verifier
+  launch, When the run stops, Then its `qa_status.json` (the QA status
+  window and every later reader) shows each verdict and verification
+  settled before the stop, including those settled in the same poll
+  interval or tick as the stop:
+  - A verified PASS shows `PASS`, not `PASS (verifying)`.
+  - A verifier flag past `qa-verify-retries` shows NEEDS_WORK with its
+    `failed verification: …` reason.
+  - A retryable flag sends the worker no follow-up and shows
+    `PASS (verifying:<n>)`.
+  - A scenario that never launched shows `queued`.
+  - `overall` stays empty, `stopped` is set, and the resume snapshot is
+    gone.
+  - After the stop pm sends no follow-up and launches no queued scenario,
+    verifier or finalizer.
+  - The usual RQ53 surface holds: one `QA stopped: …` line or one tick
+    `Error:` line, and exactly one driver once the setting is fixed.
+  A run that is not stopped writes the same statuses as before: the extra
+  write before a queued launch never leaves a running scenario shown as
+  `queued` once its verdict, verification or slot change is written.
+
+### Forty-fifth-pass fixes (2026-10-29; QA46 planner)
+- **RQ57** A QA run that a `pm tui restart` cuts off (S131 245eb22f;
+  review 6e6b 51a709f3, 74cebe25; S136 44ea3dd7). `pm tui restart` execs
+  the TUI in place, so the pid stays the same. Given a QA run that this
+  TUI started and the restart killed before the run's first resume
+  snapshot (planning or refining, about the first 20 s), When the new TUI
+  mounts, Then:
+  - The run's record is ended. No tick or TUI reads the run as "driven
+    elsewhere" any more. The dead run's `qa-*` scenario windows are
+    killed: in host mode those working inside its QA workdir, and in
+    container mode also those (opened in the PR workdir) that exec into
+    the run's own scenario containers (`…-qa-<pr>-<loop>-sN`, 44ea3dd7).
+    No other run's window is touched. The dead containers are not
+    removed at mount. The next run of that PR removes them when its
+    planning starts, except while another PR shows a same-numbered
+    `qa-*-sN` window (pr-81a249e). Its main `qa-<pr>` window may
+    survive, and `t` only focuses it.
+  - If the run was the re-run a sign-off REQA owed, the obligation is
+    reopened (`awaiting: qa`) and started once through the claim
+    (RQ56), with auto-start on or off. No line asks the user to act.
+  - Any other lost run, for a PR still at `qa`, gets one sticky TUI line
+    after the breadcrumb pass: "QA for <pr> was cut off by the TUI
+    restart before its first snapshot — press z t to run it again".
+    This covers a run the user started with `t`, and an owed re-run
+    whose reopen hit a busy project.yaml. `z t` then starts exactly one
+    run.
+  - There is no line for a run that the breadcrumb pass (auto-start on,
+    PR a target) or a queued command has already started again. There is
+    none for a PR that is no longer at `qa`, and none on a later restart.
+  - Runs with a snapshot are left to the resume scan (held runs
+    included). Records owned by another process are never touched: a
+    `pm qa run`, a tick's `qa-run-bg`, another clone's TUI, or a TUI
+    with a new pid after a crash. The crash case strands the PR at `qa`
+    on master too (pr-58aa21a, not this PR).
+  - Ticks around these runs (decided by review d05b i1, note-d4f4170;
+    both come from pr-f1d825b, pre-existing on master: `overall` is
+    written before the finalizer ends):
+    - With no sign-off return, a tick advances a PASS to `sign_off`
+      exactly once and never prints `(launched)`. It may land before the
+      TUI's QA PASS line while the finalizer runs.
+    - During an owed re-run, ticks print `running: qa`, then
+      `running: qa (driven elsewhere)` from the re-run's `overall` write
+      until the run ends. They never print `(launched)` or
+      `sign_off: re-qa`.
+- **RQ58** A held INPUT_REQUIRED run's follow-up (S132 b7321370,
+  3de073a6). Given a run held on INPUT_REQUIRED (#271):
+  - When the user presses `t` with its window open, Then the TUI says
+    "QA for <pr> is waiting for input — answer in its scenario worker
+    pane; the loop is still watching", not just "Focused QA window".
+  - When the user's answer gives a PASS or NEEDS_WORK follow-up, Then
+    that result gets its own QA note, beside the INPUT_REQUIRED note, and
+    its own finalize. This holds whether the TUI stayed up or adopted the
+    held run after a restart or crash. Either way the status line says
+    "QA resumed after INPUT_REQUIRED — collecting the follow-up verdict".
+  - A second INPUT_REQUIRED answer is not a reopen. The run stays held.
+- **RQ59** A re-armed review launch (S133 7fb5df75). Given a review
+  iteration whose launch failed (retryable LAUNCH_FAILED, #259), When
+  auto-start re-arms it or a `pm tui restart --breadcrumb` lands inside
+  its backoff, Then the next attempt starts on schedule. It does not
+  wait the 120 s launch timeout on the dead attempt's transcript link.
+  Once the provider is fixed, the attempt runs on the route.
+- **RQ60** A repeated container-mode `pm qa run` (S130 85f58e5a; also on
+  master 4a74d880). Given container mode and a `pm qa run` of a PR whose
+  earlier `pm qa run` scenario container still runs (same name,
+  `cli-<pr>`), When the user runs it again, Then the earlier container is
+  removed and a fresh one mounts the fresh clone. The scenario window
+  starts, and a routed worker reaches the router. There is no "Scenario
+  N window died — retry n/10" loop. Two concurrent `pm qa run`s of one PR
+  are pr-571a13b, not this PR.
+
+## 2. Setup
+
+- Install pm from this PR's clone (`./install.sh --local` or venv per
+  `tui-manual-test.md`), confirm `pm which` points at the clone.
+- Throwaway project per `tui-manual-test.md` with one PR and a short spec;
+  for container mode set `nested_podman: true` and `pm container enable`.
+- **Stub router** (no real work account in QA containers — tokens must not
+  be copied there): a small Python HTTP server on `127.0.0.1:<port>` that
+  speaks the Anthropic Messages API (non-streaming and SSE), records each
+  request's `model`, whether an auth header was present and the path, to a
+  JSONL log, and returns canned text chosen from the request: a refiner
+  prompt (contains `REFINED_STEPS_START`) gets
+  `REFINED_STEPS_START … REFINED_STEPS_END`; a scenario-worker prompt gets
+  a final line `PASS`; anything else gets `ok`. It may reject (HTTP 400)
+  any model lacking the `work/` prefix to make a main-account fallback
+  visible. The stub can be made to pause (to emulate long thinking gaps),
+  to stop listening (router down) and to restart on the same port.
+- Fake-claude config (`pm fake-claude config set`) for `qa_planning`
+  (scripted `QA_PLAN` body with 2–3 scenarios), `qa_verification`,
+  `qa_finalize` so the loop is deterministic, **with no entry and no `_all`
+  for `qa_concretize`/`qa_scenario`** — routed roles must run real
+  `claude` against the stub router (a fake never uses the network). Scenario
+  0 is launched with session type `qa_scenario` for fake purposes, so it
+  will be real Claude as well; that is expected (it should go to the main
+  account, not the stub).
+- Credentials-file fixture: a JSON file with `claudeAiOauth.expiresAt`
+  (ms) far in the future, or in the past for the expiry case; never a real
+  token. Since R11 (2026-10-27) it is used only to show that pm ignores
+  the retired key (RQ49).
+- Set the concurrency cap (global setting `qa-max-scenarios`) to 1 for
+  queue scenarios.
+- **Lessons from the first QA run (2026-10-22):**
+  - Use a scratch `HOME` (the host `~/.claude` may be bind-mounted rw) with
+    `PM_HOST_HOME` unset. Never copy `~/.claude/.credentials.json` into it
+    (forks the rotating refresh token and logs the real account out); give
+    real Claude a dummy `apiKeyHelper` in the scratch `settings.json`
+    instead (routed launches unset `ANTHROPIC_API_KEY`, so without a helper
+    Claude reports "Not logged in"). pm hooks are installed by `pm session`.
+  - The sandbox's `/etc/containers/containers.conf` sets `netns=host`, so
+    in-container `127.0.0.1:<port>` would reach the host directly and the
+    bridge would be bypassed. For container-route QA put
+    `[containers] netns="slirp4netns"` in the scratch
+    `~/.config/containers/containers.conf` and confirm with `podman inspect`.
+  - Overlay fs reuses socket inode numbers; compare birth time, not inode,
+    when checking whether the bridge socket was recreated.
+  - fake-claude `qa_scenario` entries must use `{"verdicts":[...]}`, not a
+    bare list.
+  - Starting QA again on the same PR continues scenario numbering (4–6,
+    7–9, …); marker-based holds in the stub router must target the real
+    index (or match on prompt text, not number).
+  - Numbering continues from the earlier runs' highest *launched* index
+    (`_next_scenario_offset` counts `s-N` clone dirs), not the highest
+    *planned* one. Queued scenarios that a stopped or superseded run never
+    launched get no clone, so the next run may reuse their indices (impl.md
+    §5 item 9: "an older run's queued tail can exceed a newer run's
+    numbers — old 1-6 at cap 2, new 3-5"). Do not assert `scenario_start` >
+    the previous run's last planned index. Assert `scenario_start` = the
+    highest launched index of earlier runs + 1, and that the reused indices
+    carry no artifacts, windows or containers from the older run (S14,
+    2026-10-23: stopped run 18–21 launched only 18/19, next run started at
+    20).
+  - Optional: export `ANTHROPIC_BASE_URL` to a second "main" stub and a
+    dummy `ANTHROPIC_API_KEY` in the user environment to make main-account
+    traffic visible: unrouted roles must reach the main stub with that key,
+    routed roles must reach only the router stub and never with that key.
+  - `pm model set <type> <model>` without `--effort` applies the
+    `medium` default; pass `--effort high` explicitly.
+  - Out of scope (pr-3c7ce04): a pane idle on "Login expired · Please run
+    /login" is not detected by the route stall watch (it only rechecks the
+    router).
+  - Delta passes 2–13 (S7–S33) are complete. They are archived verbatim
+    in [qa-passes-2-13.md](qa-passes-2-13.md). Read it before you write
+    the next delta pass. It names the harness each pass reused (stub
+    router and main stub `stub.py` holds, the two-PR container scripts,
+    the scratch TUI with the VFR cast renderer, the `⏸M` merge recipe)
+    and gotchas such as `env.sh` scrubbing variables, the
+    `qa-pass-count` settings file and `file://` origins for proxied
+    pushes. Captures are in
+    `/pm-captures/scenarios/<N>/` (REPORT.md); `pm pr note list
+    pr-592e4bd` holds per-scenario harness notes.
+  - Fourteenth pass (S34+), delta-only. The only product changes
+    since S33 are af19cfcf, aaf15356 and b8ebe2c3: pm's `UserPromptSubmit`
+    hook (receiver `user_prompt`), coexist-append and hook-level merge
+    with exact-invocation ownership, and `PaneIdleTracker` clearing idle
+    on `user_prompt` (RQ35, impl.md §5 item 27). Earlier evidence stands:
+    S32 (RQ33) and S33 (RQ34 transcript preservation) are not rerun. The
+    exception is S33's one failed Then, a typed turn into an idle impl
+    pane after auto-start is turned off, which is replayed because
+    af19cfcf targets it. Affected surfaces that need live checks:
+    hook install at `pm session`/TUI start in scratch HOMEs (upgrade,
+    coexistence, conflicts, malformed entries, concurrent installs while
+    Claude panes fire hooks); node and picker state on typed turns and on
+    pm-sent turns (verdict reminder, route nudge, verification follow-up)
+    for impl, review, s0 and routed QA panes; and hooks inside QA
+    containers, which share the bind-mounted `settings.json`, receiver and
+    `~/.pm/hooks`. Use scratch HOMEs and scratch TUI sessions only. Do not
+    restart the host TUI, change host models or settings, or unpause other
+    QA. Each capture dir must hold `recording.cast`, `recording.mp4` and
+    `manifest.md` per the recipe before a verdict is given; earlier rounds
+    omitted them. Known items stay observations: pr-0ac6f7a (a plain-string
+    Notification/Stop entry crashes install), pr-b2db183, pr-237d610,
+    pr-1139060.
+  - Fifteenth pass (S37+), delta-only. Product changes since S34 are
+    41ff0d3c (a live impl pane hides a finished loop's `⟳N` badge),
+    ebf919e8 (a Stop newer than an observed `idle_prompt` reads as
+    working), 93dca6ae (QA node spinner without a cached workdir, queued
+    launches keep the run's tracker keys, the TUI mount sweep is limited
+    to its own project's PRs) and the review-loop 3992 i1 render
+    refactor of those markers (no behaviour change). S35/S36 Thens on
+    those commits stand (captures `/pm-captures/scenarios/35`, `/36`;
+    full suite 3537 passed on 88124d1b). One open evidence gap must be
+    closed live, not inferred: S35 story 6 captured the merge window's
+    `user_prompt` and the picker formatter reading `[working]`, but no
+    visible picker popup during that interval. The required Then is a
+    visible popup frame showing the merge row `[working]` during a held
+    turn (stub holds the response, not a 0.1 s answer), recorded in
+    `recording.cast`/`recording.mp4`. To also see `[idle]`, use a held
+    nonterminal follow-up turn while the merge window stays open, and its
+    next `idle_prompt`, then a separate terminal MERGED turn. A MERGED
+    reply can make pm close/archive the merge window before any
+    `idle_prompt`; the row disappearing then is correct finalization,
+    not a missing `[idle]`. Same scratch-only limits as the fourteenth
+    pass.
+  - Sixteenth pass (S40+), delta-only. Product changes since the
+    fifteenth pass: a711f411 and 7968f576. A TUI's restart-resume scan
+    skips QA snapshots of PRs outside its own project and caches their ids
+    until project.yaml changes (RQ36; impl.md §5 item 29).
+    S39 verified it live, pre-fix and post-fix, in a scratch HOME with two
+    projects (`/pm-captures/scenarios/39`, REPORT.md).
+    - Its other Thens held on ace966c7: second-PR first-run spinner,
+      queued-launch keys, mount sweep, and RQ33 supersede.
+    - Full suite 3538 passed on a711f411 (`suite/full-suite.log`).
+    - Delta to check: kill one project's TUI with a routed run mid-turn
+      while the other project's TUI keeps running. Then restart it, in
+      both directions: it must log `Resuming QA` and spin again, and the
+      other project's runtime files must stay byte-identical.
+    - Review loop 5e26 then changed the same scan (7968f576, plus the
+      test-only cbf9941c): another project's PR ids are cached until
+      project.yaml changes, so all of the above must be rerun on the
+      current head, not inferred from S39. New surface (RQ36): two clones
+      of one project (two sessions) where a PR added and QA'd in clone B,
+      whose TUI then dies mid-turn, reaches clone A by `git pull` or an
+      in-place `pm edit`. Clone A must ignore the orphan until then and
+      resume it on its next scan afterwards. Exactly one TUI may drive it
+      when clone B restarts at the same moment.
+    - Also not covered live by S39: a long downtime (dozens of 5 s scans)
+      of one TUI, both TUIs killed and restarted together, and a run whose
+      result was written while its TUI was down (`Recovered completed QA`
+      only in its own project's TUI).
+    - Harness facts:
+      - Plain `t` on a PR whose `qa-<pr>` window exists only focuses that
+        window, so a re-run needs `z t`.
+      - A wait for a run's end must match the TUI line `QA PASS for
+        <pr>`. The superseded run logs its own `QA complete … INPUT_REQUIRED`.
+      - A queued launch's refiner idles about 60 s before its worker
+        launches.
+    Same scratch-only limits as the fourteenth pass.
+  - Seventeenth pass (S42+), delta-only. S41's live evidence on
+    f22e6f4c/c8ab2f4c/ec227cf0 stands (`/pm-captures/scenarios/41`,
+    REPORT.md). Product changes since then, never run live: db1eb982
+    (scan survives every project.yaml load failure) and 59d15fea
+    (another clone's snapshot is kept when this clone's status is stale;
+    `qa_loop.launched_elsewhere`, `_live_other_session`). Review 5e15 i1
+    passed 59d15fea. Live checks needed, two clones of one project in
+    one scratch HOME and tmux server (S41 harness):
+    - The S39-between-clones loss is gone: B's run, with B's TUI dead
+      and A at a stale status for dozens of scans, is resumed by B's
+      restart. A pre-fix replay on 59d15fea^ must show the loss, so the
+      story discriminates.
+    - The same run is adopted by A after a pull while B's session is up
+      (driven in B's session) and while B's whole tmux session is gone
+      (driven in A's).
+    - A's own stale snapshot is still dropped.
+    - Each load failure kind leaves A's TUI and its own routed QA
+      running.
+    Open from code reading; the scenarios decide:
+    - (a) After B's session is gone, A drives the run in its own session.
+      That session has no `qa-<pr>` window, and `_run_qa_finalize_pane`
+      finds windows by name, so an all-PASS adopted run may end
+      `finalize=None` (RQ28 says it must finalize). The snapshot keeps
+      B's `session_tag`, so after A's TUI dies a restarted B session
+      would drive the run in `pm-B` while its relaunched panes are in
+      `pm-A`. Compare with one clone whose own session is killed and
+      restarted, to tell whether this is pre-existing.
+    - (b) The superseded-snapshot drop still decides on liveness only
+      (`live_workdirs`, `resume_owned_elsewhere`). If both clones QA the
+      same PR id, A's scan can drop B's older run as superseded once B's
+      TUI dies, so B's restart has nothing to resume. That is the same
+      loss through another path.
+    Harness: copy `/pm-captures/scenarios/41/scripts` to the new
+    capture dir and change S, the ports and the output paths. Render
+    recordings with the current `/workspace/pm/qa/artifacts/`
+    `cli-recording.md` / `tmux-screen-recording.md` `render_cast`
+    (`-vsync vfr -enc_time_base 1/100 -video_track_timescale 100`,
+    last frame held, atomic `.partial` rename). Do not use S41's
+    `render_cast.sh` or the production copies in `/scratch/qa-artifacts`.
+    Keep holds under Claude's ~360 s request timeout, and take release
+    keys from the router log. Use `git pull --no-edit` and check its
+    rc. Re-select the merge-base `active_pr` before committing in a
+    clone whose TUI moved it.
+  - Eighteenth pass (S45+), delta-only. S42–S44 ran live and each fixed
+    bugs: bb39b92e, af2278e5, e0f74e2b, deb23fea, a4a45ffa and 67ea18e8.
+    All their post-fix Thens held (REPORT.md in `/pm-captures/scenarios/
+    42`, `43`, `44`), including the S44 story 4 replay on the combined
+    head. The full suite passed 3573 tests on 67ea18e8. Product changes
+    since then were never run live: review c1d4 i1 96555732
+    (`PlanValidationError` subclasses `ProjectYamlParseError`) and i2
+    129cf5d2 (`ProjectYamlMissingError`). Review c1d4 i3 passed on
+    37c0c8f1 with 3577 tests (`/pm-captures/review-c1d4-i3`). The
+    resume scan, sync and `_load_state` sites behave as before, since
+    they already caught both. What changed is how the ~40 other
+    keep-state handlers behave, so RQ37 is the delta. Earlier evidence
+    stands, and S42–S44 are not rerun.
+    - S45 runs host mode, one clone, in a scratch TUI. Each of the three
+      failure kinds hits a run in planning, a run in execution, and
+      completions (plain `t` NEEDS_WORK, PASS and INPUT_REQUIRED; `zz t`
+      PASS below the count and NEEDS_WORK). QA keys are pressed during
+      the failure. The pre-existing control is conflict markers on
+      master behaviour.
+    - S46 runs two clones (S41–S44 harness). An adopted run and B's own
+      run finish while A's file is unloadable, and a TUI restart happens
+      during the failure (invalid plans and conflict markers at a fresh
+      start; S44 covered only the missing file).
+    Harness: copy `/pm-captures/scenarios/44/scripts` and change S, the
+    ports and the paths. Render with `pm/qa/artifacts` from this branch
+    (`/workspace/pm/qa/artifacts`), never `/scratch/qa-artifacts`.
+    Planners need to be slow enough for the failure to land during
+    planning: a fake planner with a delay, or real Claude on the main
+    stub with a hold. Same scratch-only limits as the fourteenth pass.
+  - Nineteenth pass (S47+), delta-only. S45/S46 ran live, fixed the
+    RQ37 bugs and replayed every story post-fix (REPORT.md in
+    `/pm-captures/scenarios/45`, `46`; full suite 3622 passed). Their
+    evidence stands and is not rerun. Product delta since then:
+    ba5dd6e7 (review loop 7026 i1; i2/i3 PASS, suite 3624): one QA note
+    per run when a TUI restart re-processes a completion whose follow-up
+    was pending, and the load-error line cleared by its arrival number.
+    Neither has run live. Live checks needed, host mode, scratch TUI,
+    S45/S46 harness:
+    - The gap itself: transition and note written, follow-up pending,
+      snapshot kept, TUI killed -9 and restarted. Only the sign-off
+      hand-off waits on the project lock (`start_signoff`'s
+      `locked_update`), so a helper that takes the lock the instant the
+      note lands, and leaves the file unloadable before releasing it,
+      reaches the gap reliably. `start_qa` / review start / tree reload
+      only `store.load`, so the gap there is a sub-millisecond race:
+      attempt it with a bounded budget, report attempts, and count it
+      only if the pm log proves the follow-up failed after the note.
+      A pre-fix control on 5de77fe7 (ba5dd6e7^) must show the second
+      note, so the story discriminates.
+    - Distinct runs keep their notes (consecutive `zz t` PASS passes,
+      a `z t` rerun, a run resumed mid-execution, a result recorded
+      while the TUI was down), on two PRs at once.
+    - Two clones: an adopted run in that gap when the adopting TUI dies
+      and the launching clone restarts first. The kept snapshot names
+      the launching session, whose project.yaml lacks the adopter's
+      note, so the run may be recorded in both clones. The scenario
+      decides.
+    - RQ38 (`pm edit` held open) against a pre-existing control.
+    - The load-error line: a TUI restarted on an unloadable file, its
+      reason changing, a newer message after the 30 s sticky window,
+      then the file loading, against a pre-fix control.
+    Harness: copy `/pm-captures/scenarios/45/scripts` (one clone) or
+    `/46/scripts` (two clones) and change S, ports and paths. Render
+    with this branch's `/workspace/pm/qa/artifacts` `render_cast` (VFR,
+    `-nostdin`), stop every recorder and wait until its cast stops
+    growing before rendering, and never use `/scratch/qa-artifacts`.
+    Same scratch-only limits as the fourteenth pass.
+  - Twentieth pass (S50+), delta-only. S47–S49 ran live, fixed
+    b740e188, 13eb925b, 716d6ce1, 006d7b4d and 3a3dcc3e, and replayed
+    their stories post-fix, S49 also on the combined head (REPORT.md in
+    `/pm-captures/scenarios/47`, `48`, `49`). That evidence stands and is
+    not rerun. Review loop 679d ended PASS in i5 on 300aa1a3 with 3647
+    tests (`/pm-captures/review-679d-i1` … `-i5`, each with README.md,
+    full-suite.log and mutation-checks.log). i2–i5 changed only tests,
+    spec and notes. The only product delta never run live is i1 64b41a91
+    (RQ38 *One-shot hand-offs*):
+    - (a) the skip_qa review PASS hand-off waits up to 2 s for the lock
+      again;
+    - (b) the retried sign-off callers stay non-blocking;
+    - (c) the "waits" set is cleared on every outcome;
+    - (d) the "recorded — follow-up waiting" completion line.
+    Live checks needed:
+    - S50, host, one clone, scratch TUI, S47/S48 harness:
+      - a skip_qa auto-start review PASS whose hand-off meets a brief
+        holder (under 2 s): it goes through, with no "waits" line. Then
+        a hold past 2 s: one `Error:`, no "waits" line, the TUI stalls
+        once for at most ~2 s, and the loss is pr-7cf1fe4 (observation);
+      - a routed QA PASS hand-off with `pm edit` open, and again after a
+        sign-off REQA round of the same PR: each hand-off says it waits
+        exactly once, keys stay fast and nothing stalls;
+      - a hand-off after a TUI restart (recovery or the scheduler pass)
+        with `pm edit` open is handed off once, with one note;
+      - a pre-fix control on ca8fa055 (64b41a91^), where the brief-holder
+        skip_qa hand-off says "waits" and is lost, so the story
+        discriminates.
+    - S51, two clones, S49 harness: the recorded-result line on the
+      cross-clone gap (adopted run, note written, sign-off hand-off
+      fails on the lock and leaves conflict markers) and on a
+      one-clone run, against a completion that meets the markers before
+      its note ("… to load to record it"). One note per run across both
+      clones. The pre-fix control on ca8fa055 shows the old wording.
+    Harness: copy `/pm-captures/scenarios/47/scripts` or
+    `/48/scripts` (one clone) or `/49/scripts` (two clones) and change
+    S, ports and paths. A lock holder is any second pm process or a
+    plain `flock` on `pm/project.yaml.lock`. Measure how long it holds
+    the lock and the TUI key latency (S48 `keyprobe.py`, `wchanmon.py`).
+    Render with this branch's `/workspace/pm/qa/artifacts` `render_cast`
+    (VFR, `ffmpeg -nostdin`, atomic `.partial` → `recording.mp4`), stop
+    every recorder and wait until its cast stops growing first, and
+    never use `/scratch/qa-artifacts`. Known separate limitations stay
+    observations: pr-7cf1fe4 (skip_qa hand-off lost past 2 s or on an
+    unloadable file), pr-0f85376 (an interrupted finalizer is not
+    re-run), pr-235f465, pr-43b14d2, pr-1139060. Same scratch-only
+    limits as the fourteenth pass.
+    Done: S50 (fixes 4fb42e06, e60c9927, f19831c2) and S51 (PASS on
+    7887d772, no code change) ran live, with REPORT.md in
+    `/pm-captures/scenarios/50` and `51`.
+  - Twenty-first pass (S52+), delta-only, for the 2026-10-24 all-role
+    scope update (RQ39–RQ41). None of these product commits has run in
+    live QA:
+    - c1c08d83: impl/review/sign-off containers on the route.
+    - 9c42bb6e: tests only.
+    - Review loop 350f i1–i3: c3c39382 flush re-arm and the one-shot
+      parse `Error:` held; fbcb08b3 "Auto-start: starting" waits for a
+      queued flush; 25015d25 test only.
+    - Review loop e0e8 i1–i14: 3748691e, c08c7627, 0c577dd2, 021f2810,
+      97a77383, 2d58dea4, 57f04ee6, d76cc9d5, d361858c, 5fbbedad,
+      620327fa, 7a437b79, 52ec17f3, 05bfd6c5.
+    - User commits f1865615 and 32df2893.
+    Review e0e8 i15 passed on 104bf8fe with no code change: full suite
+    3715 passed, plus focused tests and 4 mutations
+    (`/pm-captures/review-e0e8-i15`). The only live evidence so far is
+    review e0e8 i1, which ran in a routed review container
+    (`/pm-captures/review-e0e8-i1/live-review-container-route.txt`).
+    Earlier QA evidence stands and S1–S51 are not rerun.
+    - S52: container mode, two PRs, real Claude for routed roles. One PR
+      is routed for all roles, one has a sign-off exception, and an
+      unrouted PR runs alongside both. The impl, review, QA and sign-off
+      lifecycles share one bridge, with a bridge kill in the middle.
+      Includes the review and sign-off relaunch and the unmounted impl
+      container refusal.
+    - S53: route failures for workflow roles in container mode (TUI keys,
+      CLI, auto-start, review loop, sign-off driver), plus host-mode
+      ungated roles and an unconfigured provider.
+    - S54: model-setting robustness and per-role resolution, checked
+      through the CLI and through which endpoint each launched role
+      actually reaches, including s0 with a legacy plain `qa_scenario`.
+    The stub router needs canned answers for review prompts (a `PASS`
+    verdict line), sign-off prompts (a SIGNOFF verdict) and impl prompts
+    (`ok`). (Historical: until 2026-10-27 `wrap_claude_cmd` checked the
+    route even for a fake impl/review/sign-off command, so a fake could
+    drive the failure stories. Since RQ52 it checks only the setup.) Harness: copy `/pm-captures/scenarios/23/scripts` or
+    `/36/scripts` (container, two PRs) or `/50/scripts` (host, scratch
+    TUI) and change S, the ports and the paths. Render with this branch's
+    `/workspace/pm/qa/artifacts` `render_cast`, and never use
+    `/scratch/qa-artifacts`. Never copy real credentials. Known items stay
+    observations: pr-7cf1fe4, pr-748e708 (an impl container and QA
+    containers in separate pm processes share one push proxy key),
+    pr-1139060. Same scratch-only limits as the fourteenth pass.
+    Done: S53 (NEEDS_WORK, fixes 66404830) and S54 (PASS) ran live
+    (REPORT.md in `/pm-captures/scenarios/53`, `54`). S52 never ran:
+    in run a871abafdd8bbc20 its worker window died within seconds of
+    every launch (10 relaunches, INPUT_REQUIRED by infrastructure; only
+    the refiner output and `/pm-captures/scenarios/52/{scenario.json,
+    prompt.md,verdict.md}` exist). Keep that directory as the record of
+    the failed attempt. S53/S54 do not cover S52's Thens.
+  - Twenty-second pass (S55+, native run a31ac0ae57566deb):
+    - S55 carries S52 forward unchanged in intent (RQ39 three-PR
+      concurrent lifecycle, bridge kill, review/sign-off relaunch,
+      unmounted impl container refusal and replacement). It is adapted to
+      the current head and writes to `/pm-captures/scenarios/55`. Harness:
+      `/pm-captures/scenarios/53/scripts` (the S52 network pattern
+      already applied: router stub on 127.0.0.1, main stub on 10.0.2.100,
+      `cidr=10.1.2.0/24`). Build the base image without the Chromium
+      smoke step if `pm container build-base` fails there (S53 setup).
+      Since 66404830/14d72926, `pm model show` Routes has one line per
+      route a PR override selects ("<pr> (all types) route=…", "<pr>
+      (signoff) route=…"); "(all types)" with a project session_effort
+      only since 2a6b14d4 (S55).
+    - S56 is the delta for review loop 0f64 i1–i6 (14d72926, ac202207,
+      1dc3e618, 6bd59adf, 690a9fe1, 3a0c32e6), none run live: PR Routes
+      only for the types an override decides, never the watcher; a
+      non-string or empty PR `model`; PR Routes deferring to `PM_MODEL`;
+      the TUI command bar and review-loop ERROR text keeping brackets.
+      Host mode, S54 harness (`/pm-captures/scenarios/54/scripts`).
+      Done (run a31ac0ae57566deb): S55 NEEDS_WORK, the first live run of
+      S52's Thens (every story Then held; the preflight Routes Then
+      failed, fixed in 2a6b14d4 and rechecked live post-fix). S56 PASS on
+      3a0c32e6, before 2a6b14d4, so its W/X two-line Routes Thens record
+      the superseded grouping (REPORT.md in `/pm-captures/scenarios/55`,
+      `56`).
+  - Twenty-third pass (S57+), delta-only, QA23 planner 2026-10-25,
+    recovered native planner after an E2BIG launch failure (pr-ace66e5).
+    The only product change since run a31ac0ae57566deb is 2a6b14d4 (PR
+    Routes grouped by route, differing efforts named on the line). S55
+    rechecked it live only for "(all types)" lines in container mode
+    (`story2/model-show-after-edit.txt`). Review loop 6915 i1 (test/spec)
+    and i2 (PASS, no change, 3739 tests on 86b4e94d) added only tests and
+    spec. Not yet live on 2a6b14d4: S56's W/X shapes (every type but one,
+    mixed efforts), more than two efforts on one route, two routes on
+    one PR, an unconfigured route next to a configured one, `PM_EFFORT`
+    and `PM_MODEL`, and whether each named effort is what the launch
+    really uses. All earlier evidence stands. S55 is the RQ39 record and
+    S52 stays the record of its own failed attempt.
+    Master is 26 commits ahead (review 6915 i2 trial merge). The only
+    code there is `pm_core/cli/meta.py` (pr-7f90572), with no routing
+    surface, so no merge smoke is planned.
+    - S57: host mode, S56 harness (`/pm-captures/scenarios/56/scripts`,
+      with its review class in stub.py). The S56 shapes are replayed with
+      three project efforts in play. A second router provider runs on its
+      own stub port so its traffic can be told apart. Launches of two PRs
+      run at the same time, `pm model show` runs while they do, and a `pm
+      edit` changes an override while sessions run.
+    - S58: container mode, S55 harness (`/pm-captures/scenarios/55/
+      scripts`, S52 network pattern, base image without the Chromium smoke
+      step if needed). It decides the `via=` open point in RQ41: compare
+      `pm model show` with the QA launch lines and with where each role
+      really runs.
+    Same scratch-only limits as the fourteenth pass. Render with this
+    branch's `/workspace/pm/qa/artifacts` `render_cast`, never
+    `/scratch/qa-artifacts`. Never copy real credentials.
+    Done: S57 PASS (host), S58 NEEDS_WORK (fix 0db93125, via= by path).
+  - Twenty-fourth pass (S59+), QA24 planner 2026-10-25, recovered native
+    planner after an E2BIG launch failure. The product delta is ba4e830d,
+    the subagent FORCE pin (impl.md R8, RQ42). Review loop 3741 i1 passed
+    on 3d4ebe31: 6 mutations caught, and the full suite on a `git archive`
+    snapshot had 3764 passed and 1 failure (an artifact: the snapshot is
+    not a git repo). In the checkout, test_dedup + test_hook_events
+    passed 59, so the reported test_hook_events failure did not
+    reproduce. 0db93125 also has not run live in container mode. None of
+    this has run in live QA.
+    - S59: host-mode pm inside the scenario container. A scratch PR is
+      routed for every role through a recording relay in front of the
+      real in-container `claude-work` route (the worker's own forwarder
+      to the host bridge and router).
+      - Real-Claude impl, review, sign-off, QA refiner/worker and the
+        live probe start the default agent, Explore, Plan,
+        `claude-code-guide`, a project `model: fable` agent, a user
+        `model: haiku` agent and an explicit-Fable request, also several
+        at once and after `--resume`.
+      - A scripted-parent relay mode makes the explicit `model: "fable"`
+        Agent call deterministic, while the child goes to the real work
+        account.
+      - A pre-fix control on ccf0959b must show the escape. It is
+        refused at the relay and never forwarded.
+      - Also: a launcher stand-in that behaves like `claude-mixed`, the
+        worker's own launch env and Agent schema, and the S57
+        follow-up/idle_prompt open point.
+    - S60: container mode inside the scenario container (S55/S58 harness,
+      nested slirp4netns). Two PRs at once: A routed for every role
+      through the relay to the real route, C on a plain model on a main
+      stub.
+      - Children of impl/review/sign-off/QA containers are checked
+        through a bridge kill and a review `--fresh` relaunch.
+      - `pm model show` via= is checked live (0db93125), and a C review
+        container must have no mount (S58 gap).
+    - S61: plain-model, no-model and inherited-pin sessions, the
+      `alias_models` override, and main-loop model switches outside FORCE
+      (RQ42 open points a–c), on a main stub plus the relay.
+    S59/S60 send real requests to the work account, so keep prompts
+    trivial. Requests without the `work/` prefix are refused at the relay,
+    never forwarded. Never read, copy or log a credential or header value.
+    Record only booleans and a short hash of a response's organization
+    header. Earlier evidence stands. S57/S58 do not cover RQ42.
+    Done: S59 INPUT_REQUIRED (RQ42 held on every path; fix ff65f489;
+    classifier decision on pr-1071c5a), S60 NEEDS_WORK (RQ42 held; spec
+    0e13c5f8 only), S61 NEEDS_WORK (fixes 3ee69236, 79b6ddd7).
+  - Twenty-fifth pass (S62+), delta-only, for review loop c189 i6
+    (impl.md R9, RQ44: launch environment built from pm's selection; user
+    decision 2026-10-26). S62: start the TUI (`pm session`) from a shell
+    holding a work-routed launch's exported env. Then start a no-model PR,
+    a plain-model PR and a routed PR, each with impl, review and QA. Do
+    this in host mode and in container mode, with a main stub on the
+    user's own `ANTHROPIC_BASE_URL` and the work route behind a
+    work/-only relay. Record each pane's environ, using variable names
+    and models only. Record the requested models of the main loop,
+    children, Fable/haiku switches, background calls and classifier
+    calls. Include one `--resume`. A pre-fix control on ee82dc0c shows
+    the leak. A pm process inside a container has no providers.yaml, so
+    there only the `PM_ROUTE_BASE_URL` marker identifies an inherited
+    route URL (review loop c189 i7 saw it in its own routed review
+    container: a no-model build dropped every routing variable). Include
+    one nested launch from inside a container session.
+    Recovery planner (2026-10-26, run 7bedb3d9d6eac0ee) split S62 by mode
+    and added the c189 i8–i11 changes (RQ45), which landed after this
+    pass was written:
+    - S62: host mode (TUI and plain-terminal CLI, `--resume`, `claude -p`
+      helpers, ee82dc0c control), RQ44 + RQ43 classifier in interactive
+      host panes.
+    - S63: container mode (nested slirp4netns), the same three PRs, the
+      container-by-name `ANTHROPIC_BASE_URL`/`ANTHROPIC_SMALL_FAST_MODEL`
+      removal, the marker-only case and one nested launch from inside a
+      container session; RQ43 in container panes.
+      S63 harness facts (2026-10-26, run on 09a23249):
+      - Claude sends an `http://` `ANTHROPIC_BASE_URL` through
+        `HTTPS_PROXY` as well. A nested launch whose base URL is the main
+        stub therefore needs the stub host in `NO_PROXY`
+        (`127.0.0.1,localhost,<stub host>`). Otherwise its requests reach
+        the refusing proxy as plain POSTs and the stub never sees them.
+      - A relay that forwards a routed session's turns to the real route
+        unchanged sees no classifier request from it: model-chosen tool
+        calls are not classified client-side (as in S59). Classifier
+        traffic from a routed container pane needs a relay-scripted Agent
+        round (the RQ43 method).
+      - The `/model` picker's Enter sets the default in the shared
+        `~/.claude/settings.json`, which moves later no-model sessions.
+        Use `s` (this session only). A "Switch model?" confirm then
+        follows.
+      - A second `pm pr start` of the same PR in a plain terminal resumes
+        it (`--resume`) without a new turn. Type a prompt to make a
+        request.
+    - S64: RQ45 on stubs only (no real work account): hand-edited
+      providers.yaml across launch surfaces, QA gate wait and recovery,
+      the provider CLI, a non-Claude router (no classifier pin), and
+      `pm provider add` racing live launches.
+    QA S64 (2026-10-26, captures /pm-captures/scenarios/64): for a
+    non-Claude router with no classifier pin, Claude 2.1.310 sent its
+    auto-mode classifier request on the router's own model
+    (`ds/deepseek-v4`, the value pm pins for `ANTHROPIC_DEFAULT_SONNET_MODEL`
+    on routers), not on its unprefixed `claude-sonnet-5…` default as S64
+    predicted. Which model Claude picks is Claude's choice; the RQ43
+    requirement for such a router is only that pm sets no
+    `CLAUDE_CODE_AUTO_MODE_MODEL` (an inherited one is dropped) and the
+    request is never `ds/claude-sonnet-5` or `work/claude-sonnet-5`. A
+    `touch` in the project was allowed without a classifier call; a curl
+    POST was classified. Also S64: a QA run stopped by a provider setup
+    error (`QA stopped: …`) logged "QA background thread crashed" with a
+    traceback in the pm log; it is one warning line now (bad02547).
+  - Twenty-sixth pass (S65+), delta-only, for review loop a5a3 i1
+    (3e9f6b19, RQ46): the auto-sequence QA launch checks the planner, s0,
+    verifier and finalizer providers before spawning its detached driver.
+    Stubs only (main stub + router stub), host mode, scratch TUI where a
+    TUI is needed. Pre-fix control on 9d046874 (bad02547 included, check
+    absent: the driver dies unseen and each tick relaunches it).
+    - S65: each launch site (review PASS, qa with no status, sign-off
+      `qa` hop) x each gate-less role and each failure form, recovery on
+      the next tick, routed refiner/worker still gated, pre-fix control.
+    - S66: open points (a) and (b), a mid-run provider failure in the
+      driver, and the TUI `t` path replay of bad02547.
+    - S67: concurrent use: two PRs ticked together (one broken, one not),
+      two ticks of one PR at once after the fix (open point c), and
+      `pm provider add/default` rewriting providers.yaml while ticks and
+      a TUI QA run read it.
+    QA S67 (2026-10-26, captures /pm-captures/scenarios/67): open point
+    (c) is pre-existing. Two ticks of one PR started in the same second
+    each spawned a `qa-run-bg` driver in 4/4 rounds on 3e9f6b19 and 4/4
+    on the 9d046874 control, at both launch sites (review PASS -> qa, and
+    qa with no status). Both loops took the same planner pane, then ran
+    two sets of scenario windows, two finalizers and two workdirs. This is
+    the check-then-spawn race (pr-7a83b6d), not the provider check. Three
+    facts the S67 Thens assumed otherwise, all the same on the control:
+    a run driven by auto-sequence records no QA PR note, because only the
+    TUI completion path writes one (pr-ad4af06). Auto-sequence moves to
+    `sign_off` as soon as `qa_status.json` has `overall`, which
+    `run_qa_sync` publishes before the blocking finalizer, so the sign-off
+    window opens while the finalizer still runs (pr-f1d825b). A
+    `type: claude` provider whose `api_key` is a `${VAR}` reference is
+    launched with the resolved value inline: it is in the logged launch
+    command and in the tmux pane command (pr-84ebabf). Held: the broken PR
+    got one `Error:` line, rc 1, and no driver, window or workdir on every
+    tick, and the other PR was unaffected. Rewrites of providers.yaml
+    racing ticks and a TUI run gave no refusal in 3 launch ticks and no
+    `QA stopped`.
+  - Twenty-seventh pass (S68+), delta-only, for the fixes made during and
+    after QA run 61ece449fce8cd65: 72614e5d (S65: a sign-off `qa` hop
+    refused by the provider check relaunches over the judged run's qa
+    window on the first tick after the fix), e123fb27 (S66: the review-PASS
+    tick checks before moving the PR to `qa`; the verifier is not checked
+    with `qa-verify-pass` off; a verifier or finalizer provider that breaks
+    mid-run stops the run before any verdict or `overall`; the TUI keeps
+    the `QA stopped` line and records no `QA ERROR` note) and review d5f9
+    i1 8edbe269 (the hop tick launches only when it wins
+    `claim_return_launch`; never run live). Stubs only, host mode, S65–S67
+    harness. Pre-fix control for 8edbe269: e123fb27.
+    - S68: sign-off `qa` hop with a broken gate-less provider, recovery,
+      the hop tick racing a qa tick and two qa ticks racing in the
+      `awaiting: qa` state (one driver per round), a driver killed before
+      it clears `awaiting` (the claim expires after 180 s, then one
+      relaunch).
+    - S69: auto-sequence review-PASS site over stale earlier results,
+      `qa-verify-pass` off, and verifier/finalizer providers broken
+      mid-run in the detached driver (no `sign_off` advance; the later
+      "running: qa" ticks are pr-242ebdd).
+    - S70: TUI `t` for two PRs at once, one broken mid-run by a PR-level
+      override: the `QA stopped` line stays, no note, the other PR is
+      unaffected, `qa-verify-pass` switched on mid-run keeps the run's
+      own setting, and the restart after the fix records one note.
+  - Twenty-eighth pass (S71+), delta-only, for the two product fixes made
+    during QA run d212e870835ab7b9 and reviewed in e932 i1, each so far
+    checked live only by the scenario that wrote it: 109bca54 (S68: the
+    qa launch claim outlives `awaiting`, and a qa tick with no window
+    treats a fresh qa claim like the window, so a tick while the re-run
+    driver replaces the judged qa window starts no second driver) and
+    75708c0b (S69: the resume snapshot is written before the finalizer
+    provider check, so a run stopped there keeps every verification and
+    a TUI adopting it does not verify again). Stubs only, host mode,
+    S65–S69 harness. Pre-fix controls: 4648d501 for 109bca54 (75708c0b
+    included), 4d79012a for 75708c0b. Master adds only
+    pm_core/cli/meta.py since the branch point, so no merge smoke.
+    - S71: the sign-off `qa` hop gap race at swept tick offsets, the
+      claim's 180 s expiry when the re-run driver dies after clearing
+      `awaiting` (one relaunch, then never "running: qa" from a stale
+      claim), a second sign-off REQA soon after the first re-run (a new
+      return record, one driver), the hop/claim race of 8edbe269 forced
+      with a brief project-lock holder, and the TUI watching all of it.
+      Open point from code reading: TUI auto-start's QA start for a PR
+      awaiting `qa` takes no claim, so a TUI auto-start target also
+      ticked by `pm pr auto-sequence` may get a TUI loop and a driver at
+      once; S71 decides whether that happens and whether it is
+      pre-existing (control).
+    - S72: a finalizer provider broken after the last verification, on
+      the detached driver (TUI adoption) and on TUI `t` (kill -9 + `pm
+      session` restart), with verification on and off: one `QA stopped`
+      per process, no re-verify, no request after the stop, no verdict,
+      overall, note or `sign_off`; after the fix one normal run.
+  - Twenty-ninth pass (S74+), recovered planner 2026-10-26, for bd62bc0d
+    (S71: `claim_return_launch` reads the clock inside the locked update,
+    so a claimant that waited on the project.yaml lock sees a claim
+    written while it waited) and for master moving under the branch.
+    bd62bc0d was checked live only by S71, which wrote it, and only for
+    the `qa` hop. The same function guards the `impl` and `review`
+    returns: the TUI catch-up (restart and the claim-expiry re-check),
+    and the `awaiting` tick of `pm pr auto-sequence`. Two `--fresh`
+    launchers there kill each other's session. Pre-fix control:
+    4efb40e0 with only bd62bc0d reverted, or 251763f8.
+    - S74: the `qa` hop under real lock contention: other pm commands
+      writing project.yaml (notes, edits, a second PR's ticks) and an
+      editor-style holder of 0.5, 1.5 and 1.9 s, both tick orders, and a
+      holder over the 2 s lock timeout. Expected: one driver per round.
+      A claim is stamped no earlier than the winner got the lock. Over
+      the timeout: one warning per tick, no launch, then one driver on
+      the next tick. Open point (decided as an observation): a claim
+      dated in the future (clock stepped back a few seconds) counts as
+      stale (`0 <= age`), so a second claimant launches. libfaketime,
+      if it is available.
+    - S75: the `review` and `impl` returns. The hop driver dies before
+      launching, the 180 s claim expires, and then the TUI re-check
+      (185 s) and an `awaiting` tick race under a lock holder. A TUI
+      restart right after the hop also races a tick. Expected: one fresh
+      review iteration and one impl session, and no session killed by a
+      second `--fresh` launch.
+    - S76: merge smoke. origin/master (211a6128) adds #250 (an oversized
+      prompt goes through a file-backed bootstrap: `pm/prompts/`, then
+      `; rm -f` after claude exits; bridge `--prompt-file`) and #251. A
+      merge into this branch conflicts in one hunk of
+      `launch_claude_print`. Keep the branch's
+      `_, effective_model, run_env = _resolve_provider(provider, model)`
+      and add master's `cleanup_path: str | None = None`. The rest
+      merges cleanly (project.yaml: keep ours). With that resolution the
+      planner's full suite gave 4018 passed and 1 failed. The failure,
+      test_dedup `test_returns_none_when_missing`, also fails on HEAD in
+      the planner's environment. Run it with TMUX/PM_* unset: inherited
+      pane variables also fail
+      `test_reqa_hop_refused_then_fixed_launches_over_judged_window` on
+      HEAD. Then run routed and
+      unrouted launches with prompts over 120 KB, host and container:
+      the bootstrap path is valid where claude runs, the routed
+      env/marker/pin is unchanged, the file is gone after exit, a route
+      outage relaunch delivers the prompt again, concurrent launches in
+      one workdir do not delete each other's files, and no secret is in
+      any prompt file. Harness: a stub that sees only the bootstrap line
+      must answer with a Read tool call for that path and choose its
+      canned reply from the tool result.
+  - Thirtieth pass (S77+), recovered planner, no spec commit at the time
+    (note-e7b62e8). S77 found and fixed cd125898: a waiting
+    `clear_return_awaiting` caller retries past the 2 s lock timeout for
+    up to RETURN_CLEAR_WAIT_SECONDS (180 s), and an idle SIGNOFF_IMPL
+    rework tick reviews `--fresh`. S78 found and fixed 50b5bd91: a
+    relaunched worker whose scenario container is gone gets the container
+    recreated, or INPUT_REQUIRED at once with the reason. S79 found and
+    fixed 2ad57eff, on a scratch master merge that did not have 50b5bd91:
+    the TUI adopts a review return that a tick launched, and impl idle is
+    judged only from the pane's own session.
+  - Thirty-first pass (S80+), delta-only, planner 2026-10-26. Product
+    changes since run d672c8b886d7dec3: the master merge is now committed
+    (62ba5b0f, origin/master 211a6128, unchanged since). Review 6bbd i1
+    0f4ecbf2 has never run live. It makes the 180 s wait opt-in
+    (`session_opened=True`): the CLI `pm pr review` / `pm pr start`
+    return launches and the detached `qa-run-bg` driver opt in. The TUI's
+    `start_qa` gives up after 2 s again, as on 07520c1b. It runs on the
+    TUI main thread, from the `signoff_ui.step` REQA hop and from the
+    auto_start REQA relaunch. Pre-fix control: 62ba5b0f, which freezes
+    the TUI for up to 182 s.
+    - S80: the TUI `qa` hop with a project.yaml holder of 1.5, 3 and
+      10 s at `start_qa`. Expected: the TUI keeps painting and accepting
+      keys, with one `clear sign-off return` warning past 2 s, and the
+      re-run starts. The control freezes until the holder is released.
+      Open points from code reading (S80 decides each one, against the
+      control). After the give-up, `awaiting: qa` stays set and the TUI
+      took no claim. (a) `_auto_start_qa_loops` relaunches QA over a
+      held verdict while `return_awaiting(pr) == "qa"`. So a re-run that
+      ends INPUT_REQUIRED would be re-run once more, without a human,
+      after `_qa_loops` drops it. (b) A re-run that ends PASS is handed
+      on by the completion `_trigger_signoff`, which ignores `awaiting`.
+      If the completion is missed, for example by a TUI restart before
+      the hand-off, `advance_all` refuses the PASS while `awaiting` is
+      `qa`, and auto_start re-runs QA instead. (c) Any `pm pr
+      auto-sequence` tick while the re-run is in flight launches a
+      driver over it. This is pr-bddda0f and counts as an observation.
+    - S81: the opted-in callers still wait, with a concurrent workload:
+      tick- and TUI-launched review and impl returns and a tick REQA
+      `qa-run-bg`, for two PRs at once, under 3 s and 10 s holders and
+      other pm commands writing project.yaml. Expected: one session per
+      return, `awaiting` cleared after the release, no relaunch after
+      the claim expires, and the TUI responsive throughout. The TUI
+      review loop runs `pm pr review` with a 120 s subprocess timeout,
+      which is shorter than the 180 s wait. A single holder over 120 s
+      is recorded as an observation.
+    - S82: smoke of the committed merge in container mode, with real
+      claude against the router and main stubs. Oversized file-backed
+      prompts on routed and unrouted roles. A worker whose container is
+      removed mid-run is recreated (50b5bd91) and gets its file-backed
+      prompt again. A routed review return is launched by a tick and
+      adopted by the TUI (2ad57eff). `pm container cleanup` under podman
+      3. The full suite runs on HEAD with TMUX/PM_* unset.
+    Done: S80 (NEEDS_WORK, fix 63cabd07), S81 (NEEDS_WORK, fix
+    f83b3963, filed pr-7f74c77), S82 (NEEDS_WORK, fix 19c68f43).
+  - Thirty-second pass (S83+), delta-only, planner 2026-10-26. Product
+    changes since run b8a870d656209fa9 (review 4ffd i1 PASS, no change;
+    origin/master still 211a6128, merged) have each run live only in the
+    scenario that wrote them:
+    63cabd07 (a TUI `start_qa` that gives up on the lock keeps a pending
+    clear keyed by the return's `ts`, retried with NO_WAIT on each QA
+    poll tick; auto_start and `advance_all` confirm `awaiting: qa` on
+    disk), f83b3963 (the review loop's `pm pr review` subprocess timeout
+    is `_LAUNCH_TIMEOUT` + lock timeout + RETURN_CLEAR_WAIT_SECONDS, 302 s;
+    `advance_all` logs a StoreLockTimeout as one warning) and 19c68f43 (a
+    resumed review loop with no window waits while the iteration's
+    transcript symlink exists and its session has not written, up to
+    120 s, or 15 s when no symlink exists yet). Pre-fix controls:
+    5b78ba40 (before all three), or HEAD with only the commit under test
+    reverted.
+    - S83: the pending clear's lifetime. It lives only on the run's
+      in-memory QALoopState, which the poll tick drops once the run's
+      completion is processed. Open points from code reading (S83 decides
+      each one against the control): (a) a holder that outlasts the
+      re-run (fake scenarios finish in seconds, the holder runs 30–90 s).
+      The completion's own writes need the lock, so the run should stay
+      registered until the release, and the clear should take before the
+      completion on that tick. Expected: no second re-run after
+      INPUT_REQUIRED, and one hand-off after PASS. (b) The `ts` guard.
+      During the hold the user edits the return in `pm edit` (a new `ts`,
+      or `awaiting: review`). The retry must leave the new return alone.
+      (c) A TUI restart before the release. Review 4ffd bounds this at one
+      redundant re-run, whose start clears the return. Check that bound:
+      one extra run, then it holds. (d) `z t` / `zz t` over a re-run that
+      still has a pending clear. (e) Two PRs that each have a pending
+      clear, plus `pm pr auto-sequence` ticks during the window
+      (pr-bddda0f is an observation). Host, all fake-claude.
+    - S84: 19c68f43 in container mode, with real claude against the
+      router and main stubs. The S82 repro after the fix: a TUI restart
+      while a routed sign-off review return is still creating its
+      container. Variants: (a) an ordinary review-loop iteration rather
+      than a return; (b) the restart lands before the launch has written
+      its symlink, which takes the 15 s grace; (c) the pre-restart launch
+      failed, for example a broken provider, after or before it wrote the
+      symlink. The resumed loop must report the route error and relaunch
+      or stop within the stated bound, never hang without a message;
+      (d) the user closed the window before claude wrote anything;
+      (e) two PRs restored at once, one waiting while the other's loop
+      proceeds; (f) a tick launches a return for the same PR during the
+      wait. Expected: one review window and one routed session per
+      iteration, and the router sees only `work/` from routed roles.
+    - S85: f83b3963 bounds. A TUI review loop runs a sign-off review
+      return under holders of 150 s, 200 s (past the child's 182 s clear
+      wait, but under the 302 s timeout) and 320 s (past the timeout).
+      Within the bound: one window, `awaiting` cleared after the release,
+      no relaunch after the claim expires. Past either bound: whatever
+      the user sees is recorded as an observation. It must still never
+      open a second review over a live pane without a message. Also:
+      a sign-off verdict write that lands inside another process's hold
+      logs one `advance … deferred` warning with no traceback and is
+      retried. Host, fake-claude.
+    Done (run 593fc48613cc1d94): S83 (NEEDS_WORK, fix d6e599bf), S84
+    (NEEDS_WORK, fix bbaafe6d, filed pr-9aa36f5, pr-5887f3b), S85 (PASS,
+    open point x1 below).
+  - Thirty-third pass (S86+), delta-only, planner 2026-10-26. Product
+    changes since run 593fc48613cc1d94 have run live only in the scenario
+    that wrote them, or not at all: bbaafe6d (a review-loop launch whose
+    `pm pr review` child exits non-zero, e.g. route down, is an ERROR
+    verdict logged as one ERROR line, no traceback), d6e599bf ((1) the
+    `zz t` loop start clears a REQA return with NO_WAIT and leaves the
+    clear pending on the new run when busy; (2) a finished review loop in
+    the TUI gives way to a REVIEW return waiting on disk) and review a50f
+    i1 7bd12f64 (it gives way only once the poll tick announced the loop
+    and no review -> QA hand-off is pending). 7bd12f64 has never run live.
+    Consequence from review a50f: a TUI review return whose launch fails
+    is now retried once per 180 s claim expiry (before, the finished ERROR
+    loop blocked it). Controls: 0eeb8719 (before all three), d6e599bf
+    (before 7bd12f64), or HEAD with one commit reverted.
+    - S86: a REVIEW return written behind the TUI (`pm edit`, another
+      clone's sign-off) behind a finished, announced loop starts one fresh
+      review; a running loop is never replaced; an ordinary finished loop
+      without a return is not relaunched. S85 x1 is the natural
+      hand-off-pending case: hold 250 s, review delay 200 s, so the PASS
+      lands after the child gave up its clear but inside the hold. HEAD
+      must not start a second review while the hand-off moves the PR to
+      qa (d6e599bf control should). Where `awaiting: review` and the
+      expired claim end up is an observation. Concurrent `pm pr
+      auto-sequence` ticks during each return. Host, fake-claude.
+    - S87: `zz t` over a REQA re-run, inside and outside a hold: one
+      clear, after the release, no second run after INPUT_REQUIRED, ts
+      guard via `pm edit` during the hold, two PRs at once, a TUI restart
+      bound of one redundant run. Host, fake-claude.
+    - S88: a routed sign-off review return with the router down, in
+      container mode with real claude against the router and main stubs.
+      Each failed launch is one ERROR line, no traceback; retries come at
+      the claim-expiry cadence, never a hot loop, never a launch on main;
+      once the router is back, the next retry opens one routed review and
+      clears `awaiting`. An ordinary review loop with the router down is
+      ERROR and not relaunched. An unrouted PR keeps reaching main
+      throughout. Ticks run concurrently.
+    Done (run cd2ea2bfffc11e5c): S86 (PASS), S87 (NEEDS_WORK, fix
+    a69b6945, filed pr-fc2e931), S88 (PASS).
+  - Thirty-fourth pass (S89+), delta-only, planner 2026-10-27. Product
+    changes since run cd2ea2bfffc11e5c: a69b6945 (S87: in the
+    `pm pr auto-sequence` awaiting-qa branch, a qa window plus a QA run
+    record started at or after the open return's `ts` counts as the
+    re-run's driver; the tick prints `running: qa` and launches nothing.
+    This covers the `zz t` loop start and the 63cabd07 REQA hop, where
+    the TUI's clear is pending under a busy project.yaml), review 84ea i1
+    4753b845 (test-only: a run record with no qa window still launches)
+    and i2 373fb92c (only this pm session's records count, via
+    `qa_loop._own_run_records`, which matches `pr_id` and filters
+    `launched_elsewhere`. `run_overlaps_own_run`, used by TUI restart
+    adoption, now shares that scan). a69b6945 has run live only in the
+    S87 post-fix rerun. 373fb92c has never run live. Controls: d93d39a9
+    (before both), a69b6945 (before 373fb92c).
+    - S89: the guard on its natural paths, host, fake-claude, HEAD vs
+      d93d39a9. (a) The S87 story 4 repro: `zz t` over a REQA re-run
+      inside a hold, with an auto-sequence ticker queued on the flock.
+      (b) The same race on the TUI's REQA hop (63cabd07 path). Expected
+      for both: the tick prints `running: qa`, no `qa-run-bg` runs, the
+      re-run's windows survive, and one clear lands after the release.
+      Cases that must still launch: (c) a return the TUI is not driving,
+      where the judged run's window is still open; (d) a `pm edit`
+      re-arm (new `ts`) after a re-run already started; (e) a re-run
+      whose qa window is gone while its clear is still pending. That
+      last case is an observation, bounded at one driver.
+    - S90: 373fb92c across two clones of one project, which share
+      `~/.pm/workdirs/qa`, host, fake-claude, HEAD vs a69b6945. Clone A
+      has a REQA return and its judged run's window still open. After
+      the return, clone B runs QA on the same PR, and a different PR in
+      clone A starts a run too. A's tick must launch A's re-run once, and
+      B's run must stay untouched; the a69b6945 control should stay at
+      `running: qa`. Regression for the refactor of
+      `run_overlaps_own_run`: restart each TUI while both clones QA the
+      PR. Each TUI resumes only its own run, never adopts the other's,
+      and records one QA note per run.
+    - S91: integration in container mode with real claude against the
+      router and main stubs. A routed PR's sign-off REQA return lands
+      while project.yaml is held, with the TUI and ticks running
+      concurrently. Expected: one re-run driver and one set of scenario
+      containers. Routed refiners and workers send only `work/` to the
+      router; s0, the planner and the verifier stay on main. The clear
+      lands after the release, and an unrouted PR keeps reaching main.
+      No containers leak.
+    Done: S89 (NEEDS_WORK, fix 3e0a32d8), S90 (NEEDS_WORK, fix
+    af0d5519), S91 (INPUT_REQUIRED, fix be90863c, filed pr-74159fd; F1
+    decided by the user 2026-10-27, note-6bc63eb: the classifier pin is
+    best effort, RQ43).
+  - Thirty-fifth pass (S92+), delta-only, planner 2026-10-27. Product
+    changes since the S89–S91 run: be90863c (a tick treats an own run
+    record started at/after the return `ts` and younger than a claim
+    expiry as the re-run's driver), af0d5519 (inside a pm session,
+    `latest_qa_status_path` skips runs whose qa_run.json names another
+    session) and 3e0a32d8 (a run whose resume snapshot names another live
+    process is the driver). Each ran live only in its own scenario, and
+    S91's post-fix ran before the other two; they have never run together.
+    dbaa91c8 is spec/comment only. The master merge 2a424a0d
+    (origin/master 450a6362: #243 background QA focus, #242 popup picker)
+    has never run live on this branch. Merge points: `start_qa(lock_timeout,
+    *, focus)`. Only `t`, `z t` and `zz t` select the new qa window. A `t`
+    on a run that is still starting keeps the focus request. A popup
+    spinner q/Esc suppresses the switch. Scheduler starts (auto-start,
+    the sign-off REQA hop, self-driving restarts, `qa-run-bg`) leave
+    attached clients where they are. `qa-run-bg` now mirrors itself into
+    `~/.pm/runtime/<pr>.json` (running → done+verdict, failed on a raised
+    error), which the picker and auto-start's `recorded_qa_verdict` read.
+    The tree uses `usable_prs`, keeping the `unavailable` hint, and the
+    NEEDS_WORK `_reload_tree` flushes the write queue first. Master's
+    duplicate `zz t` transition was dropped.
+    - S92: container mode, real claude against the work/ router and main
+      stubs. The router stub also answers unprefixed classifier calls and
+      logs them (RQ43, not a failure). Covers #243 on routed flows: an
+      auto-started routed QA run and the REQA re-run of the sign-off hop
+      do not move the attached client. `t` before and after the window
+      exists, and a q/Esc spinner dismissal. All three guards run on one
+      tree under a project.yaml hold, with ticks running inside the pm
+      session and the re-run's qa window closed mid-hold. Expected: one
+      driver, one container set, routed roles only on `work/`, s0, the
+      planner and the verifier on main, and the unrouted PR on main.
+    - S93: host, fake-claude, two clones sharing `~/.pm`. The three guards
+      run together, and the shared runtime mirror is probed.
+      `~/.pm/runtime/<pr>.json` is keyed by PR id only. Clone B's
+      `qa-run-bg` PASS of P writes done/PASS there, where clone A's
+      auto-start reads it as a verdict, and the file is shared like
+      qa_status.json before af0d5519. Open point (S93 decides it): A's
+      auto-start skips or hands on its own re-run of P because of B's
+      verdict, or A's picker shows B's run as A's. Treat that as the
+      af0d5519 class. Also: TUI restart adoption across clones, and the
+      focus of the self-driving restart, `z t` and `zz t` (over a pending
+      clear).
+    - S94: host, routed workers through the launcher against the stubs,
+      covering the merged `qa-run-bg` error paths. Router down, provider
+      `nosuch`, malformed providers.yaml, and a driver killed mid-run.
+      Expected: what the picker shows (running, failed or done(ERROR))
+      matches the run, and auto-start or a tick relaunches after the fix
+      (ERROR is not a QA hold), with no launch on main. The tree under a
+      malformed project.yaml and an id-less PR entry during a QA
+      completion: the unavailable hint, then recovery. A NEEDS_WORK
+      completion keeps the user's navigation.
+    Done: S92 (NEEDS_WORK, fix 207545e6: the picker spinner's
+    stale-terminal guard covers every action), S93 (NEEDS_WORK, fix
+    ad5eed13: per-session runtime directory), S94 (NEEDS_WORK, fix
+    8416c20f: id-less entries skipped, a stopped run is relaunched by a
+    tick, TUI resume tracked per QA workdir; filed pr-97fe1e3 and
+    pr-f0dc81c). Each fix held live post-fix in its own scenario. Harness
+    lessons from S92: remove auto-start from R only after `Starting QA`.
+    A U clause after a terminal U sign-off is vacuous. Keep refined_kb at
+    0, and start the stubs after allprs exists.
+  - Thirty-sixth pass (S95+), delta-only, planner 2026-10-27. Product
+    changes since the S92–S94 run: 207545e6, ad5eed13 and 8416c20f (each
+    has run live only in its own scenario, never together, and none in
+    the others' modes; ad5eed13 and 8416c20f have never run in container
+    mode). Also review 0639 i1 86c0da90 (RQ47 upgrade seed), which has
+    never run live. Controls: 2a424a0d (the pre-ad5eed13 layout, standing
+    in for "older pm") and ad5eed13 (unseeded per-session layout).
+    - S95: the upgrade from an older pm, host, fake-claude, two clones.
+      Records come from 2a424a0d (P INPUT_REQUIRED, Q failed, R with a
+      stale `running` entry plus `suppress_switch`), then HEAD starts.
+      Covers the seed contents, the auto-start and picker effects, a
+      first-start race inside one session (TUI, a popup picker on a
+      second client, and ticks, repeated over rounds), an older pm in
+      the other clone still writing at the shared path, and no re-seed
+      after cleanup or a session restart. Compare with ad5eed13.
+    - S96: integration in container mode with real claude against the
+      work/ router and main stubs. An upgraded session with a routed PR
+      R and an unrouted U. A seeded hold verdict on R blocks auto-start.
+      A picker `qa` start on R with q/Esc keeps focus (207545e6), and the
+      run routes as before. A routed run stopped by a provider setup
+      error in container mode is relaunched once by a tick after the
+      fix, with no containers left from the stopped run (8416c20f), and
+      a TUI restart in between adopts only the live run.
+    - S97: where the runtime records land, depending on how the user runs
+      pm, host, fake-claude. TUI pane, second grouped client, popup, a
+      shell outside tmux in the clone root, a non-pm tmux session in the
+      clone, and a shell outside tmux in the PR's workdir (open point a).
+      `pm tui restart` while a `qa-run-bg` driver is alive in the
+      session (open point b).
+  - Thirty-seventh pass (S98+), delta-only, planner 2026-10-27. S95 and
+    S96 passed (note-187d8cf, note-84b55db). S97 never reported, so its
+    open points (RQ47 a/b) are carried into S101. Product changes since
+    that run: bbabcb8d (generic router providers, credentials removed,
+    effort per provider/PR, `pm provider edit/show`, `pm pr model`, the
+    TUI `o` popup and `⇄`), 87fd093f (env overrides the subagent pin and
+    FORCE, wider show redaction, TUI provider cache) and ff5db9c8 (s0
+    legacy resolved in model_config, so every view agrees). None has run
+    live. RQ48–RQ51 are new. Controls: 34fa3d24 (pre-rework) for
+    upgrade and wording comparisons.
+    - S98: provider configuration on the CLI, host, real claude against
+      a stub router whose model is not `work/`-named plus a main stub.
+      add/edit/show/list, redaction, env/unset_env/classifier_model/
+      FORCE overrides verified in the live process environment, a
+      configured remedy on router-down, `--live` with and without
+      `probe_models`, retired keys with an expired credentials file and a
+      marker refresh_command (RQ48, RQ49). Concurrent `pm provider edit`
+      from several shells while launches and listings read the file
+      (open point a).
+    - S99: per-PR model and effort from the CLI, host and container mode,
+      two PRs. Each precedence level checked against the `--effort`
+      actually launched, for impl, review, sign-off and QA roles. s0
+      legacy display versus launch. Invalid hand-edited levels. An
+      unknown provider refused. A PR routed by `pm pr model set` gets the
+      bridge mount in container mode, and the other PR does not. Running
+      sessions keep their settings. Concurrent `pm pr model set` /
+      `pm model set --project` against the project.yaml lock (RQ50,
+      RQ51 CLI).
+    - S100: the TUI `o` popup end to end: PR and project views, picker,
+      effort cycle, `⇄`, Not saved under a held lock, a provider removed
+      while the popup is open, a CLI edit while it is open (open points b
+      and c), then launches from the TUI that pick up the new settings
+      (RQ51 TUI).
+    - S101: upgrade from 34fa3d24 with a pre-rework providers.yaml
+      (credentials_file, refresh_command, a `work/` model, no
+      classifier_model) in container mode. A routed QA run with route-down
+      wait, stop and recovery lines in the new wording and with the
+      configured remedy. The classifier env is gone until
+      `--classifier-model` is set. Ran INPUT_REQUIRED: the container
+      route-wait Then conflicted with the designed check, and the user
+      resolved that by removing route waiting (RQ52). Its route-wait
+      results are historical. Its upgrade, wording and classifier
+      results stand for the code they ran on. Its recording limitation
+      stands (no mp4, `agg` missing).
+    - S102: S97 carried forward unchanged (it never reported): where the
+      runtime records land depending on how pm is run, and `pm tui
+      restart` while a `qa-run-bg` driver is alive (RQ47 open points a
+      and b). Host, fake-claude. Run 1d3e360382689633 was stopped by the
+      user for the route failure simplification. Its only remaining
+      worker container is frozen to keep its work, and it has no verdict.
+      It is not completed QA. RQ47 a/b stay open.
+  - Thirty-eighth pass, delta-only, for the route failure simplification
+    (impl.md R6; RQ9–RQ14 rewritten, RQ52–RQ54 new). None of it has run
+    live. Use real claude against the router and main stubs, in host and
+    container mode, and stop the router at the points below:
+    - Before a QA run's refiners launch.
+    - Mid-turn for a worker.
+    - While a queued scenario waits for a slot.
+    - Before `pm pr start`, `pm pr review` and `pm pr signoff`.
+    Expected: no route wait, deferral, stall or nudge lines; ordinary API
+    errors, reminders and relaunches; no main-stub traffic for routed
+    roles; recovery without pm acting once the router is back. Also
+    cover setup errors for the refiner/worker (unknown provider, router
+    with no model) from the TUI and from an auto-sequence tick (RQ53),
+    and in container mode an unusable bridge (RQ54). S102's RQ47 a/b and
+    the S73 double-drive question stay open, carried separately.
+    QA38 planner (2026-10-27): HEAD c5e9764f adds e6d986dd (the
+    refiner/worker provider check runs before any scenario workdir is
+    cloned, fake-claude refiner/worker included) and c5e9764f (cleanup
+    only). Scenarios S103+:
+    - S103: host, routed refiner/worker on real claude, one routed PR R
+      and one unrouted PR U running QA at the same time, cap
+      `qa-max-scenarios` 1. The router is down before the refiners
+      launch, killed mid-turn for a worker, and down while a queued
+      scenario waits for its slot. It is brought back without pm acting.
+    - S104: the same stories in container mode (podman 3, slirp4netns),
+      plus RQ54: bridge mount and forwarder, the host bridge killed
+      mid-run (E6), and an unusable bridge (symlinked or foreign-owned
+      dir) for impl/review/sign-off and for a QA worker's `ensure`.
+    - S105: RQ52 for impl/review/sign-off/review loop/auto-start on a PR
+      routed for every role, with the router down at launch and coming
+      back, host and container. A second PR on the default provider is
+      worked at the same time.
+    - S106: RQ53 setup errors. Unknown provider, router with no model,
+      api_base with no host, non-executable host launcher, unreadable
+      providers.yaml, for the refiner/worker (fake and real) from the TUI
+      and an auto-sequence tick, at first launch and mid-run (relaunch
+      and queued launch), host and container. Also the CLI start/review/
+      sign-off surfaces, and a broken PR beside a healthy one.
+    The pass decides one point from code reading: `setup_problem` checks
+    a host `launcher` only outside a container, so in container mode a
+    non-executable launcher is not an error. That is expected, because
+    containers never use the launcher.
+    Results (run a256c3dd8ddb5662): S103, S104 and S105 PASS, no code
+    change. S106 NEEDS_WORK: every RQ53 Then held, but a queued-launch
+    stop kept a verified scenario as `PASS (verifying)`. That was fixed in
+    07cc00f3, and review 0f81 (0dad507b, 0ad075ae, abd23015) extended the
+    fix to the relaunch and verifier paths (RQ55).
+  - Thirty-ninth pass (S107+), delta-only, planner 2026-10-28, HEAD
+    abd23015. Planner run a0e706a5b5b10f04 ended in a launch ERROR with no
+    plan, and run 21f1de510c58c784 replaced it. Product changes since run
+    a256c3dd8ddb5662 are 07cc00f3, 0dad507b, 0ad075ae and abd23015
+    (RQ55), all in the `qa_loop` poll loop. Only 07cc00f3 has run live (S106
+    story 3 round B post-fix). Every story sets the stop up in the same
+    poll interval (5 s) or tick as a settled result, and runs a control
+    tree beside HEAD that shows the stale status, so a PASS proves the
+    timing window was hit:
+    - Use 15e2a918 as the control for the queued-launch stop.
+    - Use 07cc00f3 as the control for the relaunch stop.
+    - Use 0dad507b and 0ad075ae as the controls for the verifier stop.
+    Harness: `/pm-captures/scenarios/106/scripts` (fault fixtures
+    F1–F7, setup_proj.sh, fake configs).
+    - S107: host, TUI-driven, verifier-path stop. A verifier passes, a
+      verifier flags past the retry limit (`qa-verify-retries 0`), and a
+      verifier flags with retries left, each beside another scenario
+      whose verifier launch hits a broken `qa_verification` provider. Then
+      fix the provider, start QA again, and check that the stopped run's
+      record is unchanged.
+    - S108: host, worker relaunch and queued-launch stops. A settled
+      verdict sits beside a dead worker whose relaunch hits a broken
+      `qa_scenario` provider. A verified PASS sits beside a queued launch
+      (cap 1). Both run in a run the TUI adopted after a restart and in a
+      run driven by an auto-sequence `qa-run-bg` driver, with ticks racing
+      the stop. A run that never stops, with a queue, is the regression
+      control for the extra pre-dequeue write.
+    - S109: container mode (podman 3), real claude refiner/worker routed
+      through the router stub. One verifier-path round and one relaunch
+      round on a routed PR, beside an unrouted PR whose QA runs to PASS at
+      the same time.
+    Results (run 21f1de510c58c784): S107, S108 and S109 PASS on 239e2f04,
+    no code change.
+  - Fortieth pass (S110+), planner 2026-10-28, HEAD 49bbc7e4, after sign-off
+    returned SIGNOFF_REQA (note-20a8aed). There is no product change since
+    review 0f81 i4 (abd23015). The pass closes the acceptance items that
+    earlier passes left open, on the integrated code, and every scenario
+    must publish a `recording.mp4` (install `agg` if it is missing; S104
+    rendered with agg 1.9.0). A cast-only result is not complete.
+    Not to redo: S103–S109 (RQ52–RQ55), S98–S100 post-fix, S65–S96. S73
+    (pr-bddda0f) stays a separate item.
+    - S110 (RQ47 a, replaces S102's unfinished runs 4 and 6): host,
+      fake-claude. `pm pr auto-sequence` ticks from outside the pm tmux
+      session: a plain terminal in the clone root, a non-pm tmux session,
+      and `-C <clone>` from a PR workdir. The driver runs in the project's
+      pm session, its records land in `~/.pm/runtime/pm-<tag>/`, and the
+      TUI and picker follow the run to its verdict. Background review and
+      sign-off hops work without tmux. Control: 1f90deb6 (cd617253^).
+    - S111 (RQ47 b): host, fake-claude. `pm tui restart` and other TUI
+      auto-start passes while a `qa-run-bg` driver is alive. Also the window
+      between the driver's spawn and its `qa_run.json` (`write_run_record`,
+      reached only after `locked_update` and `clear_return_awaiting`), held
+      open by a busy project.yaml. And a `pm qa run` CLI run (fixed loop id
+      `cli-<pr>`, so its `qa_run.json` is written once and kept across
+      later CLI runs) beside TUI auto-start of full QA. Expected: exactly
+      one driver per QA run. A stale CLI record never blocks auto-start,
+      and the run is never lost from the picker. A second loop, or full QA
+      that never starts, is a finding. Control: 1f90deb6.
+    - S112 (R9/RQ44 since the 10-27 rework, host): from a shell or TUI that
+      carries a routed session env, launch PR N (no model), P (plain
+      `claude-opus-5-5`) and R (a generic router whose model has no `work/`
+      name). Cover impl, review, sign-off, s0, planner, refiner, worker,
+      `--resume` and the `claude -p` helpers. Check the live process env of
+      each pane and the stub logs. The last live run was S62 on 09a23249.
+    - S113: S112 in container mode (podman 3, slirp4netns). Check what the
+      container receives by name, the command's `env -u` list, and that
+      only R has the bridge mount. The last live run was S63.
+    - S114 (re-record of S105 to mp4): RQ52 for a PR routed on every role
+      through start, review loop, sign-off and auto-start, with the router
+      down at launch and then back, beside a default-provider PR, in host
+      and container mode. Also RQ54: impl, review and sign-off refuse an
+      unusable bridge.
+    - S115 (re-record of S101 to mp4, under RQ52): upgrade from 34fa3d24
+      with a pre-rework providers.yaml in container mode. Cover the retired
+      key warnings and `--clear`, the absent classifier env until
+      `--classifier-model`, and a routed QA run with the router down, which
+      shows ordinary API errors and no route wait line.
+    Harness gotcha (sign-off item 4): nested scratch QA runs in earlier
+    scenarios wrote `verdict.md`, `prompt.md` and `scenario.json` for their
+    own scenarios 1–22 and 40–42 into this PR's `/pm-captures/scenarios/`.
+    The worker scripts had scrubbed `PM_CAPTURES_PR` from the env, and
+    `captures_dir` lets any PR use the mount when that variable is unset
+    (master 237179d7, by design). Keep `PM_CAPTURES_PR` exported in every
+    scrubbed env, or give nested runs a mount-free HOME and cwd. Check that
+    no other scenario's capture dir changes. The QA40 planner restored those
+    files from the original runs' `qa_status.json` (the overwritten copies
+    are in `nested-run-overwrite/` in each dir).
+    Results (run 223ffd9ddbbd6c97, every scenario mp4):
+    - S110 PASS.
+    - S111 NEEDS_WORK, fixed in d35c473a. Review 82f2 extended the fix in
+      609e37b5 and 5e55b707 (RQ56).
+    - S112 PASS.
+    - S115 PASS.
+    - S113 INPUT_REQUIRED. Every R9/RQ44 routing Then held. Decided by the
+      QA41 planner: two literal Thens fall outside this PR, and S113
+      counts as the container-mode R9 pass.
+      - pr-fcdd76f: a PR left in `sign_off` gets no resume after
+        `pm tui restart`. Resume is tested with the PR in `qa`, and that
+        held.
+      - pr-81a249e: finished-run containers are removed at a later QA
+        start by master's `cleanup_orphaned_qa_containers`. The "one
+        finished-run container per run" Then is dropped.
+    - S114 INPUT_REQUIRED. Every RQ52/RQ54 Then held in host and container
+      mode. Decided by the QA41 planner:
+      - "running: sign_off forever" after a user-opened sign-off is
+        pre-existing master behaviour (pr-95664e1). The auto-sequence
+        sign-off story uses only tick-launched sign-offs, which held.
+      - `pm pr review` on an open review window prints "Switched to
+        existing review window", and that is accepted.
+      - No re-run is needed for these two. S118 repeats the auto-sequence
+        story in its corrected form on the new HEAD.
+  - Forty-first pass (S116+), delta-only, QA41 planner 2026-10-28, HEAD
+    5e55b707. Product changes since run 223ffd9ddbbd6c97 are d35c473a,
+    609e37b5 and 5e55b707 (RQ56). Only d35c473a has run live (S111
+    post-fix). Every scenario publishes `recording.mp4`. Run controls
+    beside HEAD: 9a2dacaa (pre-d35c473a), d35c473a (pre-609e37b5) and
+    609e37b5 (pre-5e55b707). A PASS must show the control failing where
+    the fix applies. Harness: `/pm-captures/scenarios/111/scripts` and
+    `/pm-captures/scenarios/114/scripts`. Keep `PM_CAPTURES_PR` exported.
+    Not to redo: S103–S115.
+    - S116: host, fake-claude, TUI review→QA hand-off over a run driven
+      elsewhere. The other run is a live `pm qa run`, with auto-start on
+      and off (`zz t`). It is also a `qa-run-bg` driver that a tick
+      spawned while the hand-off waited on a busy project.yaml. Cover
+      the driver frozen between its verdict write and its exit. Expected:
+      the hand-off stays pending, the `[running]` row is kept, there is
+      no second loop, and QA starts once the CLI run ends. The driver's
+      verdict goes to sign-off once, and an old PASS never goes there.
+    - S117: host, fake-claude, start-record lifecycle. A tick with a
+      broken `qa_scenario`/`qa_planning` provider leaves no record, so the
+      TUI starts at once after the fix. A tick and a TUI pass race on a
+      busy project.yaml. Two `pm qa run` runs in a row each read as live,
+      and full QA follows once they end. The TUI sign-off REQA hop runs
+      while a `pm qa run` is live (finding probe).
+    - S118: container mode (podman 3) and then host, real claude routed
+      refiner/worker on the router stub beside an unrouted PR. Ticks from
+      outside tmux drive both PRs from review PASS through `qa-run-bg`
+      (`--loop-id`) to `ready_to_merge`, with only tick-launched
+      sign-offs. The router is down at the QA launch and comes back.
+      `pm tui restart` mid-QA adopts the run, with the PR in `qa`.
+      Routing, bridge mount and stub logs are as in RQ52/R9.
+    Results (run e89777aef44ccd93, every scenario mp4):
+    - S116 PASS, no code change.
+    - S117 NEEDS_WORK. Stories 1, 2, 3 and 5 held. Story 4 found that
+      the TUI sign-off REQA hop killed a live `pm qa run`'s windows.
+      Fixed in c9ce4f6a (pr-ed2ebe9, closed).
+    - S118 NEEDS_WORK. A grouped view session whose name is not
+      `<base>~N` gave the restarted TUI that name, so CLI→TUI commands
+      timed out with `owner_timeout`. Picker popups opened there lost the
+      run badges. Fixed in 91b259bd. Every routing Then held after the
+      fix.
+    - Review 6092 i1 PASS (HEAD bc93ffb6). It filed pr-db3bf10 (the
+      deferred REQA start is lost on a TUI restart).
+  - Forty-second pass (S119+), delta-only, QA42 planner 2026-10-28, HEAD
+    bc93ffb6. Product changes since run e89777aef44ccd93 are c9ce4f6a
+    (the REQA hop defers over a run driven elsewhere, RQ56) and 91b259bd
+    (TUI session name and `_get_current_pm_session` resolve a grouped view
+    through `#{session_group}`). Each ran live only in its finding's
+    scenario, right after the fix. Every scenario publishes
+    `recording.mp4`. Controls, run beside HEAD: 91b259bd (pre-c9ce4f6a)
+    for S119/S120, and dd00f754 (pre-91b259bd) for S121. A PASS must show
+    the control failing where the fix applies. Harness:
+    `/pm-captures/scenarios/117/scripts`, `/pm-captures/scenarios/116/scripts`
+    and `/pm-captures/scenarios/118/scripts`. Keep `PM_CAPTURES_PR`
+    exported. Not to redo: S103–S118.
+    - S119: host, fake-claude, TUI sign-off REQA over a live `pm qa run`.
+      Auto-start on, off, and with the target removed mid-wait. The CLI
+      run ends with PASS, with NEEDS_WORK, and interrupted with no
+      verdict. Also: the user presses `t` while the start is deferred,
+      project.yaml is busy when the deferred start fires, and two PRs are
+      deferred at once. pr-db3bf10 is checked only for its documented
+      recovery (`t` after a restart).
+    - S120: host, fake-claude, RQ56 concurrency around a REQA that met a
+      live `pm qa run`. Auto-sequence ticks run during the wait. One
+      variant has a TUI-launched sign-off and one a tick-launched
+      sign-off with no TUI. Probe: does a tick take the CLI run's
+      `qa_status.json` as the re-run's verdict, or launch `qa-run-bg`
+      over the CLI run? A finding goes to RQ56, or to a bug PR if master
+      does the same.
+    - S121: host, fake-claude, a user's own grouped view of the pm
+      session (any name not `<base>~N`), beside the base client and a
+      `~N` view. Cover `pm tui restart` from each client, CLI→TUI
+      commands, picker popups from PR windows (badges), ticks and
+      `pm qa run` from view panes (runtime records under `pm-<tag>`),
+      and non-pm and ungrouped sessions as controls.
+    Results (run a36d03e5d7e46754, every scenario mp4):
+    - S119 NEEDS_WORK. c9ce4f6a held live in all 7 stories (one full QA
+      on the poll after the CLI run exits; auto-start on, off and
+      removed; CLI NEEDS_WORK/INPUT_REQUIRED; busy project.yaml; two
+      PRs). Finding: after a Ctrl-C `pm qa run`, the TUI resume scan
+      adopted the one-instruction run as the PR's QA and handed it to
+      sign-off (2 of 5 runs). Fixed in b402464e. Story 7 corrected the
+      RQ56 text on `t` after a restart.
+    - S120 NEEDS_WORK. Ticks launched `qa-run-bg` over a live
+      `pm qa run` started before the return (TUI-deferred and tick-only
+      variants), and advanced to sign_off on the CLI run's PASS. Fixed in
+      d7e65156. master has the same defect (pr-d7d4601). Incidental:
+      pr-0ef7f21 (`pm tui view` reports a dead pane with rc 0).
+    - S121 NEEDS_WORK. 91b259bd held live. Gaps fixed in 89d914a0 (popups
+      and pane hooks resolve a view through its group; the mount sweep
+      keeps a driven run's `qa` entry) and c1027cd6 (● for a view's
+      active window).
+    - Review 325b i1 c774b5af (rename, the since filter dropped, the
+      resume skip uses `instruction_run_loop_id`), i2 PASS.
+  - Forty-third pass (S122+), delta-only, QA43 planner 2026-10-28, HEAD
+    c774b5af. Product changes since run a36d03e5d7e46754 are b402464e,
+    d7e65156, 89d914a0, c1027cd6 and c774b5af. Each ran live only in its
+    finding's scenario, right after the fix, and c774b5af has not run
+    live. Every scenario publishes `recording.mp4`. Controls, run beside
+    HEAD: ab2ac466 (pre-b402464e), fedcdd01 (pre-d7e65156), 9a9633b4
+    (pre-89d914a0) and 89d914a0 (pre-c1027cd6). A PASS must show the
+    control failing where the fix applies. Harness:
+    `/pm-captures/scenarios/119/scripts`, `/pm-captures/scenarios/120/scripts`,
+    `/pm-captures/scenarios/121/scripts` and `/pm-captures/scenarios/118/scripts`.
+    Keep `PM_CAPTURES_PR` exported. Not to redo: S103–S121.
+    - S122: host, fake-claude. What counts as the PR's QA once a user
+      has run `pm qa run`: TUI restarts over interrupted CLI runs (alone
+      and beside an interrupted full run), the sign-off prompt's QA
+      verdict and the finalize pointer after a later CLI run, and ticks
+      at `qa` whose newest status is a CLI verdict.
+    - S123: host, fake-claude. The no-since `_qa_run_driven` hold:
+      a CLI run started seconds before the return (before its snapshot),
+      a long CLI run under steady ticks, a first QA after review PASS
+      while a CLI run is live, a Ctrl-C'd CLI run (no hold), two PRs, and
+      another clone's CLI run of the same PR id.
+    - S124: host, fake-claude. A user's own grouped views (`myview`,
+      `pm-laptop`, `my~view`) beside the base and `~N` clients: pane
+      splits/closes and terminal resizes (layout, one registry), picker ●
+      markers on attach/detach, popups, CLI→TUI commands, and
+      `pm tui restart` from a view while a `qa-run-bg` driver, a live
+      `pm qa run`, or a killed driver holds a `qa` entry. Probe for the
+      RQ47 open point.
+    - S125: container mode (podman 3, slirp4netns) and then host, real
+      claude routed refiner/worker on the router stub beside an unrouted
+      PR, on HEAD c774b5af. Ticks from outside tmux, a sign-off REQA
+      that meets the user's live `pm qa run`, watched from a user's
+      grouped view. Routing, bridge mount, stub logs, hooks and
+      transcripts as in RQ52/R9, and exactly one routed full re-run.
+    Results (run b5025bad8fc5d142):
+    - S122 PASS, no code change. Filed pr-7824490 (`pm qa run` always
+      uses scenario index 1 and overwrites the full run's
+      `scenarios/1/verdict.md` capture; master too).
+    - S123 NEEDS_WORK. A `pm qa run` still refining was invisible to the
+      tick hold, so a REQA made the tick launch `qa-run-bg` over it and
+      kill its windows. Fixed in c5af52f0 and held post-fix for 8 offsets
+      (0.95–46.47 s). Filed pr-17ddbfe (the review-PASS tick starts the
+      first QA over a live `pm qa run`; master too) and pr-66432ce (the
+      TUI never adopts a tick-launched sign-off run).
+    - S124 NEEDS_WORK. Views named `pm-laptop` and `my~view`, and
+      `C-b x`/`C-b R`/`pm session home` from any view, missed the group
+      lookup. Fixed in 920633fe and held post-fix. Filed pr-ee18218 (the
+      global split hook writes `<session>.json` for unrelated sessions).
+    - S125 NEEDS_WORK, incomplete. Story 1 (container) held every routing
+      and REQA Then, but the picker from `myview` showed `[done PASS]`
+      over a live `pm qa run`. Fixed in ca2a0657. The post-fix rerun and
+      story 2 (host router outage) did not run: the QA container hit
+      `pids.max` 2048 because its PID 1 (`sleep infinity`) never reaps
+      and a `>(tee)` tick loop left ~1840 zombies.
+    - The S124 story 4 Then ("no `[working]` while `pm qa run` is live")
+      conflicts with ca2a0657. Decided by the QA44 planner: ca2a0657 is
+      intended (RQ56 already keeps `[working]` for a driven `pm qa run`
+      across a mount sweep). RQ56 now states it.
+    - Review 1cfa i1 3110c6f3 (`instruction_run_live` reads only the
+      `<pr>-cli-<pr>` record, owner pid first), i2 PASS.
+  - Forty-fourth pass (S126+), delta-only, QA44 planner 2026-10-28, HEAD
+    3110c6f3. Product changes since run b5025bad8fc5d142 are c5af52f0,
+    920633fe, ca2a0657 and 3110c6f3. c5af52f0 and 920633fe ran live
+    post-fix. ca2a0657 and 3110c6f3 have not run live. Every scenario
+    publishes `recording.mp4`. Controls, run beside HEAD: 920633fe
+    (pre-ca2a0657) and ca2a0657 (pre-3110c6f3). A PASS must show the
+    control failing where the fix applies. Harness:
+    `/pm-captures/scenarios/125/scripts`, `/pm-captures/scenarios/123/scripts`
+    and `/pm-captures/scenarios/124/scripts`. Keep `PM_CAPTURES_PR`
+    exported. Harness rule from S125: the QA container's PID 1 does not
+    reap, so do not use process substitution or per-tick subshell
+    pipelines in long tick loops, reap background jobs with `wait`, watch
+    `/sys/fs/cgroup/pids.current`, and run one story at a time. Not to
+    redo: S103–S124.
+    - S126: host, fake-claude. The picker's `qa` badge for a live
+      `pm qa run` (ca2a0657), from the base client, a `~N` view and a
+      user's own view: over a full-run PASS, with no earlier QA, a
+      Ctrl-C'd or SIGKILLed CLI run, two CLI runs in a row, and a full
+      QA that auto-start starts once the CLI ends. Another clone sharing
+      `~/.pm` runs `pm qa run` of the same PR id, alone and at the same
+      time as this clone's run. Both share the fixed `<pr>-cli-<pr>`
+      workdir, which is a pre-existing master design. Probe: does the
+      second start's fresh `qa_run.json` drop the first clone's
+      `[working]` and its REQA hold? A finding here goes to a bug PR if
+      master shares it, otherwise to RQ56. Picker latency with many
+      kept full-run records (3110c6f3).
+    - S127: container mode (podman 3, slirp4netns), fresh container. The
+      S125 story 1 rerun on HEAD 3110c6f3: real claude routed
+      refiner/worker on the router stub beside an unrouted PR. Ticks from
+      outside tmux, and a sign-off REQA that meets the user's live
+      `pm qa run` while its refiner still runs, watched from a user's
+      grouped view (`[working]` during the CLI run). Routing, bridge
+      mount, stub logs, hooks and transcripts as in RQ52/R9, and exactly
+      one routed full re-run.
+    - S128: host. The S125 story 2 that never ran: the same flow with the
+      router down at the re-run's launch and back mid-run, beside an
+      unrouted PR's QA. RQ52 ordinary API errors only, with no route
+      wait line and no main-endpoint hit for routed roles.
+    - Not in this pass: origin/master 89e3c501 no longer merges cleanly.
+      A trial merge conflicts in 11 files, including `qa_loop.py`,
+      `tui/auto_start.py`, `tmux.py`, `signoff.py`, `claude_launcher.py`,
+      `container.py` and `providers.py`. A master integration needs an
+      implementation session, then a merge smoke QA, before sign-off.
+    Results (run 5e24fa13d2e08300):
+    - S126 PASS (stories 1–4 and 6, controls 89914811 and ca2a0657).
+      Finding (note-a42ae19): every clone's `pm qa run` of a PR rewrites
+      the shared `<pr>-cli-<pr>/qa_run.json`. A second clone's start
+      therefore drops the first clone's `[working]` badge and its REQA
+      hold. This comes from master's shared CLI workdir, and master also
+      holds no REQA over a `pm qa run` (pr-d7d4601, note added). The
+      shared workdir also hangs the first clone's run (pr-571a13b, filed).
+    - S127 INPUT_REQUIRED. Story 1 held every routing Then and ran exactly
+      one routed re-run. Story 2's TUI line after a plain `pm tui restart`
+      was open. The user deferred restart behaviour to pr-db3bf10
+      (note-da2d795). That fix merged with master, and its contract (one
+      owed run after the live run ends, also with auto-start off) is now
+      RQ56. S130 reruns S127 against it.
+    - S128 INPUT_REQUIRED. Every RQ52 and REQA Then held. The open point,
+      "Killing stale QA window" for a finished `pm qa run`'s window, is
+      accepted by the user (note-32a12ee). A fresh run of the same PR may
+      replace finished windows, but live runs and evidence stay
+      protected.
+    - The master integration came next: 67353d44 (origin/master 4a74d880,
+      21 conflicted files, note-3ce8529). After it, review 0897 made
+      5855077b (the resume snapshot's temp file is written under its
+      locks) and fc1e7d77 (`result_recorded_by` is kept across a held
+      run's snapshot rewrites). 5f204dc2 is test-only. i4 PASS.
+  - Forty-fifth pass (S129+), merge smoke, QA45 planner 2026-10-29, HEAD
+    5f204dc2. Product changes since run 5e24fa13d2e08300 are the master
+    integration 67353d44, 5855077b and fc1e7d77. None of them has run
+    live. Every scenario publishes `recording.mp4`. Controls, run beside
+    HEAD:
+    - 4aff1dd4, the PR head before the integration;
+    - 4a74d880, master;
+    - 67353d44, before 5855077b;
+    - 5855077b, before fc1e7d77.
+    A PASS shows the control differing wherever the integration or a fix
+    changed behaviour, and matching HEAD wherever it should not.
+    Test isolation is mandatory (note-user-restart-all-20261029; the #267
+    leak killed a real session):
+    - Run pm under a private HOME/`~/.pm` and a private tmux socket.
+    - Scrub `TMUX`, `TMUX_PANE` and the inherited routing vars.
+    - Keep `PM_CAPTURES_PR` exported.
+    - Name and kill only tmux sessions the scenario created, and check
+      ownership before cleanup.
+    - Never change global tmux options or shared host config.
+    Harness: `/pm-captures/scenarios/127/scripts` (container, router stub
+    with per-PR sign-off sequence, `myview` recorder), `128` (host
+    outage), `126` (two clones), `113` (R9 env probe), `114` (bridge
+    refusal) and `106` (fault fixtures). The S125 PID 1 reaping rule
+    still applies. Not to redo as such: S103–S128. This pass reruns their
+    core flows only as the merge smoke.
+    - S129: container mode. A routed refiner/worker PR beside an
+      unrouted PR goes from review through QA to sign-off. This is the
+      merge smoke for the env channel (#268): values reach panes only
+      through the private env file, which is gone once the pane runs.
+      Refused and failed launches leave no env file (pr-740ae41). Also
+      covered: the bridge mount only on routed containers, stub logs,
+      hooks, transcripts and R9 env. Two containers push through the
+      git proxy at the same time (#255/#262).
+    - S130: container mode. S127 again, under the durable owed-REQA
+      contract. A routed PR's REQA meets the user's live `pm qa run`, with
+      a plain `pm tui restart`, auto-start off and ticks from outside
+      tmux. Exactly one routed re-run follows the CLI run's end.
+    - S131: host, fake-claude. Several starters race for one owed REQA:
+      the TUI tick and mount, auto-start, ticks and a second TUI. Also a
+      busy project.yaml, two owed PRs, a finished TUI run that no longer
+      holds (`end_run_record`), and a user's grouped view driving
+      CLI→TUI commands and restarts (#263).
+    - S132: host, real claude routed worker. A held INPUT_REQUIRED run
+      (#271) with the 0897 fixes. The user's answer in the routed pane
+      gives one recorded follow-up result. Also covered: a TUI restart
+      and a second clone during the hold, `z t` over a held run, and
+      completion marks racing snapshot writes.
+    - S133: host. Provider configuration and review launches after the
+      merge. providers.yaml stays 0600 and a symlinked file is replaced.
+      Two shells edit providers at once. A claude-type key is given by
+      variable reference. A review role whose provider fails at launch
+      ends LAUNCH_FAILED (retryable, bounded) and runs on the route after
+      the fix. S81/S82 restarts are covered too.
+    Results (run ec2feb387de40778). QA46 planner decisions on spec
+    wording are marked "Decided"; none needed the user.
+    - S129 INPUT_REQUIRED, no code change. Every env-channel, routing,
+      refusal and push-proxy Then held on HEAD. Control 4aff1dd4 differed
+      only where #268 and pr-740ae41 apply. Decided (review 6e6b i1):
+      - QA stopping at scenario 2's queued launch is RQ53/RQ55. The Then
+        reads "scenario 2 never launches (no container, refiner or
+        worker) and shows `queued`".
+      - The tick stderr line "note: SIGNOFF_MERGE coerced to
+        SIGNOFF_BLOCKED …" is the expected coercion. "Tick stderr is
+        empty" means no other line.
+      - The refusal When needs the router provider present. A plain
+        `pm pr review` outside tmux is a no-op (pr-3713c9e), so use
+        `--background` or a pm-session shell. `t` on a stopped run
+        focuses its window and `z t` restarts (existing design).
+      S136 reruns the core with these Thens.
+    - S130 NEEDS_WORK, fixed by 85f58e5a (RQ60; pre-existing on master).
+      RQ56's durable REQA held in all 7 rounds. Decided:
+      - A `launch_claim` may outlive `awaiting` (S68 109bca54). It
+        expires in 180 s and is inert. "No launch_claim left behind" is
+        dropped.
+      - The TUI pidfile is JSON: read the pid with `jq -r .pid`.
+      - `pm autostart status` prints "Auto-start: off  owner=…" and
+        "No auto-start targets (auto-start off)."
+    - S131 NEEDS_WORK, fixed by 245eb22f (RQ57). Master 4a74d880 strands
+      the same way. Decided: the picker has no `[running]` badge for QA
+      (a running QA shows `[working]`). The TUI may log "Sign-off REQA …
+      QA starts once …" just after a tick's start.
+    - S132 NEEDS_WORK, fixed by b7321370 and 3de073a6 (RQ58). Decided: a
+      second clone claims a held run only once the owner TUI is dead (a
+      crash, not an in-place restart). The "not relaunching" debug line
+      needs an auto-start pass.
+    - S133 NEEDS_WORK, fixed by 7fb5df75 (RQ59). Decided: the symlinked
+      providers.yaml is replaced silently and its dotfiles target
+      diverges; this is #273 A3 and accepted. The providers.yaml.lock
+      wait is silent. The fake impl never signals done, so `zz d` starts
+      the review. With auto-start targets restored, the TUI logs
+      "Auto-start: resumed after merge restart".
+    - Review 6e6b:
+      - i1 51a709f3 added RQ57's "press z t" line for a lost run that is
+        not a reopened REQA.
+      - i2 74cebe25 moved that line after the breadcrumb pass, so a run
+        that pass restarted gets none.
+      - i3 PASS.
+  - Forty-sixth pass (S134+), delta-only, QA46 planner 2026-10-29, HEAD
+    74cebe25 (origin/master still 4a74d880). Product changes since run
+    ec2feb387de40778: 85f58e5a, b7321370, 3de073a6, 245eb22f, 7fb5df75,
+    51a709f3 and 74cebe25. The first five ran live only post-fix, each in
+    its own scenario and never together. 51a709f3 and 74cebe25 have never
+    run live. Every scenario publishes `recording.mp4`. Controls, run
+    beside HEAD:
+    - f9a6343d (pre-51a709f3, with 245eb22f);
+    - 51a709f3 (pre-74cebe25);
+    - a0e55418 (pre-b7321370);
+    - 1cf5ae0e (pre-7fb5df75);
+    - 5f204dc2 (pre-85f58e5a);
+    - master 4a74d880 for the crash probe.
+    A PASS shows the control failing where a fix applies. Test isolation
+    as in the forty-fifth pass (private HOME/`~/.pm` and tmux socket,
+    scrubbed `TMUX`/routing vars, own sessions only). The S125 PID 1
+    reaping rule applies. Harness: `/pm-captures/scenarios/131/scripts`
+    (restarts, ticks, two clones), `132` (held routed worker), `129` and
+    `130` (container, env watch, stubs) and `133` (review launch
+    failure). Copy them and re-point any `/scratch/s1NN` paths. Not to
+    redo as such: S103–S133.
+    - S134: host, fake-claude. RQ57: a plain restart cuts off a user
+      `t` run (one line, `t` focuses, `z t` runs once). A breadcrumb
+      restart restarts a target and prints no line, beside a cut-off
+      non-target that gets one. An owed REQA re-run is reopened. A busy
+      project.yaml falls back to the line. Another clone's run and a
+      live `pm qa run` survive the restart. Probe: a TUI crash (new pid)
+      during an owed re-run's planning.
+    - S135: host, real claude routed refiner/worker. RQ58 on the final
+      HEAD: `t` on a held run, one note per result across a restart and a
+      crash, a second clone during the hold. A restart also cuts off
+      another PR's routed run (RQ57). Routing as in RQ52/R9.
+    - S136: container mode (podman 3, slirp4netns). The S129 core with
+      the decided Thens, RQ60 (`pm qa run` twice), and a container run
+      cut off by a restart (RQ57: windows killed, no leaked container
+      after `z t`).
+    - S137: host, real claude routed review. RQ59 across
+      `pm tui restart --breadcrumb` inside the backoff and an auto-start
+      re-arm, then recovery onto the route. The same restart cuts off a
+      QA run on another PR.
+    Results (run 6ba3e63ef0492096). QA47 planner decisions on spec
+    wording are marked "Decided"; none needed the user.
+    - S134 INPUT_REQUIRED, no code change. Every RQ57 Then held live on
+      HEAD 74cebe25, with controls f9a6343d (no line) and 51a709f3 (lines
+      at mount, before the breadcrumb pass). Two tick Thens failed as
+      worded, both from pr-f1d825b. Decided by review d05b i1
+      (note-d4f4170): the RQ57 "Ticks" bullet now gives the wording. The
+      crash probe (new pid) strands the PR on HEAD and master alike. It
+      is filed as pr-58aa21a. S139 reruns the core with these Thens.
+    - S135 PASS (RQ58 on HEAD with control a0e55418, and RQ57 beside it).
+    - S136 NEEDS_WORK, fixed by 44ea3dd7 (RQ57 in container mode).
+      `kill_windows_of_run` matched only windows working inside the QA
+      workdir. Container scenario windows open in the PR workdir, so the
+      cut-off run's `qa-<pr>-s1/-s2` windows and their held refiners
+      survived the restart until `z t`. They are now also matched by the
+      run's container name in their start command. Post-fix (story 7,
+      same container): s0, s1 and s2 were killed, `z t` removed the two
+      dead containers before its planner, and the routed run passed.
+      Every other story held on HEAD (merge smoke, provider remove,
+      bridge-symlink refusals, RQ60 with control 5f204dc2). Decided: the
+      dead containers are left to the next run's planning cleanup
+      (review d05b i1; removing them at mount would block the TUI on
+      `podman rm`). The pushes from the S134/S136 containers were blocked
+      because those containers mounted the s-135 push proxy. That is
+      filed as pr-bd298f4.
+    - S137 PASS (RQ59 with control 4656d4cc, the true pre-7fb5df75 commit;
+      the spec's 1cf5ae0e already had the fix). Decided: a launcher setup
+      error reads "Error: provider '<name>': launcher … not an executable
+      file". The planner window `qa-<pr>` outlives a cut-off run until
+      the fresh run replaces it. A wait-for-merge target stops at "signed
+      off … waiting for manual merge".
+    - Review d05b i1 PASS on b49a8cac (code 44ea3dd7). The full suite
+      passed: 5197 passed, 1 skipped.
+  - Forty-seventh pass (S138+), delta-only, QA47 planner 2026-10-29, HEAD
+    b49a8cac. Code is 44ea3dd7, pushed. origin/master is still 4a74d880,
+    an ancestor. The only product change since run 6ba3e63ef0492096 is
+    44ea3dd7. It has run live only post-fix, inside S136's own container,
+    and never on a fresh setup or beside other live runs in the same
+    session. Every scenario publishes `recording.mp4`. The control is
+    74cebe25 (pre-44ea3dd7). A PASS needs:
+    - the control's container scenario windows surviving the restart;
+    - HEAD matching the control everywhere else, including every
+      host-mode Then.
+    Test isolation is as in the forty-fifth pass: private HOME/`~/.pm`
+    and tmux socket, scrubbed `TMUX`/routing vars, own sessions only, and
+    `PM_CAPTURES_PR` kept exported. The S125 PID 1 reaping rule applies.
+    Harness: `/pm-captures/scenarios/136/scripts` (container, stubs,
+    restart cut-off), `134` (host restarts, ticks, busy project.yaml),
+    `135` (holding a refiner at the router stub, ask limit) and `126`/`131`
+    (two clones). Copy them, re-point any `/scratch/s1NN` path, and
+    recreate the trees, venv and `agg`. Podman gotcha from S136: killing a
+    setup that owns the podman pause process breaks podman until the stale
+    `pause.pid` is removed. If a scenario container's push proxy is wired
+    to a sibling (pr-bd298f4), push from the host clone. Not to redo as
+    such: S103–S137.
+    - S138: container mode (podman 3, slirp4netns). RQ57 container
+      windows on a fresh setup, beside other live runs:
+      - a resumed run of another PR in the same TUI;
+      - another PR's live container `pm qa run`;
+      - an unrouted tick-driven run;
+      - a second clone, sharing `~/.pm` and podman, restarted at the same
+        moment with a cut-off run of the same PR id.
+      Only the dead run's windows die, and `z t` removes only its
+      containers. Routing is as in RQ52/R9.
+    - S139: host, fake-claude. The S134 core with the decided Thens on the
+      final HEAD:
+      - a user `t` run cut off by a restart;
+      - a breadcrumb restart with a cut-off target and a cut-off
+        non-target;
+      - an owed REQA re-run reopened, and the busy-project.yaml fallback;
+      - other processes' runs left untouched;
+      - ticks as in the RQ57 "Ticks" bullet.
+      The control 74cebe25 matches HEAD.
+
+## 3. Edge cases
+
+- **E1** Given `--type router` with `--api-key`, When adding, Then refused
+  with "A router holds its own credentials…"; without `--model`, refused.
+- **E2** Given `qa_scenario` set to `provider:nosuch` (not in
+  providers.yaml), When QA launches a worker or the user runs
+  `pm provider test nosuch`, Then it is refused with a "not configured"
+  problem and the remedy names configuring the provider or moving its
+  sessions back to a model — never a silent launch on built-in claude.
+  Since 2026-10-27 (RQ53) QA stops with `QA stopped: …` before any
+  scenario launches instead of waiting.
+- **E3** *(retired 2026-10-27, R11; see RQ49.)* Given an entry with
+  `credentials_file` pointing at an expired file and a
+  `refresh_command`, When preflight runs, Then neither is read or run,
+  and list/show warn about the ignored keys. (Since 2026-10-27 a launch
+  does not depend on the router answering either, RQ52.)
+- **E4** Given a stub that pauses >10 s mid-stream, When a container worker
+  streams through the bridge, Then the response completes (no EOF at the
+  connect timeout).
+- **E5** Given a project directory (cwd / `/workspace`) containing its own
+  `pm_core` package, When the bridge starts on host or ensure runs in the
+  container, Then the bridge still works (runs the file isolated).
+- **E6** Given the host bridge process killed while containers run, When
+  the next routed launch/check happens, Then the bridge restarts at the
+  same socket path and existing containers reach it through their mount.
+- **E7** Given the bridge dir replaced by a symlink (or not owned by the
+  user), When preflight runs, Then it refuses (no mount to an unsafe path).
+- **E8** Given a PR-level `model` override or `PM_MODEL`, When QA
+  launches workers, Then the override wins consistently for initial,
+  queued, retry and resumed launches (explicit user choice, no gate).
+- **E9** Given only `qa_scenario` set to a plain model (legacy config, no
+  `qa_interactive`), When s0 launches, Then s0 keeps that plain model; if
+  `qa_scenario` is a router provider, s0 does not follow it.
+- **E9a** Given a pm-managed session whose cwd contains `_` (or spaces,
+  `+`, …), When pm computes its transcript path (hook pollers, s0/planner
+  transcript symlinks, live probe), Then it matches the directory real
+  Claude writes (`-` for every non-alphanumeric character).
+- **E10** Given `ANTHROPIC_API_KEY` exported in the user's environment,
+  When a routed session starts, Then the key is not visible to that
+  claude process, but unrouted sessions keep it.
+
+## 4. Pass / fail criteria
+
+Pass: every Then above observed on the user surface (CLI output, TUI
+status line / pane, stub-router request log, transcripts, hook output,
+`podman inspect`, pm logs). In particular: the stub sees only `work/`
+models and only from refiner/worker sessions; s0/planner/verifier/finalizer
+never hit the stub; a route outage never produces a launch on the main
+endpoint, and is handled like an outage of the default provider (RQ52:
+no route wait, deferral or nudge; ordinary reminders, relaunches and
+results); no secret values in any artifact.
+
+With a PR-level override (RQ39) "routed" means the role's resolved
+setting selects the route. For that PR the router may then see every
+role, while another PR's unrouted roles must still reach only main.
+
+Fail: any routed request reaching the main endpoint or a non-`work/`
+model (subagent requests included, RQ42), any unrouted role hitting the router, any
+route-specific wait, deferral, stall/recovery line or nudge (RQ52), a
+setup error that waits instead of failing (RQ53), a leaked throwaway
+container, a token value in output/logs, or hooks/transcripts missing for
+routed sessions.
+
+## 5. Ambiguities (resolved)
+
+- *Real work account in QA.* Not available in scenario containers (tokens
+  stay on the host; supervisor already ran the real host + container smoke,
+  impl.md §5). Scenarios use a stub router that mimics the `work/`-prefix
+  contract; real end-to-end transport (bridge, slirp4netns, claude, hooks,
+  transcripts) is still exercised.
+- *How to exercise routes with fake-claude.* A fake never uses the
+  network, so routed roles run real `claude` against the stub; other
+  roles may be faked. (There is no route gate since 2026-10-27.)
+- *Config changes mid-run.* Route/model config takes effect on the next
+  QA run (impl.md §3) and is not tested as a live switch. The one live
+  switch that is tested is `qa-verify-pass` (RQ28): a running loop keeps
+  the value its poll read at start.
+- *Launcher in container mode.* Containers never use the launcher (always
+  `claude` + bridge).

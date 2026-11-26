@@ -4,7 +4,9 @@ Tracks tmux panes that are running a Claude session; "idle" means the
 session has emitted an ``idle_prompt`` hook event (i.e. Claude's turn
 is over and it is waiting for the next user message).  The TUI polls
 this tracker on its timer; pane liveness is verified via
-``tmux.pane_exists`` but the *content* is never scraped.
+``tmux.pane_exists`` and the *content* is never scraped for state —
+the one exception is the workspace-trust dialog, which fires no hook, so
+a pane with no hook event yet is captured (rate-limited) to detect it.
 
 Every ``register`` caller must supply a ``transcript_path`` — either a
 symlink created by ``build_claude_shell_cmd(transcript=...)`` or a
@@ -24,7 +26,10 @@ import time
 from dataclasses import dataclass
 
 from pm_core import tmux as tmux_mod
-from pm_core.claude_launcher import session_id_from_transcript
+from pm_core.claude_launcher import (
+    WorkspacePromptWatch,
+    session_id_from_transcript,
+)
 from pm_core.paths import configure_logger
 
 _log = configure_logger("pm.pane_idle")
@@ -37,12 +42,14 @@ class PaneIdleState:
     Three orthogonal flags:
 
     * ``idle`` — the agent emitted ``idle_prompt`` (turn ended, waiting
-      for the next user message).
+      for the next user message); cleared by ``user_prompt`` (a new
+      turn was submitted).
     * ``waiting_for_input`` — the agent emitted ``permission_prompt``
       (Claude Code is showing its own tool-approval dialog and is
       blocked until the user responds).  This is a distinct "the user
       needs to do something *right now*" state that the TUI renders
-      differently from plain idle.
+      differently from plain idle.  It is also set before the first
+      hook event while the pane shows the workspace-trust dialog.
     * ``gone`` — the tmux pane disappeared (session exited / crashed).
 
     ``idle`` and ``waiting_for_input`` are mutually exclusive: the
@@ -58,6 +65,9 @@ class PaneIdleState:
     idle: bool = False
     waiting_for_input: bool = False
     gone: bool = False
+    # Watches for the workspace-trust dialog until the first hook event
+    # (a session stuck there never emits one).
+    trust_watch: WorkspacePromptWatch | None = None
     idle_notified: bool = False
 
 
@@ -130,9 +140,29 @@ class PaneIdleTracker:
 
         event = hook_events.read_event(session_id)
         if not event:
+            # No hook event yet: the session may be sitting at the
+            # workspace-trust dialog, which fires no hook.  Surface it as
+            # waiting-for-input (and let the watch accept it when the
+            # dialog names an approved host directory) rather than leaving
+            # the pane silently "busy".
             with self._lock:
                 state = self._states.get(key)
-                return bool(state and state.idle)
+                watch = state.trust_watch if state else None
+            if state and (watch is None or watch.pane_id != pane_id):
+                watch = WorkspacePromptWatch(
+                    pane_id, transcript_path=state.transcript_path)
+            if watch is not None:
+                watch.check()
+            with self._lock:
+                state = self._states.get(key)
+                if not state or state.pane_id != pane_id:
+                    return False
+                state.trust_watch = watch
+                if watch is not None and watch.visible:
+                    state.waiting_for_input = True
+                elif watch is not None and state.waiting_for_input:
+                    state.waiting_for_input = False
+                return state.idle
 
         ev_ts = float(event.get("timestamp") or 0)
         with self._lock:
@@ -155,11 +185,25 @@ class PaneIdleTracker:
                     state.waiting_for_input = True
                     state.idle = False
                     state.idle_notified = False
+                elif etype == "user_prompt":
+                    # A new turn started (typed or sent by pm), so a pane
+                    # that went idle reads as working again and its next
+                    # idle_prompt counts as newly idle.
+                    state.idle = False
+                    state.waiting_for_input = False
+                    state.idle_notified = False
                 elif etype == "Stop":
                     # Stop fires per-turn (not only at session end), so
-                    # we don't flip state on it.  pane_exists is the
-                    # authoritative session-gone signal.
-                    pass
+                    # it never marks a pane gone; pane_exists is the
+                    # authoritative session-gone signal.  The hook file
+                    # holds only the latest event, so a turn answered
+                    # between two polls shows up as a Stop that replaced
+                    # its user_prompt: a Stop newer than an observed
+                    # idle_prompt is a new turn, working until Claude's
+                    # next idle_prompt (S35).
+                    if state.idle:
+                        state.idle = False
+                        state.idle_notified = False
             return state.idle
 
     # -- Pure reads --
@@ -235,7 +279,7 @@ class PaneIdleTracker:
 #   (picker's ``start`` action).
 # * ``qa:<pr_id>:s<N>`` — QA scenario pane (set by
 #   :mod:`pm_core.tui.qa_loop_ui`).  Mirrored as the picker's ``qa`` action.
-# * ``merge:<pr_id>`` — merge resolution window; mirrored as the
+# * ``merge:<pr_id>`` — post-merge repo-update window; mirrored as the
 #   picker's ``merge`` action so the merge row shows [working]/[idle]/
 #   [wait] alongside the impl and QA rows.
 # * ``review:<pr_id>`` — non-loop review pane; mirrored as the picker's
