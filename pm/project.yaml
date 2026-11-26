@@ -31077,7 +31077,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/222
   gh_pr_number: 222
   created_at: '2026-05-21T04:06:05.061620+00:00'
-  updated_at: '2026-11-26T20:25:03.729968+00:00'
+  updated_at: '2026-11-26T21:00:16.997682+00:00'
   started_at: '2026-05-25T02:58:20.169677+00:00'
   reviewed_at: '2026-05-25T03:13:02.415469+00:00'
   merged_at: null
@@ -31507,6 +31507,22 @@ prs:
       (probe pre/post-fix): full suite 5735 passed / 1 skipped.'
     created_at: '2026-11-26T20:25:03Z'
     last_edited: '2026-11-26T20:25:03Z'
+  - id: note-c1ec955
+    text: 'Review loop c6a2 i9 (05534b5e): NEEDS_WORK, fixed + pushed. The leaked-stash
+      reaper ran under the registry lock, and judging an older pm auto-stash that
+      carries a registry change parses two full registries; a kept one is judged again
+      on every update. 7 such stashes on this repo 3.4 MB registry held the lock 11.6
+      s per update while pm CLI writers give up after 2 s (probe: 5 writer lock timeouts
+      in one update pre-fix, 0 post-fix, longest acquire 0.05 s). _reap_auto_stashes(repo,
+      root) now runs after the update releases the lock and judges lock-free; only
+      the drops take the lock (2 s, busy = left for the next update), each after re-checking
+      the stash files and that the live registry text is unchanged since its structural
+      verdict, so an in-flight auto-stash is still never dropped. Total update time
+      is unchanged (the parsing still happens, just not under the lock). +3 tests,
+      1 rewritten (fails on 7ccdc797). Spec R2/2c/5 updated. Evidence /pm-captures/review-c6a2-i9:
+      full suite 5738 passed / 1 skipped; reap_lock_probe.py pre/post.'
+    created_at: '2026-11-26T21:00:16Z'
+    last_edited: '2026-11-26T21:00:16Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-ca6981c-bug-pm-merge-s-git-stash-pop-corrupt-ac115969
 - id: pr-c41f029
   plan: bugs
