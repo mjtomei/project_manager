@@ -25,8 +25,9 @@ def _bug_fix_flow_block(pr: dict, has_architecture: bool = False) -> str:
     the PR's local id.
 
     *has_architecture* is True when the impl prompt carries the project's
-    ``pm/architecture.md`` block (``notes.architecture_section``); the Fix
-    step then points at its DP map and its structural-debt filing rule.
+    ``pm/architecture.md`` block
+    (``architecture_prompts.architecture_section``); the Fix step then
+    points at its DP map and its structural-debt filing rule.
     """
     seg = pr["id"]
     fix_arch = ""
@@ -87,7 +88,8 @@ def _bug_fix_review_block(pr: dict, has_architecture: bool = False) -> str:
     `pm qa captures-path <pr-id>`.
 
     *has_architecture* adds a check against the review prompt's
-    ``pm/architecture.md`` block (``notes.architecture_section``).
+    ``pm/architecture.md`` block
+    (``architecture_prompts.architecture_section``).
     """
     seg = pr["id"]
     arch_check = ""

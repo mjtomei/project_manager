@@ -385,4 +385,6 @@ class TestPlanPrompts:
              patch("pm_core.cli.plan._get_pm_session", return_value=None):
             result = CliRunner().invoke(cli, ["-C", str(pm_root), "plan", "deps"])
         assert result.exit_code == 0, result.output
+        # The deps prompt was printed, so its absence below is meaningful.
+        assert "dependency graph between PRs" in result.output
         assert ARCH_HEADER not in result.output

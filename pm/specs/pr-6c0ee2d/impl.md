@@ -28,7 +28,9 @@ refactor PR depend on it).
   `bug_fix_prompts` / `regression_prompts`), not in `notes.py`: the plan's
   target table puts `notes` in DP2 ("notes primitives") and role prompt
   modules in DP7, so rewording a role's guidance must not touch the state
-  module (review-loop 322e i1):
+  module (review-loop 322e i1). The plan's DP7 row lists
+  `architecture_prompts` so the baseline seeding (pr-75abaff) maps it
+  (review-loop 322e i2):
   - `PROMPT_TYPES = ("plan", "impl", "review")`
   - `architecture_section(root, prompt_type, *, pr_id=None,
     max_bytes=ARCHITECTURE_BUDGET) -> str`: the prompt block (see R2).
