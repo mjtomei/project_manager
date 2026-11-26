@@ -595,6 +595,63 @@ class TestRegistryAcrossFastForward:
         assert store.find_conflict_markers(
             (pm / "project.yaml").read_text()) == []
 
+    def test_target_already_in_head_leaves_registry_alone(self, tmp_path):
+        """An update to a commit HEAD already contains is a no-op ("Already
+        up to date").  Merging toward that commit's older registry reverted
+        the newer committed changes in the live state and staged the old
+        blob (review c6a2 i3)."""
+        repo = _init_repo(tmp_path)
+        pm = _seed_project(repo)
+        old = _git("rev-parse", "HEAD", cwd=repo).stdout.strip()
+        _edit(pm, _add_note("note-1", "committed after old"))
+        _git("commit", "-qam", "c1", cwd=repo)
+        _edit(pm, lambda d: _pr(d, "pr-002").update(title="local"))
+        before = (pm / "project.yaml").read_text()
+
+        r = pr_mod._ff_with_autostash(repo, old)
+        assert r.returncode == 0, r.stderr
+        assert (pm / "project.yaml").read_text() == before
+        assert _git("diff", "--cached", "--name-only", cwd=repo).stdout == ""
+
+    def test_other_update_moving_head_past_the_target_reverts_nothing(
+            self, tmp_path):
+        """Two concurrent updates: the other one fast-forwards HEAD *past*
+        this one's pinned target while this one plans.  Re-planning under the
+        lock must not merge toward the older target (that reverted the newer
+        commit's registry changes and staged the older blob)."""
+        repo = _init_repo(tmp_path)
+        pm = _seed_project(repo)
+        _git("checkout", "-q", "-b", "incoming", cwd=repo)
+        _edit(pm, _add_note("note-1", "first merge"))
+        _git("commit", "-qam", "c1", cwd=repo)
+        c1 = _git("rev-parse", "HEAD", cwd=repo).stdout.strip()
+        _edit(pm, lambda d: _pr(d, "pr-002").update(description="c2"))
+        _git("commit", "-qam", "c2", cwd=repo)
+        c2 = _git("rev-parse", "HEAD", cwd=repo).stdout.strip()
+        _git("checkout", "-q", "master", cwd=repo)
+        _edit(pm, lambda d: _pr(d, "pr-002").update(title="local"))
+        real_plan = pr_mod._plan_registry
+        other = []
+
+        def plan_then_other_update(repo_, target):
+            p = real_plan(repo_, target)
+            if not other:
+                other.append(None)
+                other[0] = pr_mod._ff_with_autostash(repo, c2)
+            return p
+
+        with mock.patch.object(pr_mod, "_plan_registry",
+                               side_effect=plan_then_other_update):
+            r = pr_mod._ff_with_autostash(repo, c1)
+        assert other[0].returncode == 0, other[0].stderr
+        assert r.returncode == 0, r.stderr
+        assert _git("rev-parse", "HEAD", cwd=repo).stdout.strip() == c2
+        d = store.load(pm)
+        assert [n["id"] for n in _pr(d, "pr-001")["notes"]] == ["note-1"]
+        assert _pr(d, "pr-002")["description"] == "c2"
+        assert _pr(d, "pr-002")["title"] == "local"
+        assert _git("diff", "--cached", "--name-only", cwd=repo).stdout == ""
+
 
 # ---------------------------------------------------------------------------
 # Locking: concurrent writers serialize against the whole fast-forward

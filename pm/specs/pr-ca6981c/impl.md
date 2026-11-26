@@ -222,8 +222,12 @@ otherwise make git itself text-stash the swapped-in registry, reset it and
 pop it back over the incoming one: conflict markers and a leaked stash, with
 rc 0 (review c6a2 i1).
 
-`_plan_registry` runs only when the target changes `pm/project.yaml` and
-both HEAD and the target hold it. It needs a single stage-0 index entry
+`_plan_registry` runs only when the target changes `pm/project.yaml`,
+both HEAD and the target hold it, and the update is a real fast-forward
+(HEAD is an ancestor of the target). When HEAD already contains the target
+or has diverged, git leaves the file alone, and merging toward the target's
+older blob would revert committed registry changes in the live state and
+stage that older blob (review c6a2 i3). It needs a single stage-0 index entry
 and a live file that is valid, free of markers and a mapping; otherwise it
 returns None and git treats the file like any other.
 - It computes `merge_3way(base=HEAD blob, ours=target blob, theirs=live)`.
@@ -318,7 +322,8 @@ lock is a different one.
 - **Two updates of the same repo** (concurrent merges, a fetch during the
   plan): they serialize on the lock. The target is pinned, a moved HEAD
   triggers a re-plan, and reaping never sees the other update's in-flight
-  auto-stash.
+  auto-stash. If the other update got *past* this one's target, the re-plan
+  finds no fast-forward and plans nothing ("Already up to date").
 - **Stash-pop conflict in ordinary files:** the update has landed and the
   registry is reconciled and valid. The stash is kept with a drop
   instruction. No window opens (master no longer opens merge windows).
@@ -354,7 +359,9 @@ lock is a different one.
   - a user's `merge.autoStash=true` never text-stashes the registry;
   - the target ref moving while planning is ignored (pinned commit);
   - another update moving HEAD before the lock triggers a re-plan, and the
-    stash still pops cleanly.
+    stash still pops cleanly;
+  - a target HEAD already contains leaves the registry and the index alone,
+    also when another update moved HEAD past it during the plan.
 - Locking:
   - the lock is held during every rewriting git step (first fast-forward
     included) and released afterwards;

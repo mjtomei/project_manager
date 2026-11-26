@@ -3257,16 +3257,24 @@ def _plan_registry(repo: Path, target: str) -> dict | None:
     (parsing and dumping a large registry is the slow part); the apply step
     re-checks the live text under the lock.
 
-    None when the target does not change the registry, or it cannot be merged
-    structurally (unreadable, invalid, conflict markers, untracked, an
-    unmerged index entry) — git then handles it like any other file.
+    None when the target does not change the registry, the update is not a
+    fast-forward, or the registry cannot be merged structurally (unreadable,
+    invalid, conflict markers, untracked, an unmerged index entry) — git
+    then handles it like any other file.
     """
+    from pm_core import integration
     root = _registry_root(repo)
     if root is None:
         return None
     head = _tree_entry(repo, "HEAD", _REGISTRY_REL)
     incoming = _tree_entry(repo, target, _REGISTRY_REL)
     if head is None or incoming is None or head == incoming:
+        return None
+    if not integration.is_ancestor(repo, "HEAD", target):
+        # Not a fast-forward: HEAD already contains the target ("Already up
+        # to date": another update got further first) or has diverged, and
+        # git leaves the registry alone.  Merging toward the target's older
+        # blob would revert committed registry changes in the live state.
         return None
     ls = git_ops.run_git("ls-files", "-s", "-z", "--", _REGISTRY_REL,
                          cwd=repo, check=False)
