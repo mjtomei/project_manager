@@ -31077,7 +31077,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/222
   gh_pr_number: 222
   created_at: '2026-05-21T04:06:05.061620+00:00'
-  updated_at: '2026-11-26T17:51:33.641739+00:00'
+  updated_at: '2026-11-26T18:20:04.681109+00:00'
   started_at: '2026-05-25T02:58:20.169677+00:00'
   reviewed_at: '2026-05-25T03:13:02.415469+00:00'
   merged_at: null
@@ -31418,6 +31418,23 @@ prs:
       same order as any pm write.'
     created_at: '2026-11-26T17:51:33Z'
     last_edited: '2026-11-26T17:51:33Z'
+  - id: note-ebb3e12
+    text: 'Review loop c6a2 i4 (246adb24): NEEDS_WORK, fixed + pushed. (1) `git merge
+      --no-autostash` and merge.autoStash appeared in git 2.27; an older git (e.g.
+      Ubuntu 20.04 2.25) rejects the unknown option (rc 129), so every local publish
+      and post-publish pull would fail. `_no_autostash()` passes it only on git >=
+      2.27, or when the version is unknown; nothing else in the merge path needs newer
+      git. (2) `_plan_registry` parses the HEAD and target registries once and keeps
+      them in the plan. A re-merge under the lock (the live file changed after planning,
+      the usual case with concurrent writers) now parses only the live text instead
+      of three full registries. `_parse_registry` is shared with the reaper check.
+      +5 test cases (version gate x4; writer between plan and lock survives, with
+      a single parse under the lock). Spec 2c/5 updated. Evidence /pm-captures/review-c6a2-i4:
+      full suite 5722 passed / 1 skipped; S74 harness PASS 4/4 + dirty 3/3. Considered,
+      not changed: moving the ~600-line stash/registry section out of pr.py (master
+      section; mocked tests patch pm_core.cli.pr.git_ops).'
+    created_at: '2026-11-26T18:20:04Z'
+    last_edited: '2026-11-26T18:20:04Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-ca6981c-bug-pm-merge-s-git-stash-pop-corrupt-ac115969
 - id: pr-c41f029
   plan: bugs
