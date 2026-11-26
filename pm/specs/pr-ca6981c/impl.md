@@ -94,8 +94,11 @@ R2. **No leaked stash.**
     - pm's own auto-stash is popped and dropped after the update.
     - If the pop conflicts, or git refuses it, the stash is **kept on
       purpose**, with explicit instructions: conflicted files get "resolve,
-      then `git stash drop <ref>`"; a refused pop gets "nothing was lost,
-      `git stash pop <ref>`". Leaving it is what keeps user changes safe.
+      then `git stash drop <ref>`"; a refused pop gets "nothing was lost;
+      compare with the working tree, restore what is missing, then
+      `git stash drop <ref>`" (not "pop it again": git may have applied
+      part of it, review c6a2 i7). Leaving it is what keeps user changes
+      safe.
     - Leaked `pm: auto-stash for merge` entries from earlier runs are reaped
       after a successful update, but only those whose changes are already in
       the working tree. Others are listed, never silently dropped. Other
@@ -286,7 +289,15 @@ position:
   `_resolve_project_yaml_pop(cwd, ref)`, which merges only real pm
   registries. A lock failure there counts as unresolved. Otherwise the
   stash is kept with a "resolve, then `git stash drop <ref>`" instruction.
-- If git refuses the pop, the stash is kept ("Nothing was lost").
+- If git refuses the pop, the stash is kept ("Nothing was lost"). The
+  message does not suggest popping it again: git >= 2.34 restores the
+  tracked changes before it refuses an untracked file that now exists, and
+  a failed drop comes after a full apply, so a second pop would refuse on
+  the restored part. It says to compare the stash with the working tree
+  (`git stash show -p`, `git show <ref>^3:<path>`), restore what is
+  missing and drop it. Which files the pop restored cannot be read off by
+  blob equality (a pop merges each change into the new HEAD), so the
+  message does not list them (review c6a2 i7).
 
 `_reap_auto_stashes` drops an entry whose message is exactly `pm: auto-stash
 for merge` when its changes are already applied:
@@ -349,7 +360,9 @@ lock is a different one.
   registry is reconciled and valid. The stash is kept with a drop
   instruction. No window opens (master no longer opens merge windows).
 - **A pop git refuses** (e.g. an untracked stashed file now exists from the
-  merge): nothing is applied, the stash is kept, and the message names it.
+  merge): the stash is kept, and the message names it. git >= 2.34 has
+  already applied the tracked part then, so the message says to restore
+  the rest by hand and drop it, not to pop again.
   This covers the rescope note's open item (2) for every file type; the
   registry can no longer be the cause.
 - **Old leaked auto-stashes** (the main repo held 7): applied ones are
@@ -368,7 +381,9 @@ lock is a different one.
   - overlapping edits reconcile (live wins, merged-in note and field kept,
     no markers, no stash, HEAD == target, nothing staged);
   - finalize gives merged + `merged_at`;
-  - other dirty and untracked files are stashed and restored;
+  - other dirty and untracked files are stashed and restored (the stash
+    path is asserted to run: the registry swap alone no longer blocks the
+    fast-forward);
   - a fast-forward that fails after the swap and the stash restores the
     exact registry bytes and the index (the restore is asserted to run:
     a diverged base plans nothing since i3);
@@ -407,6 +422,8 @@ lock is a different one.
     window (the warning names a path with a space unsplit);
   - a refused pop keeps the stash intact, also under a user's
     `status.showUntrackedFiles=no`;
+  - a partly applied pop (untracked collision; a failed drop) keeps the
+    stash and never suggests popping it again;
   - reaping drops applied entries (files plus a structural registry case)
     and keeps a non-applied entry and WIP;
   - a leaked stashed rename is kept while its old path still exists.

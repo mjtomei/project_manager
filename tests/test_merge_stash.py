@@ -330,21 +330,36 @@ class TestRegistryAcrossFastForward:
         assert final.get("merged_at")
 
     def test_other_dirty_files_stashed_and_restored(self, tmp_path):
+        """code.txt blocks the fast-forward, so every dirty file but the
+        registry (an untracked one with a space in its name too) goes
+        through the stash and comes back with the clean pop."""
         repo = _init_repo(tmp_path)
         pm = _seed_project(repo)
-        (repo / "code.txt").write_text("v1\n")
+        (repo / "code.txt").write_text("a\nb\nc\nd\ne\n")
         _git("add", "code.txt", cwd=repo)
         _git("commit", "-q", "-m", "code", cwd=repo)
-        _incoming(repo, pm, _add_note("note-in", "x"))
+        _incoming(repo, pm, _add_note("note-in", "x"),
+                  files={"code.txt": "A\nb\nc\nd\ne\n"})
         _edit(pm, lambda d: _pr(d, "pr-001").update(updated_at="local"))
-        (repo / "code.txt").write_text("v1\nlocal change\n")
+        (repo / "code.txt").write_text("a\nb\nc\nd\nE\n")
         (repo / "scratch file.txt").write_text("untracked\n")
 
-        r = pr_mod._ff_with_autostash(repo, "incoming")
+        stashed = []
+        real_stash = pr_mod._stash_for_merge
+
+        def stash(*args, **kw):
+            stashed.append(real_stash(*args, **kw))
+            return stashed[-1]
+
+        with mock.patch.object(pr_mod, "_stash_for_merge", side_effect=stash):
+            r = pr_mod._ff_with_autostash(repo, "incoming")
         assert r.returncode == 0, r.stderr
-        assert (repo / "code.txt").read_text() == "v1\nlocal change\n"
+        assert [s and s["count"] for s in stashed] == [2]   # the stash path
+        assert (repo / "code.txt").read_text() == "A\nb\nc\nd\nE\n"
         assert (repo / "scratch file.txt").read_text() == "untracked\n"
-        assert _pr(store.load(pm), "pr-001")["updated_at"] == "local"
+        d = store.load(pm)
+        assert _pr(d, "pr-001")["updated_at"] == "local"
+        assert [n["id"] for n in _pr(d, "pr-001")["notes"]] == ["note-in"]
         assert _stash_list(repo) == ""
 
     def test_failed_ff_restores_exact_local_registry(self, tmp_path):
@@ -995,6 +1010,63 @@ class TestStashRestoreAndReap:
         assert "auto-stash for merge" in _stash_list(repo)
         shown = _git("show", "stash@{0}^3:new.txt", cwd=repo).stdout
         assert shown == "mine\n"
+
+    @staticmethod
+    def _assert_partial_restore_hint(err):
+        """A second pop would refuse on what is already restored: say so,
+        and finish with a drop after restoring the rest by hand."""
+        assert "may have restored part of them already" in err
+        assert "`git stash pop stash@{0}` then refuses again" in err
+        assert "`git show stash@{0}^3:<path>`" in err
+        assert err.rstrip().endswith("`git stash drop stash@{0}`.")
+
+    def test_partly_refused_pop_does_not_suggest_popping_again(
+            self, tmp_path, capsys):
+        """git >= 2.34 restores a stash's tracked changes before it refuses
+        an untracked file that now exists, so a second `git stash pop` would
+        refuse on code.txt (seen on 2.34)."""
+        repo = _init_repo(tmp_path)
+        pm = _seed_project(repo)
+        (repo / "code.txt").write_text("v1\n")
+        _git("add", "code.txt", cwd=repo)
+        _git("commit", "-q", "-m", "code", cwd=repo)
+        _incoming(repo, pm, files={"new.txt": "from the branch\n"})
+        (repo / "code.txt").write_text("v1 local\n")      # stashed too
+        (repo / "new.txt").write_text("mine\n")
+
+        r = pr_mod._ff_with_autostash(repo, "incoming")
+        assert r.returncode == 0
+        assert "auto-stash for merge" in _stash_list(repo)
+        self._assert_partial_restore_hint(capsys.readouterr().err)
+
+    def test_pop_whose_drop_fails_does_not_suggest_popping_again(
+            self, tmp_path, capsys):
+        """`git stash pop` is apply + drop: when only the drop fails (e.g.
+        another stash command holds refs/stash.lock) every change is back
+        and the stash is kept."""
+        repo = _init_repo(tmp_path)
+        pm = _seed_project(repo)
+        (repo / "code.txt").write_text("a\nb\nc\nd\ne\n")
+        _git("add", "code.txt", cwd=repo)
+        _git("commit", "-q", "-m", "code", cwd=repo)
+        _incoming(repo, pm, files={"code.txt": "A\nb\nc\nd\ne\n"})
+        (repo / "code.txt").write_text("a\nb\nc\nd\nE\n")
+        real = pr_mod.git_ops.run_git
+
+        def run_git(*args, **kw):
+            if args[:2] == ("stash", "pop"):
+                real("stash", "apply", *args[2:], **kw)
+                return subprocess.CompletedProcess(
+                    args, 1, "", "error: cannot lock ref 'refs/stash'")
+            return real(*args, **kw)
+
+        with mock.patch.object(pr_mod.git_ops, "run_git",
+                               side_effect=run_git):
+            r = pr_mod._ff_with_autostash(repo, "incoming")
+        assert r.returncode == 0
+        assert (repo / "code.txt").read_text() == "A\nb\nc\nd\nE\n"
+        assert "auto-stash for merge" in _stash_list(repo)
+        self._assert_partial_restore_hint(capsys.readouterr().err)
 
     def test_leaked_auto_stashes_reaped_only_when_already_applied(
             self, tmp_path, capsys):

@@ -3555,12 +3555,19 @@ def _restore_merge_stash(cwd: Path, sha: str, count: int) -> bool:
                    f"now hold conflict markers. The stash is kept as {ref} "
                    f"('{_AUTO_STASH_MSG}'): resolve the files, then run "
                    f"`git stash drop {ref}`.", err=True)
-    else:
-        click.echo(f"Warning: git could not restore your auto-stashed local "
-                   f"changes:\n{git_ops.git_detail(pop_r)}\n  Nothing was "
-                   f"lost: they are kept as {ref} ('{_AUTO_STASH_MSG}'). "
-                   f"Restore them with `git stash pop {ref}` once that is "
-                   f"fixed.", err=True)
+        return False
+    # A refused pop can still have applied part of the stash: git >= 2.34
+    # restores the tracked changes before it refuses an untracked file that
+    # now exists (and a failed drop comes after a full apply), so a second
+    # `git stash pop` would refuse on the restored part.
+    click.echo(f"Warning: git could not restore all of your auto-stashed "
+               f"local changes:\n{git_ops.git_detail(pop_r)}\n  Nothing was "
+               f"lost: {ref} ('{_AUTO_STASH_MSG}') still holds every change, "
+               f"but git may have restored part of them already, and "
+               f"`git stash pop {ref}` then refuses again. Compare it with "
+               f"the working tree (`git stash show -p {ref}`; an untracked "
+               f"file: `git show {ref}^3:<path>`), restore what is missing, "
+               f"then run `git stash drop {ref}`.", err=True)
     return False
 
 
