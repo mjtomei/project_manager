@@ -3335,7 +3335,8 @@ def pr_cleanup(pr_id: str | None, force: bool, cleanup_all: bool, prune: bool,
         from pm_core import pr_cleanup as pr_cleanup_mod
         from pm_core.loop_shared import get_pm_session
         session = get_pm_session()
-        summary = pr_cleanup_mod.cleanup_pr_resources(session, target)
+        summary = pr_cleanup_mod.cleanup_pr_resources(session, target,
+                                                      wait_reclaim=True)
         click.echo(f"Cleaned {target['id']}: {pr_cleanup_mod.format_summary(summary)}")
         if summary["windows"]:
             click.echo(f"  windows: {', '.join(summary['windows'])}")

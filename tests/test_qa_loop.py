@@ -431,17 +431,62 @@ class TestQAWorkdirs:
         assert "qa" in str(wd)
         assert "pr-001-abc123" in str(wd)
 
-    def test_create_scenario_workdir(self, tmp_path):
-        d, scratch = create_scenario_workdir(tmp_path, 1)
+    def test_create_scenario_workdir(self, tmp_path, monkeypatch):
+        """Source goes under the run's workdir, scratch under the local
+        scratch root — never under the (possibly network) workdir."""
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path / "home")
+        qa_workdir = tmp_path / "pr-001-abc"
+        d, scratch = create_scenario_workdir(qa_workdir, 1)
         assert d.exists()
         assert d.name == "repo"
         assert d.parent.name == "s-1"
         assert scratch.exists()
-        assert scratch.name == "scratch"
-        assert scratch.parent.name == "s-1"
+        assert scratch == (tmp_path / "home" / ".pm" / "scratch" / "qa"
+                           / "pr-001-abc" / "s-1")
+        assert not (qa_workdir / "s-1" / "scratch").exists()
 
-    def test_create_scenario_workdir_with_clone(self, tmp_path):
-        """Clone mode creates repo + scratch under s-N/."""
+    def test_create_scenario_workdir_keeps_legacy_scratch(self, tmp_path,
+                                                         monkeypatch):
+        """A run started before scratch moved keeps the scratch dir its
+        container already mounts."""
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path / "home")
+        legacy = tmp_path / "run" / "s-2" / "scratch"
+        legacy.mkdir(parents=True)
+        _, scratch = create_scenario_workdir(tmp_path / "run", 2)
+        assert scratch == legacy
+
+    def test_create_scenario_workdir_honours_scratch_dir(self, tmp_path,
+                                                        monkeypatch):
+        from pm_core.paths import set_global_setting_value
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path / "home")
+        set_global_setting_value("scratch-dir", str(tmp_path / "fast"))
+        _, scratch = create_scenario_workdir(tmp_path / "run", 3)
+        assert scratch == tmp_path / "fast" / "qa" / "run" / "s-3"
+
+    def test_create_scenario_workdir_refuses_network_scratch(
+            self, tmp_path, monkeypatch):
+        """Scratch holds private container engines: on a NAS it is refused
+        with the setting that moves it, never silently used."""
+        import pytest as _pytest
+        from pm_core import paths
+        from pm_core.paths import NonLocalPathError, set_global_setting_value
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path / "home")
+        nas = tmp_path / "nas"
+        nas.mkdir()
+        set_global_setting_value("scratch-dir", str(nas / "scratch"))
+        mountinfo = tmp_path / "mountinfo"
+        mountinfo.write_text(
+            "1 0 0:1 / / rw - ext4 /dev/sda1 rw\n"
+            f"2 1 0:2 / {nas} rw - nfs4 nas:/export rw\n")
+        monkeypatch.setattr(paths, "_MOUNTINFO", str(mountinfo))
+        with _pytest.raises(NonLocalPathError) as exc:
+            create_scenario_workdir(tmp_path / "run", 1)
+        assert "scratch-dir" in str(exc.value)
+        assert "nfs4" in str(exc.value)
+
+    def test_create_scenario_workdir_with_clone(self, tmp_path, monkeypatch):
+        """Clone mode creates repo under s-N/ and scratch on local scratch."""
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path / "home")
         qa_workdir = tmp_path / "qa"
         qa_workdir.mkdir()
 
@@ -463,8 +508,8 @@ class TestQAWorkdirs:
         assert clone_path.name == "repo"
         assert clone_path.parent.name == "s-1"
         assert scratch.exists()
-        assert scratch.name == "scratch"
-        assert scratch.parent.name == "s-1"
+        assert scratch == (tmp_path / "home" / ".pm" / "scratch" / "qa"
+                           / "qa" / "s-1")
 
     def test_clone_does_not_force_hardlinks(self, tmp_path):
         """The clone must not spell out ``--local``.
@@ -2022,6 +2067,8 @@ class TestScenarioRetryLogic:
         from pm_core import qa_loop
         clone = tmp_path / "s-5" / "repo"
         clone.mkdir(parents=True)
+        # The scenario's scratch (legacy layout: this run predates the move).
+        (tmp_path / "s-5" / "scratch").mkdir()
         sc = QAScenario(index=5, title="S78 one", focus="f")
         sc.window_name = "qa-pr-001-s5"
         sc.worktree_path = str(clone)

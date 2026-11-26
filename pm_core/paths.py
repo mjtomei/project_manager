@@ -61,11 +61,185 @@ def debug_dir() -> Path:
     return d
 
 
+# ---------------------------------------------------------------------------
+# Configurable locations
+#
+# Source workdirs and retained evidence may live on network storage (a NAS);
+# scratch, the shared image cache and container storage must stay on local
+# disk.  Each location is a global setting holding an absolute path
+# (``pm set <name> <path>``); unset means the default under ~/.pm.  Changing
+# a setting affects paths created afterwards — nothing is migrated.
+# ---------------------------------------------------------------------------
+
+WORKDIRS_DIR_SETTING = "workdirs-dir"
+CAPTURES_DIR_SETTING = "captures-dir"
+SCRATCH_DIR_SETTING = "scratch-dir"
+IMAGE_CACHE_DIR_SETTING = "image-cache-dir"
+
+# Settings whose location may be a NAS, and those that must be local.
+NETWORK_OK_PATH_SETTINGS = (WORKDIRS_DIR_SETTING, CAPTURES_DIR_SETTING)
+LOCAL_ONLY_PATH_SETTINGS = (SCRATCH_DIR_SETTING, IMAGE_CACHE_DIR_SETTING)
+PATH_SETTINGS = NETWORK_OK_PATH_SETTINGS + LOCAL_ONLY_PATH_SETTINGS
+
+
+def configured_dir(setting: str) -> Path | None:
+    """The absolute directory a path *setting* names, or None when unset.
+
+    ``~`` is expanded; a relative value (which ``pm set`` refuses) is taken
+    relative to the home directory rather than the caller's cwd.
+    """
+    raw = get_global_setting_value(setting, "")
+    if not raw:
+        return None
+    p = Path(os.path.expanduser(raw))
+    if not p.is_absolute():
+        p = Path.home() / p
+    return p
+
+
 def workdirs_base() -> Path:
-    """Return the workdirs base directory (~/.pm/workdirs/)."""
-    d = pm_home() / "workdirs"
+    """Return the workdirs base directory.
+
+    ``~/.pm/workdirs/`` unless the ``workdirs-dir`` setting names another
+    location (which may be a NAS).  Scratch never lives here — see
+    :func:`scratch_base`.
+    """
+    d = configured_dir(WORKDIRS_DIR_SETTING) or (pm_home() / "workdirs")
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def qa_workdirs_root() -> Path:
+    """Return the root of QA run workdirs (``<workdirs>/qa``).
+
+    Not created here: readers glob it and treat a missing root as "no runs".
+    """
+    return workdirs_base() / "qa"
+
+
+def scratch_base() -> Path:
+    """Return the local scratch root (``~/.pm/scratch/`` by default).
+
+    Throwaway test projects, private container engines and build scratch
+    live here, separate from source workdirs, so configuring workdirs onto a
+    NAS never moves container storage there.  Locality is checked where
+    scratch is created (:func:`require_local_path`).
+    """
+    d = configured_dir(SCRATCH_DIR_SETTING) or (pm_home() / "scratch")
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def scenario_scratch_dir(qa_workdir: Path, scenario_index: int) -> Path:
+    """Return the scratch dir of scenario *scenario_index* of a QA run.
+
+    The legacy location ``{qa_workdir}/s-N/scratch`` is kept when it already
+    exists, so a run started before scratch moved keeps the directory its
+    container mounts.  New runs get ``<scratch>/qa/<run>/s-N`` on local disk.
+    Not created here.
+    """
+    qa_workdir = Path(qa_workdir)
+    legacy = qa_workdir / f"s-{scenario_index}" / "scratch"
+    if legacy.is_dir():
+        return legacy
+    return scratch_base() / "qa" / qa_workdir.name / f"s-{scenario_index}"
+
+
+# Filesystem types that are network storage.  Container storage, runtime
+# dirs, the image cache and scratch must not be on any of these: rootless
+# overlay/fuse-overlayfs, sub-UID ownership and lock files are unreliable or
+# unsupported there, and every layer write would cross the network.
+NETWORK_FILESYSTEM_TYPES = frozenset({
+    "nfs", "nfs4", "cifs", "smb", "smb2", "smb3", "smbfs", "9p", "ceph",
+    "glusterfs", "lustre", "afs", "gpfs", "beegfs", "davfs", "ncpfs",
+    "coda", "ocfs2", "gfs2", "orangefs", "pvfs2",
+    "fuse.sshfs", "fuse.rclone", "fuse.s3fs", "fuse.gcsfuse",
+    "fuse.glusterfs", "fuse.cephfs", "fuse.ceph", "fuse.davfs2",
+    "fuse.goofys", "fuse.juicefs", "fuse.seaweedfs",
+})
+
+_MOUNTINFO = "/proc/self/mountinfo"
+
+
+def _unescape_mount_path(field: str) -> str:
+    """Decode the octal escapes (``\\040`` etc.) mountinfo uses."""
+    out, i = [], 0
+    while i < len(field):
+        if (field[i] == "\\" and i + 4 <= len(field)
+                and field[i + 1:i + 4].isdigit()):
+            out.append(chr(int(field[i + 1:i + 4], 8)))
+            i += 4
+        else:
+            out.append(field[i])
+            i += 1
+    return "".join(out)
+
+
+def filesystem_type(path: Path | str) -> str | None:
+    """Return the filesystem type the (possibly not yet existing) *path* is on.
+
+    Resolves the deepest existing ancestor and picks the longest mount point
+    containing it from ``/proc/self/mountinfo``.  Returns None when the
+    mount table cannot be read.
+    """
+    p = Path(os.path.abspath(os.path.expanduser(str(path))))
+    while not p.exists() and p != p.parent:
+        p = p.parent
+    try:
+        real = os.path.realpath(p)
+    except OSError:
+        real = str(p)
+    try:
+        lines = Path(_MOUNTINFO).read_text().splitlines()
+    except OSError:
+        return None
+    best_len, best_type = -1, None
+    for line in lines:
+        parts = line.split()
+        try:
+            sep = parts.index("-")
+            mount_point = _unescape_mount_path(parts[4])
+            fstype = parts[sep + 1]
+        except (ValueError, IndexError):
+            continue
+        if mount_point != "/" and not (real == mount_point
+                                       or real.startswith(mount_point + "/")):
+            continue
+        # Later lines over-mount earlier ones at the same point.
+        if len(mount_point) >= best_len:
+            best_len, best_type = len(mount_point), fstype
+    return best_type
+
+
+def is_network_filesystem(path: Path | str) -> bool:
+    """True when *path* is on a network filesystem (NFS, SMB, sshfs, …)."""
+    fstype = filesystem_type(path)
+    return bool(fstype) and fstype.lower() in NETWORK_FILESYSTEM_TYPES
+
+
+class NonLocalPathError(ValueError):
+    """A location that must be on local disk is on network storage."""
+
+
+def require_local_path(path: Path | str, purpose: str,
+                       setting: str | None = None) -> None:
+    """Raise :class:`NonLocalPathError` when *path* is on network storage.
+
+    *purpose* names what would live there ("QA scratch", "the image cache",
+    "container storage"); *setting* is the ``pm set`` name that relocates it.
+    """
+    fstype = filesystem_type(path)
+    if not fstype or fstype.lower() not in NETWORK_FILESYSTEM_TYPES:
+        return
+    remedy = (f"set '{setting}' to a directory on local disk "
+              f"(pm set {setting} <local-path>)" if setting
+              else "use a directory on local disk")
+    raise NonLocalPathError(
+        f"{purpose} must be on local disk, but {path} is on a network "
+        f"filesystem ({fstype}). Container storage, runtime dirs, the image "
+        f"cache and scratch are kept local; only source workdirs "
+        f"('{WORKDIRS_DIR_SETTING}') and evidence ('{CAPTURES_DIR_SETTING}') "
+        f"may live on network storage. To fix: {remedy}.")
 
 
 def _resolve_session_tag(start_path: Path | None = None) -> str | None:
@@ -126,7 +300,7 @@ def captures_dir(pr_id: str,
         session_tag = _resolve_session_tag(start_path)
     host_path: Path | None = None
     if session_tag:
-        host_path = sessions_dir() / session_tag / "captures" / pr_id
+        host_path = _captures_root_for_tag(session_tag) / pr_id
         if host_path.is_dir():
             return host_path
     mount = Path(CONTAINER_CAPTURES_MOUNT)
@@ -160,9 +334,19 @@ def captures_root(session_tag: str | None = None,
         session_tag = _resolve_session_tag(start_path)
     if not session_tag:
         return None
-    root = sessions_dir() / session_tag / "captures"
+    root = _captures_root_for_tag(session_tag)
     root.mkdir(parents=True, exist_ok=True)
     return root
+
+
+def _captures_root_for_tag(session_tag: str) -> Path:
+    """Captures root of one session: ``<captures-dir>/<tag>`` when the
+    ``captures-dir`` setting is set (evidence may live on a NAS), else
+    ``~/.pm/sessions/<tag>/captures``.  Not created here."""
+    configured = configured_dir(CAPTURES_DIR_SETTING)
+    if configured is not None:
+        return configured / session_tag
+    return sessions_dir() / session_tag / "captures"
 
 
 # Container-internal path where the host's captures_dir is bind-mounted
@@ -199,7 +383,7 @@ def latest_qa_status_path(pr_id: str) -> Path | None:
     """
     from pm_core.qa_loop import (is_instruction_run, launched_elsewhere,
                                  own_session_tag, read_run_record)
-    qa_dir = workdirs_base() / "qa"
+    qa_dir = qa_workdirs_root()
     if not qa_dir.is_dir():
         return None
     candidates = [p for p in qa_dir.glob(f"{pr_id}-*/qa_status.json")

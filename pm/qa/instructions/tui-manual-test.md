@@ -58,8 +58,12 @@ description: Test TUI changes against a throwaway project in the workdir. Includ
    filter that blocks `sethostname`. This is bootstrap-only project.yaml
    setup (same exception as the status edits above); enable container mode
    itself through the normal surface (`pm container enable`). The pm-dev
-   image already ships the other nesting prerequisites (uidmap file caps,
-   `/etc/subuid` for `pm`, fuse-overlayfs storage).
+   image ships the other nesting prerequisites (uidmap file caps,
+   `/etc/subuid` for `pm`, fuse-overlayfs), and pm mounts the shared image
+   cache, so the nested pm uses pm-dev without building or copying it.
+   Follow the **Nested Containers** instruction for everything about nested
+   engines (isolated engines, image-build fixtures, what not to do — no VFS,
+   no save/load, no rebuilds).
 4. Start the session from the test directory. The `pm session` command creates a tmux session and then tries to attach to it. Since Claude Code's Bash tool has no TTY, the attach will fail — but the session is still created and usable. Ignore the attach error:
    ```
    cd "$TEST_DIR" && pm session 2>/dev/null || true

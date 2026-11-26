@@ -264,7 +264,11 @@ _INT_SETTINGS = {"min-pane-width", "mobile-width-threshold",
                  "qa-max-scenarios", "qa-verify-retries",
                  "qa-verdict-reminder-timeout", "trust-prompt-grace-seconds"}
 _ENUM_SETTINGS = {"spec-mode": {"auto", "review", "prompt"},
-                  "container-runtime": {"docker", "podman"}}
+                  "container-runtime": {"docker", "podman"},
+                  "container-image-cache": {"auto", "on", "off"}}
+# Absolute directory paths; 'default' clears them (see pm_core.paths).
+_PATH_SETTINGS = {"workdirs-dir", "captures-dir", "scratch-dir",
+                  "image-cache-dir"}
 _SETTING_DEFAULTS = {
     "hide-assist": "off",
     "hide-merged": "off",
@@ -278,6 +282,11 @@ _SETTING_DEFAULTS = {
     "qa-verdict-reminder-timeout": "(unset)",
     "trust-prompt-grace-seconds": str(DEFAULT_PROMPT_GRACE_SECONDS),
     "spec-mode": "prompt",
+    "container-image-cache": "auto",
+    "workdirs-dir": "(default ~/.pm/workdirs)",
+    "captures-dir": "(default ~/.pm/sessions/<tag>/captures)",
+    "scratch-dir": "(default ~/.pm/scratch)",
+    "image-cache-dir": "(default ~/.pm/image-cache)",
 }
 _LIST_ALIASES = {"list", "ls", "l"}
 
@@ -285,7 +294,8 @@ _LIST_ALIASES = {"list", "ls", "l"}
 def _list_settings():
     """Print all settings and their current values."""
     from pm_core.paths import get_global_setting, get_global_setting_value
-    all_settings = sorted(_BOOLEAN_SETTINGS | _INT_SETTINGS | set(_ENUM_SETTINGS))
+    all_settings = sorted(_BOOLEAN_SETTINGS | _INT_SETTINGS
+                          | set(_ENUM_SETTINGS) | _PATH_SETTINGS)
     width = max(map(len, all_settings))
     for name in all_settings:
         if name in _BOOLEAN_SETTINGS:
@@ -337,6 +347,23 @@ def set_cmd(setting, value):
                                   workspace-trust prompt before pm fails it (default 120)
 
       spec-mode            Spec generation mode: auto, review, or prompt (default: prompt)
+
+      container-image-cache  Shared read-only image cache for nested container
+                             engines: auto (default; on for nested_podman
+                             projects on a podman host), on, or off
+
+    Location settings (absolute paths; 'default' restores the default).
+    Changing one affects paths created afterwards; nothing is migrated:
+
+      workdirs-dir     PR, meta and QA source workdirs (may be network storage)
+
+      captures-dir     Retained QA/review evidence, as <dir>/<session-tag>/<pr>
+                       (may be network storage)
+
+      scratch-dir      QA scenario scratch and private container engines
+                       (must be local disk)
+
+      image-cache-dir  Shared image cache (must be local disk)
     """
     if setting in _LIST_ALIASES:
         _list_settings()
@@ -344,7 +371,8 @@ def set_cmd(setting, value):
     if value is None:
         raise click.UsageError("Missing argument 'VALUE'.")
     from pm_core.paths import set_global_setting, set_global_setting_value
-    known = _BOOLEAN_SETTINGS | _INT_SETTINGS | set(_ENUM_SETTINGS)
+    known = (_BOOLEAN_SETTINGS | _INT_SETTINGS | set(_ENUM_SETTINGS)
+             | _PATH_SETTINGS)
     if setting not in known:
         click.echo(f"Unknown setting: {setting}", err=True)
         click.echo(f"Available: {', '.join(sorted(known))}", err=True)
@@ -360,6 +388,28 @@ def set_cmd(setting, value):
             click.echo(f"Setting '{setting}' takes one of: {', '.join(sorted(valid))}", err=True)
             raise SystemExit(1)
         set_global_setting_value(setting, value)
+    elif setting in _PATH_SETTINGS:
+        import os
+        from pathlib import Path
+        from pm_core.paths import (LOCAL_ONLY_PATH_SETTINGS, NonLocalPathError,
+                                   pm_home, require_local_path)
+        if value == "default":
+            (pm_home() / "settings" / setting).unlink(missing_ok=True)
+            click.echo(f"{setting} = {_SETTING_DEFAULTS.get(setting)}")
+            return
+        path = Path(os.path.expanduser(value))
+        if not path.is_absolute():
+            click.echo(f"Setting '{setting}' takes an absolute path "
+                       f"(or 'default')", err=True)
+            raise SystemExit(1)
+        if setting in LOCAL_ONLY_PATH_SETTINGS:
+            try:
+                require_local_path(path, setting, setting)
+            except NonLocalPathError as exc:
+                click.echo(f"Error: {exc}", err=True)
+                raise SystemExit(1)
+        set_global_setting_value(setting, str(path))
+        value = str(path)
     elif setting in _INT_SETTINGS:
         try:
             int(value)

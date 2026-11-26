@@ -807,7 +807,8 @@ def qa_debug(instruction_id: str, branch: str | None, foreground: bool):
 
     # Create a workdir keyed to session + instruction (not PR)
     debug_id = secrets.token_hex(4)
-    base_dir = Path(os.path.expanduser("~/.pm/workdirs/qa"))
+    from pm_core.paths import qa_workdirs_root
+    base_dir = qa_workdirs_root()
     qa_workdir = base_dir / f"debug-{instruction_id}-{debug_id}"
     qa_workdir.mkdir(parents=True, exist_ok=True)
 

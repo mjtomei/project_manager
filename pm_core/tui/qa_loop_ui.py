@@ -1122,7 +1122,8 @@ def _resume_incomplete_qa(app) -> None:
     from pathlib import Path
     from pm_core import qa_loop
 
-    qa_root = Path.home() / ".pm" / "workdirs" / "qa"
+    from pm_core.paths import qa_workdirs_root
+    qa_root = qa_workdirs_root()
     if not qa_root.is_dir():
         return
 

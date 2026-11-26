@@ -160,7 +160,8 @@ def test_host_run_is_isolated_and_needs_no_pm_session(project, home,
     (workdir,) = _qa_workdirs(home)
     assert workdir.name.startswith("regression-demo-")
     clone = workdir / "s-0" / "repo"
-    scratch = workdir / "s-0" / "scratch"
+    # Scratch lives on the local scratch root, apart from the source.
+    scratch = home / ".pm" / "scratch" / "qa" / workdir.name / "s-0"
     # A real clone of the project's base branch at its current commit.
     assert _git(clone, "rev-parse", "HEAD") == project.head
     assert _git(clone, "rev-parse", "--abbrev-ref", "HEAD") == "master"
@@ -252,7 +253,8 @@ def test_container_run_uses_a_qa_container(project, home, monkeypatch):
     run_id = workdir.name.removeprefix("regression-demo-")
     kw = spies.create.call_args.kwargs
     assert kw["workdir"] == workdir / "s-0" / "repo"
-    assert kw["scratch_path"] == workdir / "s-0" / "scratch"
+    assert kw["scratch_path"] == (home / ".pm" / "scratch" / "qa"
+                                  / workdir.name / "s-0")
     # Mounts only this run's captures dir, never captures/regression/.
     assert kw["pr_id"] == f"regression/demo/{run_id}"
     assert kw["allowed_push_branch"] is None

@@ -348,8 +348,9 @@ class QALoopState:
 # ---------------------------------------------------------------------------
 
 def create_qa_workdir(pr_id: str, loop_id: str) -> Path:
-    """Create the QA session workdir: ~/.pm/workdirs/qa/{pr_id}-{loop_id}/."""
-    workdir = Path.home() / ".pm" / "workdirs" / "qa" / f"{pr_id}-{loop_id}"
+    """Create the QA session workdir: <workdirs>/qa/{pr_id}-{loop_id}/."""
+    from pm_core.paths import qa_workdirs_root
+    workdir = qa_workdirs_root() / f"{pr_id}-{loop_id}"
     workdir.mkdir(parents=True, exist_ok=True)
     return workdir
 
@@ -378,7 +379,8 @@ def _next_scenario_offset(pr_id: str, current_loop_id: str) -> int:
     current run) to find the max index, so new scenarios continue numbering
     from where previous runs left off.
     """
-    qa_root = Path.home() / ".pm" / "workdirs" / "qa"
+    from pm_core.paths import qa_workdirs_root
+    qa_root = qa_workdirs_root()
     max_idx = 0
     for d in qa_root.glob(f"{pr_id}-*/s-*"):
         # Skip the current run
@@ -401,11 +403,18 @@ def create_scenario_workdir(qa_workdir: Path, scenario_index: int,
                             ) -> tuple[Path, Path]:
     """Create an isolated working area for one QA scenario.
 
-    Everything for a single scenario lives under one directory::
+    The scenario's source and its scratch live apart::
 
-        {qa_workdir}/s-{N}/
-            repo/       — local ``git clone`` of the target repo
-            scratch/    — empty dir for throwaway test projects
+        {qa_workdir}/s-{N}/repo/   — local ``git clone`` of the target repo
+        {scratch}/qa/{run}/s-{N}/  — empty local dir for throwaway test
+                                     projects and private container engines
+
+    Source workdirs may be configured onto network storage
+    (``workdirs-dir``); scratch never follows them, so container storage
+    created there stays on local disk (``scratch-dir``; refused on a network
+    filesystem).  A run that already has the legacy
+    ``{qa_workdir}/s-{N}/scratch`` keeps it (see
+    :func:`pm_core.paths.scenario_scratch_dir`).
 
     The clone checks out *branch* (the PR branch) so the scenario can
     commit and push fixes directly.
@@ -421,10 +430,14 @@ def create_scenario_workdir(qa_workdir: Path, scenario_index: int,
     """
     from pm_core import git_ops
 
+    from pm_core.paths import (SCRATCH_DIR_SETTING, require_local_path,
+                               scenario_scratch_dir)
+
     scenario_dir = qa_workdir / f"s-{scenario_index}"
     scenario_dir.mkdir(parents=True, exist_ok=True)
 
-    scratch = scenario_dir / "scratch"
+    scratch = scenario_scratch_dir(qa_workdir, scenario_index)
+    require_local_path(scratch, "QA scenario scratch", SCRATCH_DIR_SETTING)
     scratch.mkdir(parents=True, exist_ok=True)
 
     if repo_root is None:
@@ -1538,7 +1551,8 @@ def end_runs_orphaned_by_restart(
         return []
     skip = {str(w) for w in exclude_workdirs}
     ended = []
-    qa_root = Path.home() / ".pm" / "workdirs" / "qa"
+    from pm_core.paths import qa_workdirs_root
+    qa_root = qa_workdirs_root()
     for rec_path in qa_root.glob(f"*/{_RUN_RECORD}"):
         qa_wd = rec_path.parent
         if str(qa_wd) in skip or _resume_file_path(qa_wd).exists():
@@ -1630,7 +1644,8 @@ def write_launch_record(pr_id: str, loop_id: str, owner_pid: int) -> None:
 
 def drop_launch_record(pr_id: str, loop_id: str) -> None:
     """Remove a launch record whose driver was never spawned."""
-    qa_wd = Path.home() / ".pm" / "workdirs" / "qa" / f"{pr_id}-{loop_id}"
+    from pm_core.paths import qa_workdirs_root
+    qa_wd = qa_workdirs_root() / f"{pr_id}-{loop_id}"
     if (read_run_record(qa_wd) or {}).get("launch"):
         shutil.rmtree(qa_wd, ignore_errors=True)
 
@@ -1705,7 +1720,8 @@ def instruction_run_live(pr_id: str) -> bool:
     Reads only that run's fixed workdir, owner first: the picker calls
     this on every render, and finished runs' records are kept, each
     costing tmux lookups in :func:`launched_elsewhere`."""
-    qa_wd = (Path.home() / ".pm" / "workdirs" / "qa"
+    from pm_core.paths import qa_workdirs_root
+    qa_wd = (qa_workdirs_root()
              / f"{pr_id}-{instruction_run_loop_id(pr_id)}")
     rec = read_run_record(qa_wd)
     return bool(rec and rec.get("pr_id") == pr_id
@@ -1733,7 +1749,8 @@ def run_driven_elsewhere(pr_id: str) -> bool:
 def _own_run_records(pr_id: str):
     """Yield (QA workdir, start record) for each run of *pr_id* this pm
     session launched."""
-    qa_root = Path.home() / ".pm" / "workdirs" / "qa"
+    from pm_core.paths import qa_workdirs_root
+    qa_root = qa_workdirs_root()
     for rec_path in qa_root.glob(f"{pr_id}-*/{_RUN_RECORD}"):
         rec = read_run_record(rec_path.parent)
         if (rec and rec.get("pr_id") == pr_id
@@ -3642,7 +3659,9 @@ def _build_scenario_run_cmd(
         captures_root = CONTAINER_CAPTURES_MOUNT
     else:
         wd_in = host_clone
-        scratch = str(Path(state.qa_workdir) / f"s-{scenario.index}" / "scratch")
+        from pm_core.paths import scenario_scratch_dir
+        scratch = str(scenario_scratch_dir(Path(state.qa_workdir),
+                                           scenario.index))
         sess_for_prompt = session
         host_captures = captures_dir(state.pr_id, session_tag=state.session_tag)
         captures_root = str(host_captures) if host_captures else ""
@@ -3717,7 +3736,8 @@ def _ensure_scenario_container(
         # failure carries the cause.
         pass
     clone = scenario.worktree_path
-    scratch = Path(state.qa_workdir) / f"s-{scenario.index}" / "scratch"
+    from pm_core.paths import scenario_scratch_dir
+    scratch = scenario_scratch_dir(Path(state.qa_workdir), scenario.index)
     try:
         if not clone or not Path(clone).is_dir():
             raise RuntimeError(f"scenario clone {clone or '(none)'} is gone")
@@ -5674,6 +5694,19 @@ def _run_qa_sync(
             from pm_core import container as container_mod
             container_mod.cleanup_orphaned_qa_containers(
                 session, state.pr_id, session_tag=state.session_tag)
+
+        # Reclaim container stores / image exports that earlier runs' scenarios
+        # left in scratch (only where no container mounts it any more and
+        # that run has ended) — in the background, so this run does not pay
+        # for the last one's cleanup.
+        try:
+            from pm_core import storage_reclaim
+            storage_reclaim.reclaim_in_background(
+                state.pr_id, exclude_run=Path(state.qa_workdir).name,
+                reason="qa-start")
+        except Exception:
+            _log.warning("QA: could not start scenario storage reclaim",
+                         exc_info=True)
 
         # Final out-of-band status guard, immediately before any QA window is
         # created (scenario 0 / planner).  Re-load fresh: a concurrent merge

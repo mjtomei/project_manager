@@ -1,0 +1,509 @@
+"""Tests for pm_core.image_cache — the shared, read-only image cache.
+
+The container runtime is faked: ``run`` records the prep container's
+volume, ``exec`` of ``mkdir`` creates the matching host dirs, and the
+``save | load`` stream is a pair of fake processes.  Real-runtime
+qualification is recorded in pm/specs/pr-abc1124/qualification.md.
+"""
+
+import json
+import os
+import threading
+import time
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from pm_core import image_cache
+from pm_core.image_cache import ImageCacheError
+
+IMAGE_ID = "sha256:" + "ab" * 32
+KEY = ("ab" * 32)[:20]
+
+
+@pytest.fixture
+def home(tmp_path, monkeypatch):
+    h = tmp_path / "home"
+    h.mkdir()
+    monkeypatch.setattr("pathlib.Path.home", lambda: h)
+    monkeypatch.setenv("HOME", str(h))
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.setenv(image_cache.MODE_ENV, "")
+    return h
+
+
+def _cp(rc=0, out="", err=""):
+    return SimpleNamespace(returncode=rc, stdout=out, stderr=err)
+
+
+class FakeRuntime:
+    """Just enough of podman for a preparation."""
+
+    def __init__(self, image_id=IMAGE_ID, tags=("localhost/pm-dev:latest",),
+                 loaded_id=None, refs=(), present=True, fail=None):
+        self.image_id = image_id
+        self.tags = list(tags)
+        self.loaded_id = loaded_id or image_id
+        self.refs = set(refs)
+        self.present = present
+        self.fail = fail or {}
+        self.calls: list[tuple] = []
+        self.volumes: dict[str, str] = {}   # container path -> host path
+        self.lock = threading.Lock()
+
+    def __call__(self, *args, timeout=None, check=False):
+        with self.lock:
+            self.calls.append(args)
+        head = args[0]
+        if head in self.fail:
+            return _cp(1, err=self.fail[head])
+        if args[:2] == ("image", "inspect"):
+            return _cp(out=json.dumps([{"Id": self.image_id,
+                                        "RepoTags": self.tags}]))
+        if args[:2] == ("image", "exists"):
+            return _cp(0 if self.present else 1)
+        if head == "run":
+            v = args[args.index("-v") + 1]
+            host, ctr = v.split(":")[:2]
+            self.volumes[ctr] = host
+            time.sleep(0.05)
+            return _cp(out="cid\n")
+        if head == "exec":
+            argv = list(args[2:])
+            if argv[:2] == ["mkdir", "-p"]:
+                for p in argv[2:]:
+                    Path(self._host(p)).mkdir(parents=True, exist_ok=True)
+                return _cp()
+            if argv[:1] == ["podman"] and "inspect" in argv:
+                return _cp(out=json.dumps([{"Id": self.loaded_id,
+                                            "RepoTags": self.tags[:1]}]))
+            if argv[:2] == ["podman", "unshare"] and "du" in argv:
+                return _cp(out=f"123456\t{argv[-1]}\n")
+            return _cp()
+        if head == "version":
+            return _cp(out="3.4.4\n")
+        if head == "ps":
+            label = args[args.index("--filter") + 1].split("=", 1)[1]
+            rows = [{"Labels": {label: k}} for k in sorted(self.refs)]
+            return _cp(out=json.dumps(rows))
+        if head == "unshare":
+            import shutil
+            shutil.rmtree(args[-1], ignore_errors=True)
+            return _cp()
+        return _cp()
+
+    def _host(self, ctr_path):
+        for ctr, host in self.volumes.items():
+            if ctr_path == ctr or ctr_path.startswith(ctr + "/"):
+                return host + ctr_path[len(ctr):]
+        raise AssertionError(f"unmapped path {ctr_path}")
+
+    def count(self, head):
+        return sum(1 for c in self.calls if c[0] == head)
+
+
+class FakeProc:
+    def __init__(self, rc=0):
+        self.rc = rc
+        self.stdout = MagicMock()
+
+    def wait(self, timeout=None):
+        return self.rc
+
+    def kill(self):
+        pass
+
+
+@pytest.fixture
+def fake(home, monkeypatch):
+    rt = FakeRuntime()
+    monkeypatch.setattr(image_cache, "_rt", rt)
+    monkeypatch.setattr(image_cache, "_runtime", lambda: "podman")
+    monkeypatch.setattr("pm_core.container._nested_podman_run_args",
+                        lambda: ["--device", "/dev/fuse", "--uts=host"])
+    monkeypatch.setattr("pm_core.container.fit_subids", lambda *a: None)
+    removed = []
+    monkeypatch.setattr("pm_core.container.remove_container",
+                        lambda n: removed.append(n))
+    rt.removed = removed
+    popens = []
+
+    def _popen(argv, **kw):
+        popens.append(argv)
+        return FakeProc(rt.fail.get("popen:" + argv[1], 0))
+    monkeypatch.setattr(image_cache.subprocess, "Popen", _popen)
+    rt.popens = popens
+    monkeypatch.setattr(
+        "pm_core.container.load_container_config",
+        lambda: SimpleNamespace(image="pm-dev:latest"))
+    return rt
+
+
+# ---------------------------------------------------------------------------
+# Mode and roles
+# ---------------------------------------------------------------------------
+
+class TestMode:
+    def test_default_is_auto(self, home):
+        assert image_cache.mode() == "auto"
+
+    def test_setting_and_env_override(self, home, monkeypatch):
+        from pm_core.paths import set_global_setting_value
+        set_global_setting_value(image_cache.MODE_SETTING, "off")
+        assert image_cache.mode() == "off"
+        monkeypatch.setenv(image_cache.MODE_ENV, "on")
+        assert image_cache.mode() == "on"
+
+    def test_unknown_value_falls_back_to_auto(self, home):
+        from pm_core.paths import set_global_setting_value
+        set_global_setting_value(image_cache.MODE_SETTING, "maybe")
+        assert image_cache.mode() == "auto"
+
+
+class TestProviderEnabled:
+    @pytest.mark.parametrize("runtime,nested,mode,in_ctr,consumer,want", [
+        ("podman", True, "auto", False, False, True),    # host default
+        ("podman", True, "auto", True, False, False),    # inside a container
+        ("podman", True, "on", True, False, True),       # forced
+        ("podman", True, "off", False, False, False),
+        ("podman", False, "on", False, False, False),    # no nested podman
+        ("docker", True, "on", False, False, False),     # podman only
+        ("podman", True, "on", True, True, False),       # never one level deeper
+    ])
+    def test_matrix(self, home, monkeypatch, runtime, nested, mode, in_ctr,
+                    consumer, want):
+        monkeypatch.setenv(image_cache.MODE_ENV, mode)
+        monkeypatch.setattr(image_cache, "in_container", lambda: in_ctr)
+        monkeypatch.setattr(image_cache, "is_consumer", lambda: consumer)
+        assert image_cache.provider_enabled(runtime, nested) is want
+
+
+def test_entry_key_rejects_garbage():
+    assert image_cache.entry_key(IMAGE_ID) == KEY
+    assert image_cache.entry_key("AB" * 32) == KEY
+    with pytest.raises(ImageCacheError):
+        image_cache.entry_key("sha256:xyz")
+
+
+# ---------------------------------------------------------------------------
+# Preparation
+# ---------------------------------------------------------------------------
+
+class TestEnsurePrepared:
+    def test_cold_prepare_publishes_entry(self, fake, home):
+        entry = image_cache.ensure_prepared("pm-dev:latest")
+        root = home / ".pm" / "image-cache"
+        assert entry.path == root / "entries" / KEY
+        assert (entry.path / "store").is_dir()
+        assert (entry.path / "probe").is_dir()
+        meta = json.loads((entry.path / "entry.json").read_text())
+        assert meta["image_id"] == IMAGE_ID
+        assert meta["names"] == ["localhost/pm-dev:latest"]
+        assert meta["store_bytes"] == 123456
+        assert meta["format_version"] == image_cache.FORMAT_VERSION
+        # No half-built dirs left behind.
+        assert [p.name for p in (root / "entries").iterdir()] == [KEY]
+
+    def test_prep_container_matches_consumers(self, fake, home):
+        """Same user namespace + nested flags + mount path as consumers, so
+        the store's ownership is what consumers' engines expect."""
+        image_cache.ensure_prepared("pm-dev:latest")
+        run = next(c for c in fake.calls if c[0] == "run")
+        assert "--userns=keep-id" in run
+        assert "--uts=host" in run and "/dev/fuse" in run
+        v = run[run.index("-v") + 1]
+        assert v.endswith(":" + image_cache.CONSUMER_MOUNT)
+        assert f"{image_cache.PREP_LABEL}={KEY}" in run
+        assert fake.removed and fake.removed[0].startswith(
+            "pm-image-cache-prep-")
+
+    def test_streams_save_into_load_without_an_archive(self, fake, home):
+        image_cache.ensure_prepared("pm-dev:latest")
+        save, load = fake.popens
+        assert save == ["podman", "save", "pm-dev:latest"]
+        assert load[:4] == ["podman", "exec", "-i", load[3]]
+        assert load[-1] == "load"
+        assert f"overlay.mount_program={image_cache.MOUNT_PROGRAM}" in load
+        assert "--root" in load and image_cache.CONSUMER_STORE in load
+
+    def test_probes_written_in_the_engine_namespace(self, fake, home):
+        image_cache.ensure_prepared("pm-dev:latest")
+        probe = next(c for c in fake.calls if c[0] == "exec"
+                     and "unshare" in c and "sh" in c)
+        script = probe[-1]
+        assert "chown 0:0 uid0" in script and "chown 1:1 uid1" in script
+
+    def test_every_host_tag_is_applied(self, fake, home):
+        fake.tags = ["localhost/pm-dev:latest", "localhost/pm-dev:qa"]
+        entry = image_cache.ensure_prepared("pm-dev:latest")
+        tags = [c for c in fake.calls if c[0] == "exec" and "tag" in c]
+        assert len(tags) == 1 and tags[0][-1] == "localhost/pm-dev:qa"
+        assert entry.names == ["localhost/pm-dev:latest",
+                               "localhost/pm-dev:qa"]
+
+    def test_warm_path_prepares_nothing(self, fake, home):
+        image_cache.ensure_prepared("pm-dev:latest")
+        runs = fake.count("run")
+        again = image_cache.ensure_prepared("pm-dev:latest")
+        assert again.key == KEY
+        assert fake.count("run") == runs
+        assert len(fake.popens) == 2
+
+    def test_new_image_version_gets_its_own_entry(self, fake, home):
+        first = image_cache.ensure_prepared("pm-dev:latest")
+        fake.image_id = fake.loaded_id = "sha256:" + "cd" * 32
+        second = image_cache.ensure_prepared("pm-dev:latest")
+        assert first.key != second.key
+        assert first.path.is_dir() and second.path.is_dir()
+
+    def test_concurrent_requests_prepare_once(self, fake, home):
+        results, errors = [], []
+
+        def go():
+            try:
+                results.append(image_cache.ensure_prepared("pm-dev:latest"))
+            except Exception as exc:  # pragma: no cover - reported below
+                errors.append(exc)
+        threads = [threading.Thread(target=go) for _ in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert not errors
+        assert {r.key for r in results} == {KEY}
+        assert fake.count("run") == 1
+
+    def test_lock_timeout_is_actionable(self, fake, home, monkeypatch):
+        from contextlib import contextmanager
+
+        @contextmanager
+        def never(path, timeout):
+            yield False
+        monkeypatch.setattr("pm_core.store.bounded_flock", never)
+        with pytest.raises(ImageCacheError) as exc:
+            image_cache.ensure_prepared("pm-dev:latest")
+        assert "pm-image-cache-prep" in str(exc.value)
+        assert f"pm set {image_cache.MODE_SETTING} off" in str(exc.value)
+
+    def test_missing_image_is_actionable(self, fake, home):
+        fake.fail["image"] = "no such image"
+        with pytest.raises(ImageCacheError) as exc:
+            image_cache.ensure_prepared("pm-dev:latest")
+        assert "pm container build-base" in str(exc.value)
+
+    def test_failed_load_cleans_up(self, fake, home):
+        fake.fail["popen:exec"] = 125
+        with pytest.raises(ImageCacheError) as exc:
+            image_cache.ensure_prepared("pm-dev:latest")
+        assert "load rc=125" in str(exc.value)
+        entries = home / ".pm" / "image-cache" / "entries"
+        assert list(entries.iterdir()) == []
+        assert fake.removed  # prep container removed
+
+    def test_id_mismatch_aborts(self, fake, home):
+        fake.loaded_id = "sha256:" + "ef" * 32
+        with pytest.raises(ImageCacheError, match="rebuilt during preparation"):
+            image_cache.ensure_prepared("pm-dev:latest")
+        assert list((home / ".pm" / "image-cache" / "entries").iterdir()) == []
+
+    def test_cache_root_on_network_storage_is_refused(self, fake, home,
+                                                      tmp_path, monkeypatch):
+        from pm_core import paths
+        nas = tmp_path / "nas"
+        nas.mkdir()
+        paths.set_global_setting_value("image-cache-dir", str(nas / "cache"))
+        mi = tmp_path / "mountinfo"
+        mi.write_text("1 0 0:1 / / rw - ext4 /dev/sda1 rw\n"
+                      f"2 1 0:2 / {nas} rw - cifs //nas/share rw\n")
+        monkeypatch.setattr(paths, "_MOUNTINFO", str(mi))
+        with pytest.raises(ImageCacheError) as exc:
+            image_cache.ensure_prepared("pm-dev:latest")
+        assert "image-cache-dir" in str(exc.value)
+        assert fake.count("run") == 0
+
+
+# ---------------------------------------------------------------------------
+# Eviction
+# ---------------------------------------------------------------------------
+
+def _publish(root: Path, key: str, image_id: str) -> Path:
+    d = root / "entries" / key
+    (d / "store").mkdir(parents=True)
+    (d / "entry.json").write_text(json.dumps({
+        "format_version": image_cache.FORMAT_VERSION, "key": key,
+        "image_id": image_id, "names": []}))
+    return d
+
+
+class TestGc:
+    def test_keeps_referenced_configured_and_present(self, fake, home):
+        root = image_cache.cache_root()
+        configured = _publish(root, KEY, IMAGE_ID)       # configured image
+        used = _publish(root, "1" * 20, "sha256:" + "1" * 64)
+        gone = _publish(root, "2" * 20, "sha256:" + "2" * 64)
+        fake.refs = {"1" * 20}
+        fake.present = False
+        out = image_cache.gc()
+        assert configured.exists() and used.exists()
+        assert not gone.exists()
+        assert [r for _, r in out["removed"]] == [
+            "image no longer on the host, no consumers"]
+
+    def test_present_image_kept_unless_all_unreferenced(self, fake, home):
+        root = image_cache.cache_root()
+        other = _publish(root, "3" * 20, "sha256:" + "3" * 64)
+        fake.present = True
+        image_cache.gc()
+        assert other.exists()
+        image_cache.gc(all_unreferenced=True)
+        assert not other.exists()
+
+    def test_dry_run_and_runtime_failure_remove_nothing(self, fake, home):
+        root = image_cache.cache_root()
+        gone = _publish(root, "4" * 20, "sha256:" + "4" * 64)
+        fake.present = False
+        out = image_cache.gc(dry_run=True)
+        assert gone.exists() and out["planned"]
+        fake.fail["ps"] = "runtime down"
+        out = image_cache.gc()
+        assert gone.exists()
+        assert "could not list" in out["problem"]
+
+    def test_abandoned_prep_dirs(self, fake, home):
+        root = image_cache.cache_root()
+        old = root / "entries" / f".prep-{'5' * 20}-1-aa"
+        fresh = root / "entries" / f".prep-{'6' * 20}-2-bb"
+        old.mkdir()
+        fresh.mkdir()
+        past = time.time() - 2 * image_cache._ABANDONED_PREP_AGE
+        os.utime(old, (past, past))
+        image_cache.gc()
+        assert not old.exists() and fresh.exists()
+
+
+# ---------------------------------------------------------------------------
+# Consumer side
+# ---------------------------------------------------------------------------
+
+class TestEngineConfig:
+    def test_default_engine(self):
+        files = image_cache.engine_config_text("/home/pm")
+        assert set(files) == {"storage.conf"}
+        text = files["storage.conf"]
+        assert text.startswith(image_cache.ENGINE_CONFIG_MARK)
+        assert 'graphroot = "/home/pm/.local/share/containers/storage"' in text
+        assert f'additionalimagestores = ["{image_cache.CONSUMER_STORE}"]' in text
+        assert f'mount_program = "{image_cache.MOUNT_PROGRAM}"' in text
+        assert "runroot" not in text
+        assert "vfs" not in text
+
+    def test_isolated_engines_get_their_own_short_runtime_dirs(self):
+        a = image_cache.engine_config_text("/scratch/engines/w1", isolated=True)
+        b = image_cache.engine_config_text("/scratch/engines/w2", isolated=True)
+        ra = [ln for ln in a["storage.conf"].splitlines() if "runroot" in ln][0]
+        rb = [ln for ln in b["storage.conf"].splitlines() if "runroot" in ln][0]
+        assert ra != rb
+        # podman rejects runroots over 50 characters.
+        assert len(ra.split('"')[1]) <= 50
+        assert "tmp_dir" in a["containers.conf"]
+
+    def test_setup_script_writes_the_files(self, tmp_path):
+        import subprocess
+        home = tmp_path / "pmhome"
+        script = image_cache.consumer_setup_script(str(home))
+        subprocess.run(["sh", "-c", script], check=True)
+        written = (home / ".config/containers/storage.conf").read_text()
+        assert written == image_cache.engine_config_text(str(home))["storage.conf"]
+
+
+@pytest.fixture
+def consumer(tmp_path, monkeypatch, home):
+    """A fake consumer mount (entry.json + probes) at a temp path."""
+    mount = tmp_path / "pm-image-cache"
+    (mount / "store").mkdir(parents=True)
+    (mount / "probe").mkdir()
+    (mount / "entry.json").write_text(json.dumps({
+        "key": KEY, "image_id": IMAGE_ID,
+        "names": ["localhost/pm-dev:latest"]}))
+    monkeypatch.setattr(image_cache, "CONSUMER_MOUNT", str(mount))
+    monkeypatch.setattr(image_cache, "CONSUMER_STORE", str(mount / "store"))
+    image_cache._checked_homes.clear()
+    return mount
+
+
+class TestWriteEngineConfig:
+    def test_outside_a_consumer_writes_nothing(self, home):
+        with pytest.raises(ImageCacheError, match="launched without it"):
+            image_cache.write_engine_config(str(home))
+        assert not (home / ".config").exists()
+
+    def test_writes_isolated_config(self, consumer, tmp_path):
+        eng = tmp_path / "w1"
+        written = image_cache.write_engine_config(str(eng))
+        assert set(written) == {"storage.conf", "containers.conf"}
+        assert image_cache.engine_config_problem(str(eng)) is None
+
+    def test_refuses_foreign_config_without_force(self, consumer, tmp_path):
+        eng = tmp_path / "w2"
+        cfg = eng / ".config" / "containers" / "storage.conf"
+        cfg.parent.mkdir(parents=True)
+        cfg.write_text('[storage]\ndriver = "vfs"\n')
+        with pytest.raises(ImageCacheError, match="--force"):
+            image_cache.write_engine_config(str(eng))
+        assert "vfs" in cfg.read_text()
+        image_cache.write_engine_config(str(eng), force=True)
+        assert "vfs" not in cfg.read_text()
+
+    def test_refuses_a_fuse_graphroot(self, consumer, tmp_path, monkeypatch):
+        from pm_core import paths
+        mi = tmp_path / "mountinfo"
+        mi.write_text("1 0 0:1 / / rw - fuse.fuse-overlayfs fuse-overlayfs rw\n")
+        monkeypatch.setattr(paths, "_MOUNTINFO", str(mi))
+        with pytest.raises(ImageCacheError, match="/scratch"):
+            image_cache.write_engine_config(str(tmp_path / "w3"))
+
+
+class TestEnsureConsumerEngine:
+    def _unshare(self, monkeypatch, out, rc=0):
+        calls = []
+
+        def run(argv, **kw):
+            calls.append(argv)
+            return _cp(rc, out=out)
+        monkeypatch.setattr(image_cache.subprocess, "run", run)
+        return calls
+
+    def test_matching_probes_pass_once(self, consumer, tmp_path, monkeypatch):
+        calls = self._unshare(monkeypatch, "0:0\n1:1\n")
+        eng = str(tmp_path / "nested-home")
+        image_cache.ensure_consumer_engine(eng)
+        image_cache.ensure_consumer_engine(eng)
+        assert len(calls) == 1
+        assert (Path(eng) / ".config/containers/storage.conf").exists()
+
+    def test_shifted_probes_fail_loudly(self, consumer, tmp_path, monkeypatch):
+        """An entry mounted one keep-id level too deep reads 0:0 / 0:0 or
+        65534 — never used with wrong ownership."""
+        self._unshare(monkeypatch, "0:0\n65534:65534\n")
+        with pytest.raises(ImageCacheError, match="another user-namespace level"):
+            image_cache.ensure_consumer_engine(str(tmp_path / "h"))
+
+    def test_foreign_config_without_store_is_refused(self, consumer, tmp_path,
+                                                     monkeypatch):
+        self._unshare(monkeypatch, "0:0\n1:1\n")
+        eng = tmp_path / "h2"
+        cfg = eng / ".config" / "containers" / "storage.conf"
+        cfg.parent.mkdir(parents=True)
+        cfg.write_text('[storage]\ndriver = "overlay"\n')
+        with pytest.raises(ImageCacheError, match="additionalimagestores"):
+            image_cache.ensure_consumer_engine(str(eng))
+
+
+def test_missing_in_consumer_message_names_the_cache(consumer):
+    msg = image_cache.missing_in_consumer_message("pm-dev:other")
+    assert "localhost/pm-dev:latest" in msg
+    assert "does not build, pull or import" in msg
+    assert "VFS" in msg and "host" in msg
+    assert f"pm set {image_cache.MODE_SETTING} off" in msg

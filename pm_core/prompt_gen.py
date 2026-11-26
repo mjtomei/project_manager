@@ -2335,7 +2335,10 @@ state or depend on **another scenario's** side effects, and STEPS must
 include all setup the scenario needs. Within a single scenario you *can*
 spawn nested containers, background processes, or parallel actors to drive
 the system under test from multiple contexts at once — use that capability
-whenever the surface being tested is shared across users or workers.
+whenever the surface being tested is shared across users or workers. Nested
+containers use the shared image cache described in the Nested Containers
+instruction; reference that instruction instead of writing storage-driver,
+image import or rebuild steps into STEPS.
 
 Prefer fewer, broader scenarios over many narrow ones. Group related checks
 that share setup into one scenario with multi-step STEPS, including edge

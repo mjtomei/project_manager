@@ -34,6 +34,14 @@ def container_status():
     click.echo(f"Image:           {cfg.image}")
     click.echo(f"Memory limit:    {cfg.memory_limit}")
     click.echo(f"CPU limit:       {cfg.cpu_limit}")
+    from pm_core import image_cache
+    consumer = image_cache.read_consumer_entry()
+    if consumer:
+        click.echo(f"Image cache:     {image_cache.mode()} (consumer of "
+                   f"{consumer.get('key')}: "
+                   f"{', '.join(consumer.get('names') or [])})")
+    else:
+        click.echo(f"Image cache:     {image_cache.mode()}")
 
     if enabled and not runtime_ok:
         click.echo(
@@ -304,3 +312,187 @@ def container_cleanup(pr_id: str | None):
         removed += 1
 
     click.echo(f"Removed {removed} container(s).")
+
+
+# ---------------------------------------------------------------------------
+# Shared image cache (pm_core.image_cache) and scenario storage reclaim
+# ---------------------------------------------------------------------------
+
+@container_group.group("cache")
+def cache_group():
+    """Shared, read-only image cache for nested container engines.
+
+    For projects with nested_podman, pm prepares the container image's
+    unpacked layers once per image version (keyed by image ID) on local
+    disk and mounts them read-only into every container it launches; each
+    engine keeps only its private writable layers.  The 'container-image-
+    cache' setting is auto (default: on for a podman host), on or off.
+    """
+
+
+@cache_group.command("status")
+def cache_status():
+    """List cache entries and which containers use them."""
+    from pm_core import image_cache
+    from pm_core.image_cache import ImageCacheError
+    click.echo(f"Mode: {image_cache.mode()}")
+    consumer = image_cache.read_consumer_entry()
+    if consumer:
+        click.echo(f"This container consumes entry {consumer.get('key')} "
+                   f"({', '.join(consumer.get('names') or [])}) at "
+                   f"{image_cache.CONSUMER_MOUNT}")
+        return
+    try:
+        root = image_cache.cache_root()
+        entries = image_cache.list_entries(root)
+    except ImageCacheError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        raise SystemExit(1)
+    click.echo(f"Root: {root}")
+    refs = image_cache.referenced_keys()
+    if not entries:
+        click.echo("No entries.")
+    for e in entries:
+        if not e.meta:
+            click.echo(f"  {e.key}  (incomplete)")
+            continue
+        used = ("?" if refs is None else
+                ("in use" if e.key in refs else "unused"))
+        size = e.meta.get("store_bytes")
+        size_s = f"{size / 1e9:.2f} GB" if isinstance(size, int) else "?"
+        click.echo(f"  {e.key}  {', '.join(e.names)}  {size_s}  "
+                   f"prepared {e.meta.get('created_at')} in "
+                   f"{e.meta.get('prep_seconds')}s  [{used}]")
+
+
+@cache_group.command("prepare")
+@click.option("--image", default=None,
+              help="Image to prepare (default: the configured container image)")
+def cache_prepare(image: str | None):
+    """Prepare the cache entry for an image now (normally done on first launch)."""
+    import time
+    from pm_core import image_cache
+    from pm_core.container import load_container_config
+    image = image or load_container_config().image
+    if image_cache.is_consumer():
+        click.echo("Error: this container consumes a shared cache entry; "
+                   "prepare entries on the host.", err=True)
+        raise SystemExit(1)
+    t = time.monotonic()
+    try:
+        entry = image_cache.ensure_prepared(image)
+    except image_cache.ImageCacheError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        raise SystemExit(1)
+    click.echo(f"{image}: entry {entry.key} at {entry.path} "
+               f"({time.monotonic() - t:.1f}s)")
+
+
+@cache_group.command("check")
+@click.option("--image", default=None, help="Image the engine must see")
+@click.option("--home", default=None,
+              help="Engine HOME to check (default: $HOME)")
+def cache_check(image: str | None, home: str | None):
+    """Verify the shared cache works for an engine in this container."""
+    from pm_core import image_cache
+    res = image_cache.consumer_check(image_ref=image, home=home)
+    for ok, text in res.lines:
+        click.echo(f"  [{'ok' if ok else 'FAIL'}] {text}")
+    if not res.ok:
+        raise SystemExit(1)
+
+
+@cache_group.command("gc")
+@click.option("--dry-run", is_flag=True, help="Only show what would be removed")
+@click.option("--all-unreferenced", is_flag=True,
+              help="Also remove unused entries whose image still exists "
+                   "(never the configured image's)")
+def cache_gc(dry_run: bool, all_unreferenced: bool):
+    """Remove cache entries no container uses and whose image is gone."""
+    from pm_core import image_cache
+    try:
+        summary = image_cache.gc(dry_run=dry_run,
+                                 all_unreferenced=all_unreferenced)
+    except image_cache.ImageCacheError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        raise SystemExit(1)
+    if summary["problem"]:
+        click.echo(f"Nothing removed: {summary['problem']}.", err=True)
+        raise SystemExit(1)
+    for path, reason in summary["planned"]:
+        verb = "would remove" if dry_run else (
+            "removed" if (path, reason) in summary["removed"] else "FAILED")
+        click.echo(f"  {verb}: {path} ({reason})")
+    if not summary["planned"]:
+        click.echo("Nothing to remove.")
+    if summary["failed"]:
+        raise SystemExit(1)
+
+
+@container_group.command("engine-setup")
+@click.option("--home", default=None,
+              help="Engine HOME (default: $HOME)")
+@click.option("--force", is_flag=True,
+              help="Replace an existing containers config pm did not write")
+def engine_setup(home: str | None, force: bool):
+    """Configure a container engine (in this container) to use the shared cache.
+
+    Writes HOME/.config/containers/storage.conf (overlay, fuse-overlayfs, a
+    private graphroot under HOME, the shared store as an additional image
+    store) and, for any HOME but the default user's, a containers.conf
+    giving the engine its own runroot and tmp dir — so several isolated
+    engines can run side by side on the same shared layers.  Then runs
+    'pm container cache check' for that HOME.
+    """
+    from pm_core import image_cache
+    try:
+        written = image_cache.write_engine_config(home, force=force)
+    except image_cache.ImageCacheError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        raise SystemExit(1)
+    for path in written.values():
+        click.echo(f"wrote {path}")
+    res = image_cache.consumer_check(home=home)
+    for ok, text in res.lines:
+        click.echo(f"  [{'ok' if ok else 'FAIL'}] {text}")
+    if not res.ok:
+        raise SystemExit(1)
+
+
+@container_group.command("reclaim")
+@click.option("--pr", "pr_id", default=None,
+              help="Only this PR's QA runs (default: every run)")
+@click.option("--dry-run", is_flag=True, help="Only show what would be removed")
+def container_reclaim(pr_id: str | None, dry_run: bool):
+    """Reclaim container stores and image archives left in QA scenario scratch.
+
+    Removes only container-engine stores and image archives (podman save
+    output) under scenario scratch dirs that no existing container mounts
+    and whose QA run has ended.  Checkouts, captures, notes, drafts and
+    other scratch files are never touched.
+    """
+    from pm_core import storage_reclaim
+    out = storage_reclaim.reclaim(pr_id=pr_id, dry_run=dry_run,
+                                  reason="manual")
+    if out.problem:
+        click.echo(f"Nothing removed: {out.problem}.", err=True)
+        raise SystemExit(1)
+    removed = {str(d.path) for d in out.removed}
+    failed = {str(d.path): err for d, err in out.failed}
+    for p in out.plans:
+        if p.held:
+            if p.items or dry_run:
+                click.echo(f"  keep {p.scratch}: {p.held}")
+            continue
+        for d in p.items:
+            size = storage_reclaim._human(d.bytes) if d.bytes else "?"
+            if dry_run:
+                state = "would remove"
+            elif str(d.path) in removed:
+                state = "removed"
+            else:
+                state = f"FAILED ({failed.get(str(d.path), '?')})"
+            click.echo(f"  {state} {d.kind} {d.path} ({size})")
+    click.echo(out.summary())
+    if out.failed:
+        raise SystemExit(1)

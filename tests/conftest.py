@@ -39,6 +39,22 @@ def _no_qa_launch_records(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_shared_image_cache(monkeypatch):
+    """Keep tests off the real image cache and scenario scratch.
+
+    With the cache on, a container-mode launch prepares an entry on the
+    real container runtime (and inside a cache-consumer container, checks
+    the mounted entry); QA start and PR cleanup reclaim real scenario
+    stores in a background thread.  Tests of those paths set the mode and
+    call the reclaim themselves.
+    """
+    from pm_core import image_cache, storage_reclaim
+    monkeypatch.setenv(image_cache.MODE_ENV, "off")
+    monkeypatch.setattr(storage_reclaim, "reclaim_in_background",
+                        lambda *a, **k: None)
+
+
+@pytest.fixture(autouse=True)
 def _isolated_claude_config(tmp_path_factory, monkeypatch):
     """Point Claude's global config at a temp dir.
 
