@@ -88,6 +88,7 @@ key. `pm plan breakdown` then fails with Click's standard
 - `pm_core/tui/pane_ops.py` assistant prompt: already lists `a`/`c`/`l` after the merge.
 - `pm_core/cli/plan.py`: the `plan load` "No PRs found" error no longer names `pm plan breakdown`. It points at `pm plan review ⟦plan_id⟧` (key `c`), the recovery path from Ambiguity 4, and does not suggest re-running `pm plan add`, which would mint a new plan id. The `plan fix` docstring and the `_MANUAL_TESTING_GUIDANCE` comment drop "breakdown".
 - `pm_core/fake_claude.py`: drop "breakdown" from the `plan` session-type comment.
+- `org-demo.md` (review bb8a i4): step 4 says `pm plan add` develops the plan and breaks it into PRs, and step 5 becomes "Review and load the PRs": `pm plan review` checks the breakdown and proposes one only when the plan has no `## PRs`. The doc is outside `pm_core`, so the source-scan test does not cover it.
 
 ### R6. Tests
 

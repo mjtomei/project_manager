@@ -100,20 +100,22 @@ This creates `pm/` inside the org repo.
 pm plan add "Bootstrap lab governance"
 ```
 
-This launches Claude directly to develop the plan. In a real workflow you'd
-discuss the plan with Claude and have it write the plan file. For this
+This launches Claude directly to develop the plan and break it into PRs. In
+a real workflow you'd discuss the plan and its PR breakdown with Claude, and
+it writes both to the plan file, including a `## PRs` section. For this
 demo, the stub is fine. (If Claude CLI isn't installed, it prints the prompt.)
 
-## 5. Break the plan into PRs
+## 5. Review and load the PRs
 
-Launch Claude to decompose the plan into PRs:
+Launch Claude to check the plan's PRs for coverage and consistency:
 
 ```bash
 pm plan review
 ```
 
-Claude writes a `## PRs` section to the plan file. Then load them with
-`pm plan load`. For this demo, simulate by running commands manually:
+If the plan has no `## PRs` section yet, the review proposes one and writes
+it to the plan file. Then load the PRs with `pm plan load`. For this demo,
+simulate by running commands manually:
 
 Layer 0 — foundational work (no dependencies):
 
