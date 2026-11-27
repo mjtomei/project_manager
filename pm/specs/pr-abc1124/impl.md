@@ -349,10 +349,21 @@ the task and on the measurements above.
   path is recomputed, not recorded, so without the lookup a `scratch-dir`
   change mid-run would hand a relaunched scenario container (or host-mode
   prompt) an empty or missing scratch (review 62b4 i13).
-  `paths.qa_scratch_roots()` is `<scratch>/qa` plus the default
-  `~/.pm/scratch/qa` when `scratch-dir` moved it and it exists — the same
-  configured-plus-default rule as `workdirs_roots()` / `captures_roots()`;
-  trust and reclaim scan all of them.
+  `paths.qa_scratch_roots()` is `<scratch>/qa` plus, when they exist, the
+  `qa` dir of each earlier `scratch-dir` location and of the default
+  `~/.pm/scratch` — the same rule as `workdirs_roots()` /
+  `captures_roots()`; trust and reclaim scan all of them.
+* Earlier locations: `pm set <path-setting>` goes through
+  `paths.set_path_setting`, which records the value it replaces (only a
+  configured one — the default is always searched) in
+  `~/.pm/settings/<setting>.earlier`, most recent first, at most 20;
+  `paths.earlier_dirs(setting)` reads it.  Every roots function searches
+  the current location, then the earlier ones, then the default, skipping
+  any that no longer exist.  With only "configured plus default", a second
+  move between two configured locations lost what began at the first: a
+  scenario started under `scratch-dir` A was relaunched after a move to B
+  onto a missing `B/qa/<run>/s-N` (`podman run` "statfs … no such file or
+  directory", QA ERROR "could not be recreated"; QA S6, 2026-11-27).
 * Workspace trust follows the move: `workspace_trust.approved_roots()`
   includes `paths.qa_scratch_roots()` (`<scratch>/qa`).  The legacy scratch
   sat inside the trusted QA workdir, so a host-mode scenario's throwaway
@@ -362,8 +373,9 @@ the task and on the measurements above.
 * No migration of existing workdirs/captures; changing a setting affects
   new paths only (documented in `pm set` help).  So that existing
   workdirs keep working after `workdirs-dir` moves:
-  `paths.workdirs_roots()` (the configured root plus the default
-  `~/.pm/workdirs` when it differs) is what workspace trust, PR-clone
+  `paths.workdirs_roots()` (the configured root, then earlier
+  `workdirs-dir` locations and the default `~/.pm/workdirs` that exist) is
+  what workspace trust, PR-clone
   detection (`integration.py`) and sync's fallback search for a merge-check
   clone (`pr_sync.find_workdir`, review 62b4 i13) treat as pm-created, and
   `paths.qa_workdirs_roots()` (`<root>/qa` of each) is what code looking
@@ -381,20 +393,22 @@ the task and on the measurements above.
   unsupported and can hang while the share stalls.
 * Existing evidence likewise keeps working after `captures-dir` moves
   (review 62b4 i5): a PR's captures dir is the configured
-  `<captures-dir>/<tag>/<pr>` when it exists, else the default
-  `~/.pm/sessions/<tag>/captures/<pr>` when only that exists (evidence
-  from before the change), else the configured one (created).
+  `<captures-dir>/<tag>/<pr>` when it exists, else the first of the
+  earlier `captures-dir` locations' `<dir>/<tag>/<pr>` and the default
+  `~/.pm/sessions/<tag>/captures/<pr>` that exists (evidence from before
+  a change), else the configured one (created).
   `captures_dir` (writers, container mounts, `pm qa captures-path`) and
   `paths.host_pr_captures_dir` (host readers/writers of one file: the
   sign-off merge gate's `report.html` hash, `pm pr signoff record`,
   `report_meta`, `integration.json`) resolve it the same way, so one PR's
   evidence never splits across two roots and a recorded sign-off is not
   reported as "report.html changed".  The dashboard serves
-  `paths.captures_roots()` (configured root, then the default when it
-  exists) and lists each PR's report from the first root holding it.
+  `paths.captures_roots()` (configured root, then the earlier roots and
+  the default that exist) and lists each PR's report from the first root holding it.
 * Prompts that glob captures across sessions use
-  `paths.captures_roots_globs()` (`<captures-dir>/*`, then the default
-  `~/.pm/sessions/*/captures`, when set), e.g. the discovery supervisor's
+  `paths.captures_roots_globs()` (`<captures-dir>/*` when set, then each
+  existing earlier location's `<dir>/*`, then the default
+  `~/.pm/sessions/*/captures`), e.g. the discovery supervisor's
   `ls -t …/regression/<id>/*/prompt.md`.
 
 ### R6 — Shared recipe/instructions

@@ -151,6 +151,94 @@ class TestConfigured:
         assert {str(sc) for _, sc in sr.scenario_scratch_dirs("pr-1")} == {
             str(old), str(new)}
 
+    def test_second_scratch_dir_move_keeps_in_flight_scratch(
+            self, home, tmp_path, monkeypatch):
+        """QA S6: a scenario began under scratch-dir A; scratch-dir then
+        moved to B.  Its relaunched container must mount A's scratch, not a
+        missing B/qa/<run>/s-N (podman "statfs … no such file or
+        directory", QA ERROR "could not be recreated").  A stays trusted
+        and reclaimable; new scenarios go to B."""
+        from click.testing import CliRunner
+        from pm_core import storage_reclaim as sr, workspace_trust
+        from pm_core.cli import cli
+        a, b = tmp_path / "scratch-a", tmp_path / "scratch-b"
+        assert CliRunner().invoke(cli, ["set", "scratch-dir", str(a)]
+                                  ).exit_code == 0
+        run = paths.qa_workdirs_root() / "pr-1-abc"
+        old = paths.scenario_scratch_dir(run, 1)
+        assert old == a / "qa" / "pr-1-abc" / "s-1"
+        (old / "proj").mkdir(parents=True)
+        assert CliRunner().invoke(cli, ["set", "scratch-dir", str(b)]
+                                  ).exit_code == 0
+
+        assert paths.qa_scratch_roots() == [b / "qa", a / "qa"]
+        assert paths.scenario_scratch_dir(run, 1) == old
+        new = paths.scenario_scratch_dir(run, 2)
+        assert new == b / "qa" / "pr-1-abc" / "s-2"
+        new.mkdir(parents=True)
+        assert workspace_trust.approved_path(old / "proj")
+        monkeypatch.setattr(sr, "container_mount_sources", lambda: [])
+        assert {str(sc) for _, sc in sr.scenario_scratch_dirs("pr-1")} == {
+            str(old), str(new)}
+
+        # A location that no longer exists is not searched.
+        import shutil
+        shutil.rmtree(a)
+        assert paths.qa_scratch_roots() == [b / "qa"]
+
+    def test_second_workdirs_dir_move_keeps_runs(self, home, nas):
+        """A QA run started under workdirs-dir A is still found (status,
+        resume scan) after workdirs-dir moved on to B."""
+        paths.set_path_setting("workdirs-dir", nas / "a")
+        run = paths.qa_workdirs_root() / "pr-1-aaa"
+        run.mkdir(parents=True)
+        (run / "qa_status.json").write_text('{"overall": "PASS"}')
+        paths.set_path_setting("workdirs-dir", nas / "b")
+        assert paths.workdirs_roots() == [nas / "b", nas / "a"]
+        assert paths.qa_workdirs_roots() == [nas / "b" / "qa",
+                                             nas / "a" / "qa"]
+        assert paths.latest_qa_status_path("pr-1") == run / "qa_status.json"
+
+    def test_second_captures_dir_move_keeps_evidence(self, home, nas):
+        """Evidence begun under captures-dir A keeps being used, served and
+        listed after captures-dir moved on to B: one PR never splits."""
+        paths.set_path_setting("captures-dir", nas / "a")
+        old = paths.captures_dir("pr-old", session_tag="tag")
+        assert old == nas / "a" / "tag" / "pr-old"
+        paths.set_path_setting("captures-dir", nas / "b")
+        for resolve in (paths.captures_dir, paths.host_pr_captures_dir):
+            assert resolve("pr-old", session_tag="tag") == old
+        assert paths.captures_dir("pr-new", session_tag="tag") == (
+            nas / "b" / "tag" / "pr-new")
+        assert paths.captures_roots("tag") == [nas / "b" / "tag",
+                                               nas / "a" / "tag"]
+        assert paths.captures_roots_globs() == [
+            f"{nas / 'b'}/*", f"{nas / 'a'}/*", "~/.pm/sessions/*/captures"]
+        # Back to the default: both configured locations stay searched.
+        paths.set_path_setting("captures-dir", None)
+        assert paths.captures_dir("pr-old", session_tag="tag") == old
+
+    def test_earlier_locations_bookkeeping(self, home, tmp_path):
+        """Most recent first, no duplicates, the current value and the
+        default never listed, bounded."""
+        x, y = tmp_path / "x", tmp_path / "y"
+        paths.set_path_setting("scratch-dir", x)
+        assert paths.earlier_dirs("scratch-dir") == []
+        paths.set_path_setting("scratch-dir", y)
+        assert paths.earlier_dirs("scratch-dir") == [x]
+        paths.set_path_setting("scratch-dir", None)
+        assert paths.configured_dir("scratch-dir") is None
+        assert paths.earlier_dirs("scratch-dir") == [y, x]
+        paths.set_path_setting("scratch-dir", x)
+        assert paths.earlier_dirs("scratch-dir") == [y]
+        paths.set_path_setting("scratch-dir", x)
+        assert paths.earlier_dirs("scratch-dir") == [y]
+        for i in range(30):
+            paths.set_path_setting("scratch-dir", tmp_path / f"d{i}")
+        earlier = paths.earlier_dirs("scratch-dir")
+        assert len(earlier) == 20
+        assert earlier[0] == tmp_path / "d28"
+
     def test_qa_runs_in_the_old_root_are_still_found(self, home, nas,
                                                      monkeypatch):
         """A QA run started before workdirs-dir moved stays in the old root

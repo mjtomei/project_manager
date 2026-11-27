@@ -353,7 +353,8 @@ def set_cmd(setting, value):
                              projects on a podman host), on, or off
 
     Location settings (absolute paths; 'default' restores the default).
-    Changing one affects paths created afterwards; nothing is migrated:
+    Changing one affects paths created afterwards; nothing is migrated, and
+    pm keeps finding what began in an earlier location while it exists:
 
       workdirs-dir     PR, meta and QA source workdirs (may be network storage)
 
@@ -394,9 +395,9 @@ def set_cmd(setting, value):
         import os
         from pathlib import Path
         from pm_core.paths import (LOCAL_ONLY_PATH_SETTINGS, NonLocalPathError,
-                                   pm_home, require_local_path)
+                                   require_local_path, set_path_setting)
         if value == "default":
-            (pm_home() / "settings" / setting).unlink(missing_ok=True)
+            set_path_setting(setting, None)
             click.echo(f"{setting} = {_SETTING_DEFAULTS.get(setting)} (default)")
             return
         path = Path(os.path.expanduser(value))
@@ -410,7 +411,7 @@ def set_cmd(setting, value):
             except NonLocalPathError as exc:
                 click.echo(f"Error: {exc}", err=True)
                 raise SystemExit(1)
-        set_global_setting_value(setting, str(path))
+        set_path_setting(setting, path)
         value = str(path)
     elif setting in _INT_SETTINGS:
         try:

@@ -98,6 +98,69 @@ def configured_dir(setting: str) -> Path | None:
     return p
 
 
+# Earlier configured values of each path setting, most recent first: one
+# absolute path per line in ``~/.pm/settings/<setting>.earlier``.
+_EARLIER_SUFFIX = ".earlier"
+_EARLIER_MAX = 20
+
+
+def earlier_dirs(setting: str) -> list[Path]:
+    """Directories path *setting* named before its current value, most
+    recent first, as recorded by :func:`set_path_setting`.
+
+    Nothing is migrated when a location setting changes, so what was
+    created under an earlier location (an in-flight run's scenario
+    scratch, QA runs, evidence) stays there.  The roots functions
+    (:func:`workdirs_roots`, :func:`qa_scratch_roots`,
+    :func:`captures_roots`) keep searching these, like the default
+    location, as long as they exist.
+    """
+    f = pm_home() / "settings" / f"{setting}{_EARLIER_SUFFIX}"
+    try:
+        lines = f.read_text().splitlines()
+    except OSError:
+        return []
+    out: list[Path] = []
+    for line in lines:
+        line = line.strip()
+        if line and os.path.isabs(line) and Path(line) not in out:
+            out.append(Path(line))
+    return out
+
+
+def set_path_setting(setting: str, value: Path | str | None) -> None:
+    """Set path *setting* to the absolute *value* (None: back to the
+    default), remembering the location it configured until now in
+    :func:`earlier_dirs` so what began there is still found.  The default
+    location is always searched, so only configured values are kept."""
+    old = configured_dir(setting)
+    new = Path(value) if value is not None else None
+    earlier = [p for p in earlier_dirs(setting) if p not in (old, new)]
+    if old is not None and old != new:
+        earlier.insert(0, old)
+    d = pm_home() / "settings"
+    d.mkdir(parents=True, exist_ok=True)
+    f = d / f"{setting}{_EARLIER_SUFFIX}"
+    if earlier:
+        f.write_text("".join(f"{p}\n" for p in earlier[:_EARLIER_MAX]))
+    else:
+        f.unlink(missing_ok=True)
+    if new is None:
+        (d / setting).unlink(missing_ok=True)
+    else:
+        set_global_setting_value(setting, str(new))
+
+
+def _existing_roots(first: Path, candidates: list[Path]) -> list[Path]:
+    """*first*, then each existing directory of *candidates* not already
+    listed, in order."""
+    roots = [first]
+    for c in candidates:
+        if c not in roots and c.is_dir():
+            roots.append(c)
+    return roots
+
+
 def workdirs_base() -> Path:
     """Return the workdirs base directory.
 
@@ -113,16 +176,15 @@ def workdirs_base() -> Path:
 def workdirs_roots() -> list[Path]:
     """Every root holding pm-created workdirs.
 
-    :func:`workdirs_base` plus, when ``workdirs-dir`` moved it, the default
-    ``~/.pm/workdirs``: workdirs created before the change stay there
-    (nothing is migrated) and are still pm's own clones — for workspace
-    trust and for recognising a PR clone.
+    :func:`workdirs_base` plus, when ``workdirs-dir`` moved it, each
+    earlier location it named (:func:`earlier_dirs`) and the default
+    ``~/.pm/workdirs`` that still exist: workdirs created before a change
+    stay where they are (nothing is migrated) and are still pm's own
+    clones — for workspace trust and for recognising a PR clone.
     """
-    base = workdirs_base()
-    default = pm_home() / "workdirs"
-    if default != base and default.is_dir():
-        return [base, default]
-    return [base]
+    return _existing_roots(
+        workdirs_base(),
+        earlier_dirs(WORKDIRS_DIR_SETTING) + [pm_home() / "workdirs"])
 
 
 def workdir_locks_dir() -> Path:
@@ -186,16 +248,16 @@ def qa_scratch_roots() -> list[Path]:
     """Every root that may hold QA scenario scratch, :func:`qa_scratch_root`
     first.
 
-    The default ``~/.pm/scratch/qa`` follows when ``scratch-dir`` moved new
-    scratch elsewhere and it still exists: scenarios begun before the change
-    keep their scratch there (nothing is migrated) — for their relaunches,
-    workspace trust and reclaim.  Not created here.
+    The ``qa`` dirs of each earlier ``scratch-dir`` location
+    (:func:`earlier_dirs`) and of the default ``~/.pm/scratch`` follow when
+    they still exist: scenarios begun before a change keep their scratch
+    there (nothing is migrated) — for their relaunches, workspace trust and
+    reclaim.  Not created here.
     """
-    root = qa_scratch_root()
-    default = pm_home() / "scratch" / "qa"
-    if default != root and default.is_dir():
-        return [root, default]
-    return [root]
+    return _existing_roots(
+        qa_scratch_root(),
+        [d / "qa" for d in earlier_dirs(SCRATCH_DIR_SETTING)]
+        + [pm_home() / "scratch" / "qa"])
 
 
 def run_scratch_dir(qa_workdir: Path) -> Path:
@@ -381,9 +443,9 @@ def captures_dir(pr_id: str,
     1. The host path ``~/.pm/sessions/<tag>/captures/<pr_id>/`` (or
        ``<captures-dir>/<tag>/<pr_id>/``) if it already exists. ``tag`` is
        *session_tag* if supplied, else the tmux-derived tag, else the
-       cwd-derived tag. When ``captures-dir`` is set but only the default
-       location holds the PR's dir — evidence from before the setting
-       changed, which is not migrated — that dir is used, so one PR's
+       cwd-derived tag. When ``captures-dir`` changed and only an earlier
+       location (or the default) holds the PR's dir — evidence from before
+       the change, which is not migrated — that dir is used, so one PR's
        evidence never splits across two places.
     2. Otherwise the container bind-mount at
        :data:`CONTAINER_CAPTURES_MOUNT` if it exists and belongs to
@@ -413,9 +475,9 @@ def captures_dir(pr_id: str,
         host_path = _captures_root_for_tag(session_tag) / pr_id
         if host_path.is_dir():
             return host_path
-        legacy = _legacy_captures_root(session_tag)
-        if legacy is not None and (legacy / pr_id).is_dir():
-            return legacy / pr_id
+        for earlier in _earlier_captures_roots(session_tag):
+            if (earlier / pr_id).is_dir():
+                return earlier / pr_id
     mount = Path(CONTAINER_CAPTURES_MOUNT)
     # The mount belongs to one PR (PM_CAPTURES_PR, set at container
     # creation). A throwaway pm project driven inside the container
@@ -462,23 +524,25 @@ def _captures_root_for_tag(session_tag: str) -> Path:
     return sessions_dir() / session_tag / "captures"
 
 
-def _legacy_captures_root(session_tag: str | None = None,
-                          start_path: Path | None = None) -> Path | None:
-    """The default captures root ``~/.pm/sessions/<tag>/captures`` when
-    ``captures-dir`` moved new evidence elsewhere and that root exists
-    (it holds evidence from before the change — nothing is migrated);
-    otherwise None.  The tag is resolved only when ``captures-dir`` is set.
+def _earlier_captures_roots(session_tag: str | None = None,
+                            start_path: Path | None = None) -> list[Path]:
+    """The session's captures roots under earlier ``captures-dir``
+    locations (:func:`earlier_dirs`), then the default
+    ``~/.pm/sessions/<tag>/captures``, that exist and are not the current
+    root: they hold evidence from before a change (nothing is migrated).
+    The tag is resolved only when ``captures-dir`` was ever set.
     """
-    if configured_dir(CAPTURES_DIR_SETTING) is None:
-        return None
+    earlier = earlier_dirs(CAPTURES_DIR_SETTING)
+    if configured_dir(CAPTURES_DIR_SETTING) is None and not earlier:
+        return []
     if session_tag is None:
         session_tag = _resolve_session_tag(start_path)
     if not session_tag:
-        return None
-    legacy = sessions_dir() / session_tag / "captures"
-    if legacy == _captures_root_for_tag(session_tag) or not legacy.is_dir():
-        return None
-    return legacy
+        return []
+    current = _captures_root_for_tag(session_tag)
+    return _existing_roots(
+        current, [d / session_tag for d in earlier]
+        + [sessions_dir() / session_tag / "captures"])[1:]
 
 
 def host_pr_captures_dir(pr_id: str, session_tag: str | None = None,
@@ -487,8 +551,9 @@ def host_pr_captures_dir(pr_id: str, session_tag: str | None = None,
     one file there (``report.html``, ``integration.json``).
 
     The same dir :func:`captures_dir` resolves on the host: the PR's dir in
-    :func:`captures_root`, or — when ``captures-dir`` is set and only the
-    default root holds it (evidence from before the change) — that one.
+    :func:`captures_root`, or — when ``captures-dir`` changed and only an
+    earlier root or the default holds it (evidence from before the
+    change) — that one.
     Not created; None when no session tag can be derived.
     """
     root = captures_root(session_tag, start_path)
@@ -496,9 +561,9 @@ def host_pr_captures_dir(pr_id: str, session_tag: str | None = None,
         return None
     d = root / pr_id
     if not d.is_dir():
-        legacy = _legacy_captures_root(session_tag, start_path)
-        if legacy is not None and (legacy / pr_id).is_dir():
-            return legacy / pr_id
+        for earlier in _earlier_captures_roots(session_tag, start_path):
+            if (earlier / pr_id).is_dir():
+                return earlier / pr_id
     return d
 
 
@@ -506,30 +571,30 @@ def captures_roots(session_tag: str | None = None,
                    start_path: Path | None = None) -> list[Path]:
     """Every host captures root of the session, :func:`captures_root` first.
 
-    The default ``~/.pm/sessions/<tag>/captures`` follows when
-    ``captures-dir`` moved new evidence elsewhere and it still exists: PRs
-    whose evidence started there keep it there.  Empty when no tag can be
-    derived.
+    The roots under earlier ``captures-dir`` locations and the default
+    ``~/.pm/sessions/<tag>/captures`` follow when ``captures-dir`` moved new
+    evidence elsewhere and they still exist: PRs whose evidence started
+    there keep it there.  Empty when no tag can be derived.
     """
     root = captures_root(session_tag, start_path)
     if root is None:
         return []
-    legacy = _legacy_captures_root(session_tag, start_path)
-    return [root] + ([legacy] if legacy is not None else [])
+    return [root] + _earlier_captures_roots(session_tag, start_path)
 
 
 def captures_roots_globs() -> list[str]:
     """Shell globs matching every session's captures roots, for prompts
     that list runs across sessions: ``~/.pm/sessions/*/captures`` by
     default; ``<captures-dir>/*`` (shell-quoted) first when ``captures-dir``
-    is set, then the default, which still holds evidence (and the runs of
-    any PR or test dir) begun before the change."""
+    is set, then each earlier ``captures-dir`` location that still exists,
+    then the default, which still hold evidence (and the runs of any PR or
+    test dir) begun before a change."""
     default = "~/.pm/sessions/*/captures"
     configured = configured_dir(CAPTURES_DIR_SETTING)
-    if configured is not None:
-        import shlex
-        return [f"{shlex.quote(str(configured))}/*", default]
-    return [default]
+    dirs = [configured] if configured is not None else []
+    dirs += [d for d in earlier_dirs(CAPTURES_DIR_SETTING)
+             if d not in dirs and d.is_dir()]
+    return [f"{shlex.quote(str(d))}/*" for d in dirs] + [default]
 
 
 # Container-internal path where the host's captures_dir is bind-mounted
