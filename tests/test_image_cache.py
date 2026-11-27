@@ -565,6 +565,32 @@ class TestWriteEngineConfig:
         assert set(written) == {"storage.conf", "containers.conf"}
         assert image_cache.engine_config_problem(str(eng)) is None
 
+    def test_hand_written_isolated_config_needs_its_own_runroot(
+            self, consumer, tmp_path, monkeypatch):
+        """A hand-fixed storage.conf with the store and mount_program but
+        no runroot passes every other check, yet shares runtime state with
+        the container's other engines; the check says so."""
+        eng = tmp_path / "hand"
+        cfg = eng / ".config" / "containers" / "storage.conf"
+        cfg.parent.mkdir(parents=True)
+        base = (f'[storage]\ndriver = "overlay"\n'
+                f'graphroot = "{eng}/.local/share/containers/storage"\n'
+                f'[storage.options]\n'
+                f'additionalimagestores = ["{image_cache.CONSUMER_STORE}"]\n'
+                f'[storage.options.overlay]\n'
+                f'mount_program = "{image_cache.MOUNT_PROGRAM}"\n')
+        cfg.write_text(base)
+        problem = image_cache.engine_config_problem(str(eng))
+        assert problem and "runroot" in problem and "--force" in problem
+        cfg.write_text(base.replace(
+            '[storage]\n', '[storage]\nrunroot = "/tmp/pm-eng-x/run"\n'))
+        assert image_cache.engine_config_problem(str(eng)) is None
+        # The default engine (container user's HOME) needs no runroot.
+        cfg.write_text(base)
+        from pm_core import container
+        monkeypatch.setattr(container, "_CONTAINER_HOME", str(eng))
+        assert image_cache.engine_config_problem(str(eng)) is None
+
     def test_refuses_foreign_config_without_force(self, consumer, tmp_path):
         eng = tmp_path / "w2"
         cfg = eng / ".config" / "containers" / "storage.conf"
@@ -597,6 +623,30 @@ class TestWriteEngineConfig:
         assert "additionalimagestores" not in msg
         assert "network_backend" in cfg.read_text()
         assert not (cfg.parent / "storage.conf").exists()
+
+    def test_foreign_storage_conf_of_an_isolated_engine_names_its_runroot(
+            self, consumer, tmp_path, monkeypatch):
+        # Following the advice by hand must give a working second engine:
+        # without its own runroot it shares podman's default one, and two
+        # such engines overwrite each other's container mount records
+        # (seen live: exec into the first engine's container then fails).
+        eng = tmp_path / "foreign"
+        cfg = eng / ".config" / "containers" / "storage.conf"
+        cfg.parent.mkdir(parents=True)
+        cfg.write_text('[storage]\ndriver = "overlay"\n')
+        with pytest.raises(ImageCacheError) as exc:
+            image_cache.write_engine_config(str(eng))
+        runroot = [ln for ln in image_cache.engine_config_text(
+            str(eng), isolated=True)["storage.conf"].splitlines()
+            if ln.startswith("runroot")][0]
+        msg = str(exc.value)
+        assert runroot in msg and "additionalimagestores" in msg
+        # The container user's default engine keeps podman's runroot.
+        from pm_core import container
+        monkeypatch.setattr(container, "_CONTAINER_HOME", str(eng))
+        with pytest.raises(ImageCacheError) as exc:
+            image_cache.write_engine_config(str(eng))
+        assert "runroot" not in str(exc.value)
 
     def test_refuses_a_fuse_graphroot(self, consumer, tmp_path, monkeypatch):
         from pm_core import paths

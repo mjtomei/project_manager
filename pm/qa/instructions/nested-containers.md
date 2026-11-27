@@ -55,7 +55,10 @@ the same shared layers:
 
 `engine-setup` refuses a network filesystem, an incompatible cache, and an
 existing `storage.conf` or `containers.conf` it did not write; the error
-says what to add to that file, and `--force` replaces it instead.
+says what to add to that file, and `--force` replaces it instead. After
+editing such a file yourself, verify it with `HOME=<engine home> pm
+container cache check` (`engine-setup` keeps refusing a file it did not
+write).
 
 ## Container-mode pm inside the container (nested pm launch)
 
@@ -81,10 +84,13 @@ Build a small fixture on top of the cached image instead of rebuilding
 pm-dev:
 
     mkdir -p /scratch/build-fixture && cd /scratch/build-fixture
-    printf 'FROM localhost/pm-dev:latest\nRUN echo fixture > /etc/pm-fixture\n' > Containerfile
+    printf 'FROM localhost/pm-dev:latest\nUSER root\nRUN echo fixture > /etc/pm-fixture\n' > Containerfile
     podman build --uts host -t localhost/pm-fixture:test .
 
-New layers land in your private graphroot; the base layers stay shared.
+pm-dev ends with `USER pm`, so a `RUN` step that writes outside `/home/pm`
+needs `USER root` first (without it: `Permission denied`). New layers land
+in your private graphroot; the base layers stay shared. The `COMMIT` step
+takes a minute or two: it diffs the new layer against the shared base.
 Rebuild pm-dev from the Dockerfile only when the Dockerfile itself is under
 test — that is a full build (network, several GB, minutes); say so in the
 scenario's steps.

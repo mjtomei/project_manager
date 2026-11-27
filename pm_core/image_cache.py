@@ -40,6 +40,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import secrets
 import shlex
 import shutil
@@ -777,8 +778,7 @@ def write_engine_config(home: str | None = None, *, force: bool = False,
             f"it. Nothing was written.")
     home = os.path.abspath(home or os.environ.get("HOME") or str(Path.home()))
     if isolated is None:
-        from pm_core.container import _CONTAINER_HOME
-        isolated = home != _CONTAINER_HOME
+        isolated = _is_isolated(home)
     problem = _graphroot_problem(home)
     if problem:
         raise ImageCacheError(problem)
@@ -792,7 +792,8 @@ def write_engine_config(home: str | None = None, *, force: bool = False,
             except OSError:
                 ours = False
             if not ours:
-                raise ImageCacheError(_foreign_config_message(p, fname, home))
+                raise ImageCacheError(_foreign_config_message(
+                    p, fname, home, isolated=isolated))
     cdir.mkdir(parents=True, exist_ok=True)
     written = {}
     for fname, text in files.items():
@@ -801,15 +802,36 @@ def write_engine_config(home: str | None = None, *, force: bool = False,
     return written
 
 
-def _foreign_config_message(path: Path, fname: str, home: str) -> str:
+def _is_isolated(home: str) -> bool:
+    """An engine at any HOME but the container user's own is a second
+    engine in this container: it needs its own runroot and tmp dir."""
+    from pm_core.container import _CONTAINER_HOME
+    return home != _CONTAINER_HOME
+
+
+def _isolated_runroot(home: str) -> str:
+    return f"/tmp/pm-eng-{_engine_hash(home)}/run"
+
+
+def _foreign_config_message(path: Path, fname: str, home: str, *,
+                            isolated: bool = True) -> str:
     """Why :func:`write_engine_config` will not replace *path*, and what to
     add to it instead — specific to the file, since a scenario's own
     ``containers.conf`` (e.g. its network mode) has nothing to do with the
     image store."""
     if fname == "storage.conf":
         why = "it would hide the shared image store"
-        add = (f"add \"{CONSUMER_STORE}\" to its additionalimagestores and "
-               f"set mount_program = \"{MOUNT_PROGRAM}\"")
+        if isolated:
+            # Without its own runroot a second engine shares podman's
+            # default one, and the engines' container mount records then
+            # overwrite each other (exec into the other's containers fails).
+            add = (f"add \"{CONSUMER_STORE}\" to its additionalimagestores, "
+                   f"set mount_program = \"{MOUNT_PROGRAM}\" and give it "
+                   f"its own runroot = \"{_isolated_runroot(home)}\" under "
+                   f"[storage]")
+        else:
+            add = (f"add \"{CONSUMER_STORE}\" to its additionalimagestores "
+                   f"and set mount_program = \"{MOUNT_PROGRAM}\"")
     else:
         why = ("this engine needs its own runtime tmp dir, so it does not "
                "share runtime state with another engine in this container")
@@ -883,6 +905,13 @@ def engine_config_problem(home: str | None = None) -> str | None:
     if MOUNT_PROGRAM not in text:
         return (f"{p} does not set mount_program = \"{MOUNT_PROGRAM}\"; "
                 f"overlay cannot run on this filesystem without it")
+    if _is_isolated(home) and not re.search(r"^\s*runroot\s*=", text, re.M):
+        return (f"{p} sets no runroot, so this engine shares podman's default "
+                f"runtime dir with the other engines in this container and "
+                f"their container mount records overwrite each other; add "
+                f"runroot = \"{_isolated_runroot(home)}\" under its [storage] "
+                f"table, or run 'pm container engine-setup --force' to "
+                f"replace it")
     return None
 
 
