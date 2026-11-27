@@ -174,6 +174,11 @@
 - When the user runs `pm guide`.
 - Then it prints "Loading PRs from plan file...", loads the PRs, and moves on to the next step.
 - The TUI guide refresh no longer shows "Finish plan with PR breakdown".
+- With PRs now loaded, `pm guide` (no Claude) prints the assist prompt. Its
+  "pm Project Lifecycle" lists seven steps: Initialize, Plan (write the plan
+  *then* break it into PRs, TUI `p` then `a`), Review (`c`), Load (`l`), Work,
+  Review, Merge. There is no separate "Break down" step and no `w` /
+  `pm plan breakdown`.
 
 **R16: Bounded listing.**
 - Given a project with about 300 existing PRs, some with very long titles.
