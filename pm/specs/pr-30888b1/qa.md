@@ -26,7 +26,10 @@
     plans-view reference lists `Enter` (view plan file), not the `v` key the
     pane lost in 81b19294 (c04c6bd5; fixes pr-c428279).
   - `org-demo.md` step 4 says plan add writes the plan and its PRs; step 5 is
-    "Review and load the PRs" (b1cbdd99).
+    "Review and load the PRs" (b1cbdd99). Step 3's `pm init` passes
+    `--no-import`, so the step-4 plan is the only plan and step 5's bare
+    `pm plan review` / `pm plan load` pick it. Step 5 also says to pass the plan
+    id when there are several plans (QA S14, ac602505).
 - Guide:
   - The `has_plan_draft` step label is now "Finish plan with PR breakdown". The TUI guide status bar shows it.
   - The `pm guide` setup prompt describes the flow `a` → `c` → `l`, says `a` writes the plan and its `## PRs`, and has a section "If the plan has no PRs yet" that points at `c`.
@@ -88,6 +91,13 @@
   - `plan add` is described as adding a plan and breaking it into PRs;
   - the plan key list reads `a=add  c=review  l=load  e=edit  D=deps  Enter=view file`, with no `v=view`.
 - In an uninitialized directory, `pm help` shows the getting-started text with the same content.
+- A user following `org-demo.md` sections 3-5 literally in a scratch repo (no
+  Claude) sees one plan after section 4. Section 5's bare `pm plan review`
+  launches (or prints) the pre-load review prompt for that plan. Bare
+  `pm plan load` gives the R11 recovery message, and after a `## PRs` section is
+  written it loads those PRs. Neither command says "Multiple plans", and the doc
+  describes no separate breakdown step. The manual `pm pr add` steps that follow
+  are out of scope (pr-82b2739).
 
 **R8: TUI plans view.**
 - Given the TUI is open on a project whose setup is complete.
@@ -204,6 +214,12 @@
       pane open (e.g. `exec sleep` on a tty after recording) (QA S9).
     - the first `w r` clones the pm repo to `~/.pm/workdirs/meta-<tag>`, which
       takes about 16 s with the TUI blocked. Wait for it before judging (QA S10).
+    - `w r` opens a split pane in window 0 and takes focus. Kill that pane (or
+      re-select the TUI pane) before typing more keys through a real client (QA S16).
+    - a repeat plans-view `c` on the same plan resumes the saved review session
+      (`--resume <id>`), so the recording stand-in sees the pre-load review
+      prompt only on the first `c`. To read the prompt again, use a fresh plan or
+      run `pm plan review <id> --fresh` from a shell (QA S16).
 - **Standing in for the plan session's output:** the fake does not write files.
   To get "the session wrote the plan and its PRs", write the plan file in the
   format the prompt asks for: a body, then `## PRs`, then `### PR:` entries
@@ -267,12 +283,20 @@
   here.
 
 **E9: Other Claude-facing TUI prompts.**
-- The TUI's interactive Claude session (tree view) and the watcher review session
-  (`w r`) carry the TUI-usage section.
-- That section lists the session-launching commands not to run (`pm pr start`,
-  `pm pr done`, `pm plan add`, `pm plan review`) and the plan keys `a`/`c`/`l`.
-  Neither prompt mentions breakdown or `w` as a plan key.
+- The TUI's interactive Claude session (tree view `c`) and the watcher review
+  session (`w r`) both carry the "Interacting with the TUI" section. That section
+  lists the session-launching commands not to run (`pm pr start`, `pm pr done`,
+  `pm plan add`, `pm plan review`), with no `pm plan breakdown`.
+- The tree-view session also has a "Use the TUI for actions that launch sessions"
+  list whose plan line reads `p` — toggle plans view, then `a`/`c`/`l`.
+- The watcher review prompt has a "Forbidden" list (`pm pr start`, `pm pr done`,
+  `pm plan add`, `pm plan review`, no breakdown) but **no plan-key line at all**.
+  That is the same as before this PR, so its absence is not a failure. (QA S16
+  found that an earlier version of this spec overclaimed here.)
+- Neither prompt mentions breakdown or `w` as a plan key.
 - Seen through the recording stand-in on PATH before `pm session`.
+- `pm pr done` in those lists names a command that no longer exists. That is
+  pre-existing and filed as pr-21033e4 (QA S17); it is not a failure here.
 
 **E7: Malformed PR fields (pre-existing; tracked by pr-5cee3d5).**
 - Given a hand-edited `depends_on: 7`.
@@ -294,6 +318,7 @@
 - the pre-load review prompt lacks the propose-breakdown paragraph;
 - the guide still shows a breakdown step;
 - a plans-view key reference (getting-started, guide prompt) still names a `v` key;
+- `org-demo.md` sections 3-5 followed literally fail (e.g. "Multiple plans") or describe a separate breakdown step;
 - in the plans view, a plan action (`c` / `l` / `e`) fires while a `w` or `y` prefix is armed, or the prefix stays armed after it;
 - with more plans than fit, the footer cannot be brought into view by moving to the last plan;
 - a concurrent different-name add or load loses or duplicates entries.
@@ -308,7 +333,12 @@
 - plans-view Enter runs bare `less` with no fallback (pr-2ea2797);
 - doubled "Error: Error:" prefix on TUI command-bar errors (pr-6dcca52);
 - status bar omits WCH right after `w s` (pr-edc256b);
-- the `_MANUAL_TESTING_GUIDANCE` INPUT_REQUIRED wording (pr-a7d4dae).
+- the `_MANUAL_TESTING_GUIDANCE` INPUT_REQUIRED wording (pr-a7d4dae);
+- Claude-facing TUI prompts still forbid the removed `pm pr done` (pr-21033e4);
+- the watcher review (`w r`) prompt has no plan-key line (unchanged from master; see E9);
+- org-demo.md steps 5-9 use placeholder ids (`plan-001`, `pr-001`…) that pm
+  never mints, so `--depends-on pr-001` exits 1 "Unknown PR IDs" (pr-82b2739).
+  Steps 3-5 up to the bare review / load (and loading a written `## PRs`) are in scope.
 
 ## 5. Ambiguities (all resolved)
 

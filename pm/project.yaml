@@ -57027,3 +57027,30 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-82b2739
+  plan: bugs
+  title: 'Bug: org-demo.md steps 5-9 use sequential placeholder ids (plan-001, pr-001..pr-004)
+    that pm never mints'
+  branch: pm/pr-82b2739-bug-org-demo-md-steps-5-9-use-sequential-placehold
+  status: pending
+  depends_on: []
+  description: 'org-demo.md, followed literally, fails from step 5 on. Plan and PR
+    ids are hash-based (plan-<7hex>, pr-<7hex>), but step 5 runs `pm pr add ... --plan
+    plan-001` and `--depends-on pr-001` / `"pr-001,pr-002"` (org-demo.md:130-148),
+    and steps 6-9 use `pm pr start pr-001`, a python snippet matching `pr["id"] ==
+    "pr-001"`, branch `pm/pr-001-write-integrity-checks-framework`, `pm pr review
+    pr-001` and `pm pr cleanup pr-001` (lines 172-264). Repro: follow sections 1-5
+    in a temp dir; `pm pr add "Add resource tracking" --plan plan-001 --depends-on
+    pr-001` exits 1 with "Unknown PR IDs". Fix: capture ids from command output into
+    shell variables (e.g. PLAN=$(pm plan list | ...), PR1=$(pm pr add ... | ...))
+    and use them in every later step, or tell the reader to substitute the ids pm
+    printed. Found by pr-30888b1 QA S14 (pre-existing on master ac719072).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-27T08:24:59.234214+00:00'
+  updated_at: '2026-11-27T08:24:59.234214+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
