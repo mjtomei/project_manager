@@ -56572,3 +56572,30 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-0707023
+  plan: bugs
+  title: 'Bug: remove_container logs ERROR "container runtime failed (rc=125): podman
+    inspect" on every successful removal'
+  branch: pm/pr-0707023-bug-remove-container-logs-error-container-runtime-
+  status: pending
+  depends_on: []
+  description: 'pm_core/container.py remove_container() polls `_run_runtime("inspect",
+    name, check=False)` until the container is gone; _run_runtime logs every non-zero
+    rc at ERROR, so the expected "no such container" answer is logged as `ERROR [container]
+    container runtime failed (rc=125): podman inspect <ctr>` + stderr on every successful
+    removal (seen in QA S18 of pr-abc1124 for each merge cleanup, pm pr cleanup --resources
+    and create_container/container_is_running probes; same code on master). Repro:
+    container mode, run QA so a scenario container exists, then pm pr cleanup --resources
+    <pr>; grep -a "container runtime failed (rc=125): podman inspect" ~/.pm/debug/<tag>.log.
+    Expected: probes whose failure means "absent" log at debug (e.g. a quiet=True
+    flag on _run_runtime for check=False existence probes), so real runtime errors
+    stay visible.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-27T15:38:51.543350+00:00'
+  updated_at: '2026-11-27T15:38:51.543350+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
