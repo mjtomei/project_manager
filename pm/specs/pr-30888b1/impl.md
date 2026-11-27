@@ -76,12 +76,12 @@ key. `pm plan breakdown` then fails with Click's standard
 
 ### R5. Docs, help and guidance text
 
-- `pm_core/cli/__init__.py`: the getting-started text and the `pm help` COMMANDS list drop `plan breakdown` and `w=breakdown`, and describe `plan add` as adding a plan and breaking it into PRs. (The merge already applied this.)
+- `pm_core/cli/__init__.py`: the getting-started text and the `pm help` COMMANDS list drop `plan breakdown` and `w=breakdown`, and describe `plan add` as adding a plan and breaking it into PRs. (The merge already applied this.) The getting-started plans-view key line also replaces the stale `v=view` (the pane lost `v` in 81b19294; Enter views the file) with `D=deps  Enter=view file`, the same text pr-fa9f172 writes on that line (review bb8a i1).
 - `pm_core/guide.py`:
   - `STEP_DESCRIPTIONS["has_plan_draft"]` changes from "Break plan into PRs" to "Finish plan with PR breakdown". The TUI log shows this label while the plan add session is still writing.
   - The setup prompt's "Breaking the plan into PRs" section becomes "If the plan has no PRs yet", pointing at `c`.
   - "Creating a plan" says the `a` session writes both the plan and its `## PRs`.
-  - The plans-view reference reads `a` → `c` → `l` with no `w` line.
+  - The plans-view reference reads `a` → `c` → `l` with no `w` line, and its stale `v` line becomes `Enter` — view plan file (review bb8a i1; this was filed as pr-c428279).
   - The workflow-lifecycle numbering is already updated by the merge.
 - `pm_core/prompt_gen.py`: remove `pm plan breakdown` from the `tui_section` forbidden list (already done by the merge) and from the watcher-explainer forbidden list (new on master).
 - `pm_core/tui/pane_ops.py` assistant prompt: already lists `a`/`c`/`l` after the merge.
@@ -102,6 +102,7 @@ key. `pm plan breakdown` then fails with Click's standard
   - the pre-load review prompt contains the missing-PRs instruction;
   - `plan load` on a plan with no `## PRs` points at `pm plan review ⟦plan_id⟧`, not `plan add`;
   - the guide setup prompt and `STEP_DESCRIPTIONS` have no `w`/breakdown step;
+  - every key named in the guide's plans-view reference and in the getting-started key line is a live plans-pane key (`_KEY_ACTIONS` or Enter) (`TestPlansKeyReferencesAreLive`, review bb8a i1);
   - `handle_plan_action(app, "breakdown", …)` launches nothing;
   - a source scan of `pm_core/**/*.py` finds no `plan breakdown`, `plan-breakdown`, `plan:breakdown` or "Break plan into PRs".
 
@@ -468,7 +469,7 @@ In the TUI, `p` toggles the plans view. The setup flow is `a` → `c` → `l`:
 - `c` — review plan (launches a Claude session)
 - `l` — load PRs from plan into the project
 - `e` — edit plan file
-- `v` — view plan file
+- `Enter` — view plan file
 
 ## Next Step
 

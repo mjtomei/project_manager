@@ -561,7 +561,7 @@ def _getting_started_text() -> str:
      pm plan load                Load PRs from plan file
 
   In the TUI, press p to open the plans view.  Plan action keys:
-     a=add  c=review  l=load  e=edit  v=view
+     a=add  c=review  l=load  e=edit  D=deps  Enter=view file
 
   Working with PRs:
      pm pr start                 Clone, branch, launch Claude session

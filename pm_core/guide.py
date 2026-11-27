@@ -318,7 +318,7 @@ In the TUI, `p` toggles the plans view. The setup flow is `a` → `c` → `l`:
 - `c` — review plan (launches a Claude session)
 - `l` — load PRs from plan into the project
 - `e` — edit plan file
-- `v` — view plan file
+- `Enter` — view plan file
 
 ## Next Step
 

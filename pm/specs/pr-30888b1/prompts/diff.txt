@@ -43,7 +43,7 @@
  
  ### Reviewing the plan
  
-@@ -106,9 +106,8 @@
+@@ -106,13 +106,12 @@
  
  ### TUI plans view reference
  
@@ -55,6 +55,11 @@
  - `c` — review plan (launches a Claude session)
  - `l` — load PRs from plan into the project
  - `e` — edit plan file
+-- `v` — view plan file
++- `Enter` — view plan file
+ 
+ ## Next Step
+ 
 --- master/guide_step_description_has_plan_draft
 +++ branch/guide_step_description_has_plan_draft
 @@ -1 +1 @@

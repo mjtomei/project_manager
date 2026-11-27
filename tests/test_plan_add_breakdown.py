@@ -4,6 +4,7 @@ pr-30888b1 folded `pm plan breakdown` (TUI key `w`) into `pm plan add`.  These
 tests pin both halves: the plan add prompt carries the breakdown guidance, and
 nothing in pm still offers the removed command, key, or review prompt.
 """
+import re
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -11,7 +12,7 @@ import pytest
 from click.testing import CliRunner
 
 from pm_core import guide, store
-from pm_core.cli import cli, helpers
+from pm_core.cli import _getting_started_text, cli, helpers
 from pm_core.cli.plan import plan as plan_group
 from pm_core.plans.review import REVIEW_PROMPTS
 from pm_core.tui import pane_ops
@@ -188,3 +189,28 @@ class TestGuideHasNoBreakdownStep:
         assert "`w` —" not in prompt
         assert "### If the plan has no PRs yet" in prompt
         assert "breaks it into PRs" in prompt
+
+
+class TestPlansKeyReferencesAreLive:
+    """Every plans-view key that the guide prompt and the getting-started text
+    name must be a key the plans pane handles.  Both lists dropped ``w`` here
+    and still named a ``v`` key that the pane lost earlier (Enter views the
+    plan file; pr-c428279)."""
+
+    LIVE = set(PlansPane._KEY_ACTIONS) | {"Enter"}
+
+    def test_guide_reference_keys(self, tmp_path):
+        root = _state(tmp_path, plan_body="# Plan\n\nDraft.\n")
+        state, ctx = guide.detect_state(root)
+        prompt = guide.build_setup_prompt(state, ctx, root)
+        ref = prompt.split("### TUI plans view reference", 1)[1].split("\n## ", 1)[0]
+        keys = re.findall(r"^- `([^`]+)` — ", ref, re.M)
+        assert "Enter" in keys
+        assert set(keys) <= self.LIVE, keys
+
+    def test_getting_started_keys(self):
+        text = _getting_started_text()
+        line = text.split("Plan action keys:\n", 1)[1].splitlines()[0]
+        keys = re.findall(r"(\S+)=", line)
+        assert "Enter" in keys
+        assert set(keys) <= self.LIVE, keys
