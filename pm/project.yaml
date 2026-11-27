@@ -2618,8 +2618,24 @@ prs:
       fix) held live.'
     created_at: '2026-11-27T06:54:23Z'
     last_edited: '2026-11-27T06:54:23Z'
+  - id: note-d860066
+    text: 'QA S14 run (2026-11-27): 11 of 12 Thens held live at 7b3423d0 (breakdown
+      in 6 forms rc 2 with nothing launched; help/getting-started/plan --help/plan
+      add --help in-project and pm help outside any repo have no breakdown or v=view;
+      no-PRs load rc 1 with the plan review <id> (key c) message; pre-load review
+      has the propose-breakdown paragraph and 5. FORMAT; load after writing ## PRs
+      creates 2 PRs on the same plan; post-load review is the progress prompt; legacy
+      plan-breakdown-<ts>.txt works through plan fixes + plan fix --review). Failed
+      Then: org-demo.md followed literally. Section 3 pm init (no --no-import) registers
+      an import plan, so section 5 bare pm plan review / pm plan load refuse with
+      "Multiple plans" rc 1. Fixed in ac602505: section 3 passes --no-import and section
+      5 says to pass the plan id when there are several plans. Post-fix walkthrough,
+      extracted from the doc: bare review launches, bare load gives the recovery message,
+      then loads 2 PRs. Captures: /pm-captures/scenarios/14/{pre-fix,post-fix}.'
+    created_at: '2026-11-27T07:10:12Z'
+    last_edited: '2026-11-27T07:10:12Z'
   created_at: '2026-03-01T17:51:46.490716+00:00'
-  updated_at: '2026-11-27T06:54:24.200215+00:00'
+  updated_at: '2026-11-27T07:10:13.121710+00:00'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-30888b1-fold-plan-breakdown-into-plan-add-st-ab512a43
 - id: pr-3116896
   plan: tui-ux
