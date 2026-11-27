@@ -1394,15 +1394,30 @@ def _podman_error(stderr: str | None) -> str:
 
 def missing_in_consumer_message(image_ref: str) -> str:
     entry = read_consumer_entry() or {}
-    names = ", ".join(entry.get("names") or []) or entry.get("image_id", "?")
+    names = [str(n) for n in entry.get("names") or []]
+    short_id = str(entry.get("image_id") or "").removeprefix("sha256:")[:12]
+    held = ", ".join(names) or short_id or "?"
+    if names and short_id:
+        held += f", image {short_id}"
+    use = names[0] if names else short_id or "<name>"
+    by_id = f", or its ID {short_id}" if names and short_id else ""
+    # Entries are immutable and keyed by image ID, so a tag added on the host
+    # after the entry was prepared never reaches it: relaunching this
+    # container from that tag mounts the same entry and fails here again.
+    # Only the names (or ID) the entry already holds work for such an alias.
     return (
         f"Image '{image_ref}' is not in the shared image cache mounted at "
-        f"{CONSUMER_MOUNT} (it holds {names}). Inside a cache consumer pm "
+        f"{CONSUMER_MOUNT} (it holds {held}). Inside a cache consumer pm "
         f"does not build, pull or import images — that would recreate the "
         f"per-engine copies the cache exists to avoid — and it does not fall "
-        f"back to VFS or the host.\n\nTo fix: use one of the cached images "
-        f"('pm container set image <name>'), build a small fixture on top of "
-        f"one, or launch this container from that image — a container sees "
+        f"back to VFS or the host.\n\nTo fix: use the cached image "
+        f"('pm container set image {use}'{by_id}). That is also the fix "
+        f"when '{image_ref}' is another tag of the cached image: an entry "
+        f"keeps the names its image had when it was prepared, so a tag "
+        f"added on the host afterwards is not in it, and relaunching this "
+        f"container from that tag mounts the same entry. Or build a small "
+        f"fixture on top of the cached image. Or, if '{image_ref}' is a "
+        f"different image, launch this container from it — a container sees "
         f"only the entry of the image it was launched from, so on the host "
         f"run 'pm container set image {image_ref}' and relaunch this "
         f"container (that launch prepares the image's entry); "

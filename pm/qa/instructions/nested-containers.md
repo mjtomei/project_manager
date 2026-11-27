@@ -69,7 +69,9 @@ bootstrap-only `project.yaml` edit — see TUI Manual Testing) and run
 shared image: it never builds, pulls or imports it, and a pm started with a
 private `HOME` gets its engine configured automatically. If the image is
 not in the shared cache the launch fails with an error naming the cached
-image — it does not fall back to building, VFS or the host.
+image — it does not fall back to building, VFS or the host. A tag added on
+the host after the image's entry was prepared is not in the entry: use the
+cached name or the image ID the error names.
 
 Containers launched by that nested pm (one level deeper) do not receive the
 shared cache: each nesting level shifts non-root file ownership by one, so

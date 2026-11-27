@@ -1105,6 +1105,34 @@ def test_missing_in_consumer_message_names_the_cache(consumer):
     assert "cache prepare --image" not in msg
 
 
+def test_missing_in_consumer_message_alias_uses_the_cached_name(consumer):
+    """A tag added on the host after the entry was prepared is not in it
+    (entries are immutable), and relaunching from that tag mounts the same
+    entry; the error must name the cached ref or ID as the fix, and offer
+    the relaunch only for a different image (QA S9)."""
+    msg = image_cache.missing_in_consumer_message("localhost/pm-dev:s9-alias")
+    short = "ab" * 6
+    assert f"it holds localhost/pm-dev:latest, image {short}" in msg
+    assert ("'pm container set image localhost/pm-dev:latest', or its ID "
+            f"{short}") in msg
+    assert "<name>" not in msg
+    assert "another tag of the cached image" in msg
+    assert "mounts the same entry" in msg
+    assert ("if 'localhost/pm-dev:s9-alias' is a different image, launch "
+            "this container from it") in msg
+    assert "pm container set image localhost/pm-dev:s9-alias" in msg
+
+
+def test_missing_in_consumer_message_entry_without_names(consumer):
+    (consumer / "entry.json").write_text(json.dumps({
+        "key": KEY, "image_id": IMAGE_ID, "names": []}))
+    msg = image_cache.missing_in_consumer_message("pm-dev:other")
+    short = "ab" * 6
+    assert f"(it holds {short})" in msg
+    assert f"'pm container set image {short}')" in msg
+    assert ", or its ID" not in msg
+
+
 def test_missing_overlay_support_fails_the_nested_launch(consumer, tmp_path,
                                                         monkeypatch):
     monkeypatch.setattr(image_cache, "overlay_support_problem",

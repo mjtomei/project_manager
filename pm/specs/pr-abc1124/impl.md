@@ -222,7 +222,11 @@ the task and on the measurements above.
     on one, or launch this container from the wanted image (`pm container
     set image` on the host, then relaunch: a container only ever sees the
     entry of the image it was launched from, so preparing another image on
-    the host changes nothing here — review 62b4 i8).  The engine config for the
+    the host changes nothing here — review 62b4 i8).  The error names the
+    cached ref (and the image ID) in that first remedy, and offers the
+    relaunch only for a *different* image: a tag added on the host after the
+    entry was prepared is not in it, and relaunching from that tag mounts the
+    same entry (QA S9).  The engine config for the
     current `HOME` is ensured first (a test pm with a private `HOME`).  The
     shared entry is **not** mounted into the next level (fact 6); see A3.
 * `pm container status` shows the cache mode and, when applicable, the
@@ -601,7 +605,9 @@ the task and on the measurements above.
 * A tag added on the host to an image ID that already has an entry is not
   in that entry: entries are immutable once published, and the warm path
   only compares IDs.  Consumers see the tags the ID had at preparation
-  (and the ID itself); the consumer's missing-image error lists them.
+  (and the ID itself); the consumer's missing-image error lists them and
+  names the cached ref or ID as the fix for such an alias (relaunching from
+  the alias would mount the same entry).
   Re-preparing on a tag change would re-import the whole image for an
   alias, so it is not done.
 
@@ -681,7 +687,9 @@ bootstrap-only `project.yaml` edit — see TUI Manual Testing) and run
 shared image: it never builds, pulls or imports it, and a pm started with a
 private `HOME` gets its engine configured automatically. If the image is
 not in the shared cache the launch fails with an error naming the cached
-image — it does not fall back to building, VFS or the host.
+image — it does not fall back to building, VFS or the host. A tag added on
+the host after the image's entry was prepared is not in the entry: use the
+cached name or the image ID the error names.
 
 Containers launched by that nested pm (one level deeper) do not receive the
 shared cache: each nesting level shifts non-root file ownership by one, so
