@@ -708,9 +708,15 @@ def _earlier_cache_roots(current: Path) -> list[Path]:
     so their unreferenced entries are evicted whatever their image's state
     (their files are sub-UID owned: hard to delete by hand)."""
     from pm_core.paths import IMAGE_CACHE_DIR_SETTING, earlier_dirs, pm_home
+    # Compared by real path: an earlier spelling of the current root (a
+    # symlink to it, or a value with '..') is the current root, whose
+    # configured image's entry gc must keep.
+    seen = {os.path.realpath(current)}
     out: list[Path] = []
     for d in earlier_dirs(IMAGE_CACHE_DIR_SETTING) + [pm_home() / "image-cache"]:
-        if d != current and d not in out and (d / "entries").is_dir():
+        real = os.path.realpath(d)
+        if real not in seen and (d / "entries").is_dir():
+            seen.add(real)
             out.append(d)
     return out
 

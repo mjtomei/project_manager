@@ -456,7 +456,10 @@ the task and on the measurements above.
   once it is over an hour old (a preparer that resolved the old root just
   before the move may have published there and not yet launched its
   consumer).  Their files are sub-UID owned, so a user cannot simply
-  delete them by hand (review 5875 i1).
+  delete them by hand (review 5875 i1).  Roots are compared by real path:
+  setting `image-cache-dir` to the directory a symlinked default points
+  at names the root in use, not an earlier one, so its configured image's
+  entry is kept (review 5875 i2).
 
 ## 3. Implicit requirements
 

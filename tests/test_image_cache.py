@@ -592,6 +592,24 @@ class TestGc:
         assert [r for _, r in out["removed"]] == [
             "left in an earlier image-cache-dir, no consumers"]
 
+    def test_current_root_under_another_spelling_is_not_earlier(
+            self, fake, home, tmp_path):
+        """'image-cache-dir' set to the real dir behind a symlinked default
+        names the root in use, not an earlier one: its configured image's
+        entry stays, however old and unreferenced."""
+        from pm_core import paths
+        ssd = tmp_path / "ssd"
+        ssd.mkdir()
+        (paths.pm_home() / "image-cache").symlink_to(ssd)
+        named = _publish(image_cache.cache_root(), KEY, IMAGE_ID)
+        past = time.time() - 2 * image_cache._ABANDONED_PREP_AGE
+        os.utime(named, (past, past))
+        paths.set_path_setting("image-cache-dir", ssd)
+        fake.present = True
+        out = image_cache.gc()
+        assert named.exists(), out
+        assert image_cache._earlier_cache_roots(image_cache.cache_root()) == []
+
 
 # ---------------------------------------------------------------------------
 # Consumer side
