@@ -179,8 +179,8 @@ Let them know it is safe to close this pane — load and review will run in new 
         click.echo("Launching Claude...")
         launch_claude(prompt, session_key=session_key, pm_root=root, resume=not fresh,
                       session_type="plan")
-        # Background review — plan add now includes the PR breakdown, so the
-        # check requires a ## PRs section as well as the plan body.
+        # Background check: this session writes both the plan body and its
+        # ## PRs breakdown, so the check requires both.
         check_prompt = review_mod.REVIEW_PROMPTS["plan-add"].format(path=plan_path)
         click.echo("Reviewing results... (background)")
         review_mod.review_step("plan add", f'Develop plan "{name}"', check_prompt, root)
