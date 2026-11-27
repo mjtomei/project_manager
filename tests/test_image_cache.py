@@ -1139,6 +1139,16 @@ class TestStatusLine:
         assert line.startswith(f"auto — entry {KEY} for pm-dev:latest")
         assert fake.count("run") == 0 and not fake.popens
 
+    @pytest.mark.parametrize("image_id", [IMAGE_ID, "ab" * 32])
+    def test_missing_entry_names_the_short_image_id(self, fake, home,
+                                                    monkeypatch, image_id):
+        """podman 3.4 reports a bare hex ID, docker a ``sha256:`` one;
+        either way the line shows the 12-digit ID ``podman images`` shows."""
+        monkeypatch.setattr(image_cache, "in_container", lambda: False)
+        fake.image_id = image_id
+        line = image_cache.status_line("pm-dev:latest", "podman", True)
+        assert f"no entry for pm-dev:latest ({'ab' * 6}) yet" in line
+
     def test_unavailable_image_is_reported(self, fake, home, monkeypatch):
         monkeypatch.setattr(image_cache, "in_container", lambda: False)
         fake.fail["image"] = "no such image"

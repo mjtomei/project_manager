@@ -345,7 +345,11 @@ def status_line(image_ref: str, runtime: str, nested_podman: bool) -> str:
     except ImageCacheError as exc:
         return f"{m} — {exc}"
     if entry is None:
-        return (f"{m} — no entry for {image_ref} ({image_id[:19]}) yet; the "
+        # podman reports a bare hex ID (docker prefixes "sha256:"); show
+        # the 12-digit short ID that `podman images` and the consumer's
+        # missing-image error use.
+        short_id = image_id.removeprefix("sha256:")[:12]
+        return (f"{m} — no entry for {image_ref} ({short_id}) yet; the "
                 f"next launch prepares it, or run 'pm container cache "
                 f"prepare'")
     size = entry.meta.get("store_bytes")
