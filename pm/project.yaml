@@ -56477,3 +56477,53 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-c0ab8ae
+  plan: bugs
+  title: 'Bug: pm guide outside a pm tmux session crashes in assist mode (launch_claude
+    missing session_key/pm_root)'
+  branch: pm/pr-c0ab8ae-bug-pm-guide-outside-a-pm-tmux-session-crashes-in-
+  status: pending
+  depends_on: []
+  description: 'pm_core/cli/guide.py:101 (assist branch, PRs exist, not in a pm-*
+    tmux session) calls launch_claude(prompt, session_type="guide") but launch_claude(prompt,
+    session_key, pm_root, ...) requires session_key and pm_root, so `pm guide` dies
+    with "TypeError: launch_claude() missing 2 required positional arguments: session_key
+    and pm_root" before Claude starts. Same on origin/master. Repro: throwaway project
+    (git init; pm init --backend local --no-import; pm pr add x), then run `pm guide`
+    from a plain shell or a tmux session not named pm-*. The setup branch (line ~146)
+    passes session_key="guide:setup", pm_root=root. Found in pr-abc1124 QA S6 (2026-11-27);
+    the tmux branch (pm guide in a pm-* pane) works.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-27T03:34:20.060550+00:00'
+  updated_at: '2026-11-27T03:34:20.060550+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-caccef7
+  plan: bugs
+  title: 'Bug: a QA run started with /pr qa on an in_progress PR is silently dropped
+    at the next TUI restart'
+  branch: pm/pr-caccef7-bug-a-qa-run-started-with-pr-qa-on-an-in-progress-
+  status: pending
+  depends_on: []
+  description: 'pm_core/tui/qa_loop_ui.py _resume_incomplete_qa only resumes runs
+    of PRs in status qa and clears any other own snapshot as "the PR has left QA".
+    _enter_qa_status only moves in_review -> qa, so `/pr qa <id>` (or t) on an in_progress
+    PR runs QA with status in_progress, and `pm tui restart` deletes its qa_resume.json:
+    the run is never resumed and its scenario windows/containers are left with no
+    driver (no log line says so). Repro: pm pr start X (status in_progress), /pr qa
+    X with a long fake-claude qa_scenario delay, pm tui restart -> no "Resuming QA
+    for X", ~/.pm/workdirs/qa/X-*/qa_resume.json gone. Same class as S47 (in_review)
+    which was fixed by entering qa. Found in pr-abc1124 QA S6 (2026-11-27).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-27T03:34:26.900623+00:00'
+  updated_at: '2026-11-27T03:34:26.900623+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
