@@ -2507,8 +2507,38 @@ prs:
       filed as pr-c2bcb0a. Captures: /pm-captures/scenarios/10/{pre-fix,post-fix,unit-tests}.'
     created_at: '2026-11-27T04:59:10Z'
     last_edited: '2026-11-27T04:59:10Z'
+  - id: note-6f998df
+    text: 'QA S9 refiner (7c1c504b): at 80x24 with 6+ plans (one intro line each),
+      moving the plans-view selection to the last plan does NOT bring the footer into
+      view; the view stops on the last plan''s intro line and the blank + footer (a=add
+      ... p=back) stay 2-3 rows below. Pane height is right (refresh(layout=True)
+      holds); the cause is PlansPane._scroll_selected_into_view ignoring the pane''s
+      1-row top padding and the footer lines (unchanged from master, so pre-existing),
+      but R8 asserts the footer is reached by moving to the last plan. Other S9 stories
+      held live: second TUI load logs ''Loaded 0 PRs from plan <id>.'' (Skipped lines
+      are CLI-only); no-PR load error is clipped at 80 cols, full text via pm log
+      grep; stand-in must hold (exec sleep on a tty) so the per-plan window survives
+      for Enter/e/c.'
+    created_at: '2026-11-27T04:34:27Z'
+    last_edited: '2026-11-27T04:34:27Z'
+  - id: note-dce0f6b
+    text: 'QA S9 run (2026-11-27): 6 of 7 stories held live at 7c1c504b (footer/help,
+      3 TUI adds with per-plan windows and plan-add prompts, l twice + tree, Enter/e/c
+      in one window with the progress review prompt, no-PR load error + pre-load review
+      prompt, /plan breakdown). Story 6 R8 Then failed as the refiner predicted: at
+      80x24 with 7 plans, j to the last plan never brought the footer into view. Fixed
+      in 7688eb64 (8d7026fd before the rebase onto S10 e5573ed0): PlansPane._scroll_selected_into_view
+      counts the top padding and scrolls the last plan to the pane full height; TestPlansPaneScrollReachesFooter.
+      Post-fix live: same-session demo + story 6 rerun in a fresh project both show
+      the footer. Incidental, pre-existing, not fixed here: the command-bar focus
+      handback (/ Esc or any submitted command) scrolls an overflowing plans list/tree
+      to its top; handed to pr-25d4825 (note-11b0803, candidate patch + test). Filed
+      pr-c428279 (guide prompt lists removed v key). Suite 5704 passed/1 skipped at
+      8d7026fd. Captures /pm-captures/scenarios/9/ (index manifest.md).'
+    created_at: '2026-11-27T05:19:09Z'
+    last_edited: '2026-11-27T05:21:30Z'
   created_at: '2026-03-01T17:51:46.490716+00:00'
-  updated_at: '2026-11-27T04:59:10.917887+00:00'
+  updated_at: '2026-11-27T05:21:30.291603+00:00'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-30888b1-fold-plan-breakdown-into-plan-add-st-ab512a43
 - id: pr-3116896
   plan: tui-ux
@@ -56574,11 +56604,30 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-11-02T09:50:08.146101+00:00'
-  updated_at: '2026-11-02T09:50:08.146101+00:00'
+  updated_at: '2026-11-27T05:08:27.724656+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-11b0803
+    text: 'QA S9 of pr-30888b1 (2026-11-27) hit the same scroll-to-top in the PLANS
+      view too, not only the tree. At 80x24 with 7 plans and the last plan selected
+      (footer on screen), `/` Esc, `/plan list` Enter or `/plan breakdown` Enter (handle_command_submitted
+      generic tail) scroll #plans-container to 0, so ▶ and the footer go off screen
+      until the next k. Tree view: `/` Esc jumps from the lower Base plan group back
+      to the first group. `?`+Esc and `r` do not jump (the pane keeps focus and Screen.set_focus
+      returns early for an already-focused widget). Candidate fix verified live and
+      by a pilot test (fails on master: scroll_y 13 -> 0, passes with it): focus(scroll_visible=False)
+      in ProjectManagerApp._focus_view_widget and _focus_current_view and on the 11
+      plans-pane/tree .focus() handbacks in pr_view.handle_command_submitted. The
+      plans pane needs no extra scroll call (its own _scroll_selected_into_view keeps
+      the selection in view on j/k); the tree may still want the _scroll_selected_into_view()
+      after focus that this PR description proposes, for handbacks that move the cursor.
+      Patch, test and before/after casts are in the pr-30888b1 QA captures, scenarios/9/incidental-focus-scroll/
+      (candidate-fix.patch, test_focus_return_keeps_plans_scroll.py). Not committed
+      on pr-30888b1, so the handback consolidation stays here and in pr-adfdce3.'
+    created_at: '2026-11-27T05:08:27Z'
+    last_edited: '2026-11-27T05:08:27Z'
 - id: pr-78e8ebe
   plan: bugs
   title: 'Bug: every pm command tracebacks at import when ~/.pm is unwritable (configure_logger
@@ -56809,6 +56858,29 @@ prs:
   gh_pr_number: null
   created_at: '2026-11-27T04:57:04.933173+00:00'
   updated_at: '2026-11-27T04:57:04.933173+00:00'
+- id: pr-c428279
+  plan: bugs
+  title: 'Bug: guide prompt lists a removed `v` key ("v — view plan file") in its
+    plans-view key reference'
+  branch: pm/pr-c428279-bug-guide-prompt-lists-a-removed-v-key-v-view-plan
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/guide.py, the "### TUI plans view reference" list
+    in the setup guide prompt (line ~321, same on origin/master): "- `v` — view plan
+    file". The plans pane has no v key (removed in 81b19294 "Remove v (view) key from
+    plans pane"); Enter views the plan file (PlansPane.on_key enter -> PlanActivated
+    -> less <plan file>), and the in-TUI help says "Enter  View plan file". Repro
+    (QA S9 of pr-30888b1, 2026-11-27): fresh project with no PRs, pm session -> the
+    guide pane launches; the recorded guide prompt (stand-in claude) contains "- `v`
+    — view plan file", so the guide can tell the user to press v, which does nothing
+    in the plans view. Fix: replace the line with "- `Enter` — view plan file" (and
+    check the other guide variants / HELP_TEXT for the same stale key); add a prompt
+    test asserting no `v` key line.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-27T05:08:01.154123+00:00'
+  updated_at: '2026-11-27T05:08:01.154123+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
