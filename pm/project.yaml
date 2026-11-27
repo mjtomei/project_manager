@@ -2645,8 +2645,21 @@ prs:
       via real clients.'
     created_at: '2026-11-27T07:24:03Z'
     last_edited: '2026-11-27T07:24:03Z'
+  - id: note-0fcf085
+    text: 'QA planning round 4 (2026-11-27, spec 02d19d16): qa.md synced with QA S14/S16/S17.
+      E9 corrected: only the tree-view c session prompt has the a/c/l plan-key line;
+      the w r watcher review prompt has its Forbidden list (no breakdown) but no plan-key
+      line, same as master. R7 now covers org-demo.md sections 3-5 followed literally
+      (ac602505 --no-import). Setup adds S16 traps: w r takes focus in a window-0
+      split; repeat plans-view c resumes the saved review, so the pre-load prompt
+      is recorded only on the first c (use pm plan review <id> --fresh). Not-failures
+      add pr-21033e4 (prompts still forbid the removed pm pr done) and pr-82b2739,
+      filed now: org-demo.md steps 5-9 use placeholder ids plan-001/pr-001 that pm
+      never mints. Scenarios 19-24 re-cover every surface.'
+    created_at: '2026-11-27T08:25:51Z'
+    last_edited: '2026-11-27T08:25:51Z'
   created_at: '2026-03-01T17:51:46.490716+00:00'
-  updated_at: '2026-11-27T07:24:03.963129+00:00'
+  updated_at: '2026-11-27T08:25:52.030736+00:00'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-30888b1-fold-plan-breakdown-into-plan-add-st-ab512a43
 - id: pr-3116896
   plan: tui-ux
