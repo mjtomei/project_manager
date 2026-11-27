@@ -56730,3 +56730,28 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-9cfddef
+  plan: bugs
+  title: 'Bug: pm pr list with a filter that matches nothing prints a stray blank
+    line on a TTY instead of nothing or a "No PRs" message'
+  branch: pm/pr-9cfddef-bug-pm-pr-list-with-a-filter-that-matches-nothing-
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/cli/helpers.py emit_paged() and pm_core/cli/pr.py
+    pr_list(). Repro: in a project that has PRs, run `pm pr list --plan <plan-with-no-PRs>`
+    (or `--status merged` when none are merged) in a terminal. stdout is "\r\n" (one
+    blank line); piped, it is empty. Cause: pr_list passes an empty list to emit_paged,
+    which on a TTY calls click.echo_via_pager("") and click appends a newline. `pm
+    pr list` with no PRs at all prints "No PRs.", so a filtered-empty result is inconsistent.
+    Fix: in pr_list print "No PRs." (or "No matching PRs.") when the filtered list
+    is empty, and/or make emit_paged return early for no lines. Seen in QA S7 for
+    pr-30888b1 (pre-existing on master; that PR does not touch either file).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-27T04:18:47.775412+00:00'
+  updated_at: '2026-11-27T04:18:47.775412+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
