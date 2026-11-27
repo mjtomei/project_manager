@@ -127,15 +127,26 @@ class PlansPane(Widget):
         return 1 + intro_lines + 1  # header + intro lines + blank
 
     def _scroll_selected_into_view(self) -> None:
-        """Scroll the parent container to keep the selected plan visible."""
+        """Scroll the parent container to keep the selected plan visible.
+
+        Rows are in the container's coordinates.  This pane is the
+        container's only child, so its top padding comes before the first
+        entry.  The first plan also brings that padding into view, and the
+        last plan also brings the shortcut footer (the rest of the pane)
+        into view, so the footer stays reachable once the list overflows.
+        """
         if not self._plans or not self.parent:
             return
         container = self.parent
-        y_top = sum(self._entry_lines(p) for p in self._plans[: self.selected_index])
-        h = self._entry_lines(self._plans[self.selected_index])
+        y_top = self.styles.padding.top + sum(
+            self._entry_lines(p) for p in self._plans[: self.selected_index])
+        y_bottom = y_top + self._entry_lines(self._plans[self.selected_index])
+        if self.selected_index == 0:
+            y_top = 0
+        if self.selected_index == len(self._plans) - 1:
+            y_bottom = max(y_bottom, self.outer_size.height)
         viewport_h = container.size.height
         scroll_y = round(container.scroll_y)
-        y_bottom = y_top + h
         if y_bottom > scroll_y + viewport_h:
             new_y = min(y_top, y_bottom - viewport_h)
         elif y_top < scroll_y:

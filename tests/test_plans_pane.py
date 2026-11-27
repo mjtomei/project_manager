@@ -347,3 +347,78 @@ class TestPlansPaneYieldsToChordPrefix:
         assert actions == ["review", "load", "edit"]
         assert index == 1
         assert watcher == []
+
+
+class TestPlansPaneScrollReachesFooter:
+    """Once the list overflows, moving to the last plan must also scroll the
+    shortcut footer into view.  Before the fix, _scroll_selected_into_view
+    ignored the pane's top padding and stopped at the last plan's own
+    lines, so at 80x24 with 7 plans the footer stayed 2-3 rows below the
+    viewport (QA S9, pr-30888b1; spec R8)."""
+
+    FOOTER = "D=deps p=back"
+
+    @staticmethod
+    def _plans(n):
+        return [{"id": f"plan-{i:03d}", "name": f"Plan {i}", "file": f"p{i}.md",
+                 "status": "draft", "intro": "Body line.", "pr_count": 0}
+                for i in range(1, n + 1)]
+
+    def _run(self, n, keys):
+        """Show *n* plans at 80x24, press *keys* one at a time and return
+        (on-screen text, container scroll_y) after each key."""
+        import asyncio
+        import html
+        import re
+
+        from textual.app import App, ComposeResult
+        from textual.containers import Vertical
+
+        from pm_core.tui.app import ProjectManagerApp
+
+        class _PlansApp(App):
+            CSS = ProjectManagerApp.CSS + "\n#plans-container { display: block; }"
+
+            def compose(self) -> ComposeResult:
+                with Vertical(id="plans-container"):
+                    yield PlansPane(id="plans-pane")
+
+        def screen_text(app):
+            svg = re.sub(r"<[^>]+>", "", app.export_screenshot())
+            return re.sub(r"\s+", " ", html.unescape(svg))
+
+        async def run():
+            app = _PlansApp()
+            states = []
+            async with app.run_test(size=(80, 24)) as pilot:
+                pane = app.query_one("#plans-pane", PlansPane)
+                container = app.query_one("#plans-container")
+                pane.update_plans(self._plans(n))
+                pane.focus()
+                await pilot.pause()
+                for key in keys:
+                    await pilot.press(key)
+                    await pilot.pause()
+                    states.append((screen_text(app), container.scroll_y))
+            return states
+        return asyncio.run(run())
+
+    def test_last_plan_brings_footer_into_view(self):
+        states = self._run(10, ["j"] * 9)
+        text, _ = states[-1]
+        assert "▶ plan-010: Plan 10" in text
+        assert self.FOOTER in text
+
+    def test_footer_hidden_until_last_plan(self):
+        # The list really overflows: the footer is off screen mid-list.
+        states = self._run(10, ["j"] * 5)
+        text, _ = states[-1]
+        assert "▶ plan-006: Plan 6" in text
+        assert self.FOOTER not in text
+
+    def test_back_to_first_plan_scrolls_to_top(self):
+        states = self._run(10, ["j"] * 9 + ["k"] * 9)
+        text, scroll_y = states[-1]
+        assert scroll_y == 0
+        assert "▶ plan-001: Plan 1 " in text
+        assert self.FOOTER not in text
