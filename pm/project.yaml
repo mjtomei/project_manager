@@ -57067,3 +57067,37 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-d463cf2
+  plan: bugs
+  title: 'Bug: guide setup checklist shows Project file as current at the "Create
+    a plan" step'
+  branch: pm/pr-d463cf2-bug-guide-setup-checklist-shows-project-file-as-cu
+  status: pending
+  depends_on: []
+  description: 'Pre-existing, unchanged by pr-30888b1 (found in its QA S23, 2026-11-27).
+    After `pm init` the guide state is `initialized` (status "Create a plan"), but
+    the TUI Project Setup panel still shows "▶ Project file / ○ Plan file / ○ PRs
+    loaded", identical to the no_project step, even though the project file now exists
+    and the step is about the plan. The guide setup prompt Current Status uses the
+    same mapping (pm_core/guide.py build_setup_prompt checklist), so at `initialized`
+    it would report "Project file: **next**". Cause: pm_core/tui/guide_progress.py
+    _CHECKLIST (and the copy in guide.py) marks an item done only when one of its
+    done_after steps is strictly before the current step (done_steps = STEP_ORDER[:current_idx]);
+    "Project file" lists {initialized, has_plan_draft, has_plan_prs}, so it is not
+    done at `initialized`. Expected: ✓ Project file / ▶ Plan file at "Create a plan";
+    has_plan_draft (✓ / ▶ Plan file / ○) and has_plan_prs are already right. Fix idea:
+    add "no_project"-passed semantics (e.g. Project file done_after {"no_project",
+    ...}) in both copies, or share one checklist. Repro: new git repo, `pm session`
+    (TUI opens guide at "Initialize the project"), in another window `pm init --backend
+    local --no-import`, press r in the TUI: status "Create a plan", panel still ▶
+    Project file. Evidence: /pm-captures/scenarios/23/logs/01-after-r.txt (pr-30888b1
+    QA S23).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-27T09:22:42.231416+00:00'
+  updated_at: '2026-11-27T09:22:42.231416+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
