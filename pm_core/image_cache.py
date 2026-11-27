@@ -302,8 +302,6 @@ def ensure_prepared(image_ref: str) -> CacheEntry:
             entry = load_entry(key, root)
             if entry and entry.image_id == image_id:
                 return entry   # another process prepared it while we waited
-            _log.info("image cache: preparing %s (%s) — one-time per image "
-                      "version", image_ref, key)
             entry = _prepare(root, image_ref, image_id, tags, key)
     except OSError as exc:
         # The lock file, the prep dir, entry.json or the publishing rename
@@ -375,6 +373,8 @@ def _prepare(root: Path, image_ref: str, image_id: str, tags: list[str],
         # An unusable leftover (load_entry returned None) that this
         # preparation would replace — never while a container mounts it.
         _refuse_replacing_used_entry(final, key, image_ref)
+    _log.info("image cache: preparing %s (%s) — one-time per image version",
+              image_ref, key)
     token = secrets.token_hex(3)
     prep_dir = entries / f".prep-{key}-{os.getpid()}-{token}"
     prep_dir.mkdir(parents=True)

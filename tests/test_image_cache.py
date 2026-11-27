@@ -420,14 +420,20 @@ class TestEnsurePrepared:
         return entry.path, entry.path.stat().st_ino, fake.count("run")
 
     def test_damaged_entry_a_container_mounts_is_not_replaced(self, fake,
-                                                              home):
+                                                              home,
+                                                              monkeypatch):
         """A consumer bind-mounts the entry dir itself: deleting it to
         publish a fresh one empties the store under the consumer's
-        nested engine.  Refuse, naming the users, before any prep."""
+        nested engine.  Refuse, naming the users, before any prep (and
+        without logging a preparation that never runs)."""
         path, ino, runs = self._damage(fake)
         fake.users = [("pm-x-qa-pr-a-1-s1", KEY), ("pm-other", "f" * 20)]
+        log = MagicMock()
+        monkeypatch.setattr(image_cache, "_log", log)
         with pytest.raises(ImageCacheError) as exc:
             image_cache.ensure_prepared("pm-dev:latest")
+        assert not any("preparing" in c.args[0]
+                       for c in log.info.call_args_list)
         msg = str(exc.value)
         assert f"entry {KEY}" in msg and "unusable" in msg
         assert "1 container(s)" in msg and "pm-x-qa-pr-a-1-s1" in msg
@@ -446,9 +452,13 @@ class TestEnsurePrepared:
         assert fake.count("run") == runs
         assert path.stat().st_ino == ino and (path / "store").is_dir()
 
-    def test_damaged_entry_no_container_uses_is_replaced(self, fake, home):
+    def test_damaged_entry_no_container_uses_is_replaced(self, fake, home,
+                                                         monkeypatch):
         path, ino, runs = self._damage(fake)
+        log = MagicMock()
+        monkeypatch.setattr(image_cache, "_log", log)
         entry = image_cache.ensure_prepared("pm-dev:latest")
+        assert any("preparing" in c.args[0] for c in log.info.call_args_list)
         assert fake.count("run") == runs + 1
         assert entry.path == path and image_cache.load_entry(KEY)
         assert [p.name for p in path.parent.iterdir()] == [KEY]
