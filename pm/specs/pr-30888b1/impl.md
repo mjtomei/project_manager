@@ -68,6 +68,7 @@ key. `pm plan breakdown` then fails with Click's standard
 - `pm_core/tui/screens.py::HelpScreen`: drop the "w  Break plan into PRs" row.
 - `pm_core/tui/plans_pane.py::update_plans` (QA S3 incidental fix, 2261f26a): call `refresh(layout=True)`. The pane is `height: auto`, so a plain `refresh()` kept the old height and clipped the footer once `a` added a second plan. This predates the PR and is also on master.
 - `pm_core/tui/plans_pane.py::on_key` + `pm_core/tui/app.py::ProjectManagerApp.chord_prefix_armed` (QA S10 fix): while a `w` or `y` prefix is armed, the pane leaves every key unhandled so `App.on_key` resolves the chord. `w c`/`w l`/`w e` log `w cancelled`, the plan action does not fire, and a following `r` is a plain refresh. Before the fix the pane stopped the key, the plan action fired, the prefix stayed armed and `r` opened a watcher review. Tree-view `w j` is the same pre-existing ordering in `TechTree` and is filed as pr-c2bcb0a. Pinned by `tests/test_plans_pane.py::TestPlansPaneYieldsToChordPrefix`.
+- `pm_core/tui/plans_pane.py::_scroll_selected_into_view` (QA S9 fix, 7688eb64): the scroll target counts the pane's 1-row top padding, the first plan scrolls to the top, and the last plan also scrolls the shortcut footer (the rest of the pane) into view. Before the fix, at 80x24 with 7 plans, `j` to the last plan stopped on its intro line and the footer stayed 2-3 rows below the viewport. This predates the PR and is also on master. The command-bar focus handback scrolling an overflowing list to the top is a separate, pre-existing issue handed to pr-25d4825.
 
 ### R4. Review prompts
 
@@ -90,7 +91,7 @@ key. `pm plan breakdown` then fails with Click's standard
 
 ### R6. Tests
 
-- `tests/test_plans_pane.py`: the key map excludes `w`; the footer no longer asserts "breakdown"; the routing test covers `review` (from the merge). `TestPlansPaneHeightTracksContent` pins the footer staying visible after a plan is added or an intro grows (QA S3). `TestPlansPaneYieldsToChordPrefix` pins `w`/`y` then a plan key cancelling the prefix without the plan action (QA S10).
+- `tests/test_plans_pane.py`: the key map excludes `w`; the footer no longer asserts "breakdown"; the routing test covers `review` (from the merge). `TestPlansPaneHeightTracksContent` pins the footer staying visible after a plan is added or an intro grows (QA S3). `TestPlansPaneYieldsToChordPrefix` pins `w`/`y` then a plan key cancelling the prefix without the plan action (QA S10). `TestPlansPaneScrollReachesFooter` pins the footer coming into view on the last plan, staying off screen mid-list, and `k` back to the first plan scrolling to the top (QA S9).
 - `tests/test_plan_review.py`: `REVIEW_PROMPTS` keys exclude `plan-breakdown` (from the merge).
 - `tests/test_plans_window_per_plan.py`: the shared-window test uses edit / view (`launch_plan_activated`) / review instead of breakdown, keeping its three-pane, two-split assertion.
 - `tests/test_prompt_bounds.py`: the two tests that invoked `plan breakdown` now invoke `plan add` (300 other PRs, and long titles), so the existing-PR listing stays bounded under `PROMPT_ARG_LIMIT`.

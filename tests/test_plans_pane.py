@@ -179,6 +179,25 @@ class TestPlansPane:
         assert "1 PRs" not in result.plain
 
 
+def _plans_view_app():
+    """A bare App that shows PlansPane inside #plans-container with the real
+    TUI CSS (``height: auto`` pane, padding, scrolling container), so layout
+    and scroll behave as in the plans view."""
+    from textual.app import App, ComposeResult
+    from textual.containers import Vertical
+
+    from pm_core.tui.app import ProjectManagerApp
+
+    class _PlansApp(App):
+        CSS = ProjectManagerApp.CSS + "\n#plans-container { display: block; }"
+
+        def compose(self) -> ComposeResult:
+            with Vertical(id="plans-container"):
+                yield PlansPane(id="plans-pane")
+
+    return _PlansApp()
+
+
 class TestPlansPaneHeightTracksContent:
     """The pane is ``height: auto``; adding a plan while the plans view is
     open must grow it, or the footer (a=add c=review ...) is clipped.
@@ -194,20 +213,8 @@ class TestPlansPaneHeightTracksContent:
     def _visible_lines(self, plan_lists):
         import asyncio
 
-        from textual.app import App, ComposeResult
-        from textual.containers import Vertical
-
-        from pm_core.tui.app import ProjectManagerApp
-
-        class _PlansApp(App):
-            CSS = ProjectManagerApp.CSS + "\n#plans-container { display: block; }"
-
-            def compose(self) -> ComposeResult:
-                with Vertical(id="plans-container"):
-                    yield PlansPane(id="plans-pane")
-
         async def run():
-            app = _PlansApp()
+            app = _plans_view_app()
             snapshots = []
             async with app.run_test(size=(100, 40)) as pilot:
                 pane = app.query_one("#plans-pane", PlansPane)
@@ -369,26 +376,13 @@ class TestPlansPaneScrollReachesFooter:
         (on-screen text, container scroll_y) after each key."""
         import asyncio
         import html
-        import re
-
-        from textual.app import App, ComposeResult
-        from textual.containers import Vertical
-
-        from pm_core.tui.app import ProjectManagerApp
-
-        class _PlansApp(App):
-            CSS = ProjectManagerApp.CSS + "\n#plans-container { display: block; }"
-
-            def compose(self) -> ComposeResult:
-                with Vertical(id="plans-container"):
-                    yield PlansPane(id="plans-pane")
 
         def screen_text(app):
             svg = re.sub(r"<[^>]+>", "", app.export_screenshot())
             return re.sub(r"\s+", " ", html.unescape(svg))
 
         async def run():
-            app = _PlansApp()
+            app = _plans_view_app()
             states = []
             async with app.run_test(size=(80, 24)) as pilot:
                 pane = app.query_one("#plans-pane", PlansPane)

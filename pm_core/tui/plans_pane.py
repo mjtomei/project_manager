@@ -170,7 +170,8 @@ class PlansPane(Widget):
         # An armed app-level w/y prefix owns the next key: "w c" must
         # cancel the prefix rather than open a plan review with the prefix
         # still armed.  Leave the key unhandled so it bubbles to the app's
-        # on_key, which dispatches or cancels the chord.
+        # on_key, which dispatches or cancels the chord.  getattr: test
+        # hosts mount the pane in a plain App without the chord state.
         armed = getattr(self.app, "chord_prefix_armed", None)
         if armed is not None and armed():
             return
