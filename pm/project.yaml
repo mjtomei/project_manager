@@ -56449,3 +56449,31 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-15aa4f5
+  plan: bugs
+  title: 'Bug: removing a running QA scenario container waits podman''s 10 s stop
+    timeout (PID 1 is sleep infinity)'
+  branch: pm/pr-15aa4f5-bug-removing-a-running-qa-scenario-container-waits
+  status: pending
+  depends_on: []
+  description: 'pm_core/container.py create_container ends the container command with
+    ''exec sleep infinity'' and passes no --stop-timeout, so podman keeps its 10 s
+    default (podman inspect --format ''{{.Config.StopTimeout}}'' = 10). sleep as PID
+    1 ignores SIGTERM, so every ''podman rm -f'' of a running scenario container waits
+    the full 10 s and then SIGKILLs. Repro (pr-abc1124 QA S5 story 6): end a container-mode
+    QA run (its scenario container stays Up), then ''z t'' (/pr qa fresh) on the same
+    PR: the debug log shows ''remove_container: name=…-s2'' at 02:35:43 and the next
+    line at 02:35:54, so the orphan cleanup delays the new run''s Scenario 0 by 10
+    s per container. ''pm pr cleanup --resources'' on a PR with Up containers waits
+    too. Same pattern pr-abc1124 fixed for its prep container in 08ab1428: pass --stop-timeout
+    0, or run an init that exits on TERM. Present on master (exec sleep infinity,
+    no stop timeout).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-27T02:38:41.312863+00:00'
+  updated_at: '2026-11-27T02:38:41.312863+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
