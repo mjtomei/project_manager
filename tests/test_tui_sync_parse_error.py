@@ -195,3 +195,84 @@ class TestMissingProjectFileKeepsRoot:
         assert app._root == tmp_path
         assert app._data == previous
         app._show_normal_view.assert_called_once()
+
+
+class TestMergeCleanupAfterReload:
+    """``g`` on a local backend saves ``merged`` and SIGUSR1s the TUI; the
+    state-only reload then held the merged status before any sync ran, so
+    sync's newly-merged check never fired and merge cleanup (containers,
+    scenario stores) never ran (QA S11 story 5)."""
+
+    _SUMMARY = {"windows": [], "containers": ["c1"], "registry_windows": [],
+                "sockets": [], "runtime_state": True}
+
+    def test_cleans_only_newly_merged(self):
+        from pm_core.tui import sync as sync_mod
+        prs = [{"id": "pr-a", "status": "merged"},
+               {"id": "pr-b", "status": "merged"},
+               {"id": "pr-c", "status": "in_review"},
+               {"id": "pr-new", "status": "merged"}]
+        app = types.SimpleNamespace(_session_name="pm-test",
+                                    _data={"prs": prs})
+        old = {"pr-a": "in_review", "pr-b": "merged", "pr-c": "in_review"}
+        with patch("pm_core.tmux.session_exists", return_value=True), \
+             patch("pm_core.pr_cleanup.cleanup_pr_resources",
+                   return_value=self._SUMMARY) as mock_cleanup:
+            t = sync_mod.cleanup_merged_after_reload(app, old)
+            assert t is not None
+            t.join(5)
+        mock_cleanup.assert_called_once_with("pm-test", prs[0])
+
+    def test_nothing_newly_merged_or_first_load(self):
+        from pm_core.tui import sync as sync_mod
+        app = types.SimpleNamespace(
+            _session_name="pm-test",
+            _data={"prs": [{"id": "pr-a", "status": "merged"}]})
+        with patch("pm_core.pr_cleanup.cleanup_pr_resources") as mock_cleanup:
+            assert sync_mod.cleanup_merged_after_reload(
+                app, {"pr-a": "merged"}) is None
+            assert sync_mod.cleanup_merged_after_reload(app, {}) is None
+            app._session_name = None
+            assert sync_mod.cleanup_merged_after_reload(
+                app, {"pr-a": "qa"}) is None
+        mock_cleanup.assert_not_called()
+
+    def test_reload_runs_merge_cleanup(self, tmp_path):
+        """The real ``_load_state``: a reload that reads a PR merged by the
+        CLI starts its cleanup."""
+        from unittest.mock import MagicMock
+        from pm_core import store
+        from pm_core.tui import sync as sync_mod
+        from pm_core.tui.app import ProjectManagerApp
+        pm_dir = tmp_path / "pm"
+        pm_dir.mkdir()
+        pr = {"id": "pr-001", "title": "T", "branch": "b",
+              "status": "in_review", "notes": []}
+        data = {"project": {"name": "t", "repo": "/tmp/r",
+                            "base_branch": "master"},
+                "plans": [], "prs": [dict(pr)]}
+        store.save(data, pm_dir)
+        app = MagicMock()
+        app._root = pm_dir
+        app._data = data
+        app._session_name = "pm-test"
+        app._plans_visible = app._qa_visible = False
+        # What `pm pr merge` writes before its SIGUSR1.
+        store.save({**data, "prs": [{**pr, "status": "merged"}]}, pm_dir)
+        started = []
+        real = sync_mod.cleanup_merged_after_reload
+
+        def spy(a, old):
+            t = real(a, old)
+            started.append(t)
+            return t
+        with patch("pm_core.tui.auto_start.on_state_loaded"), \
+             patch.object(sync_mod, "cleanup_merged_after_reload", spy), \
+             patch("pm_core.tmux.session_exists", return_value=True), \
+             patch("pm_core.pr_cleanup.cleanup_pr_resources",
+                   return_value=self._SUMMARY) as mock_cleanup:
+            ProjectManagerApp._load_state(app)
+            assert started and started[0] is not None
+            started[0].join(5)
+        mock_cleanup.assert_called_once()
+        assert mock_cleanup.call_args.args[1]["id"] == "pr-001"

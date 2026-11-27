@@ -328,7 +328,14 @@ the task and on the measurements above.
     reclaim every run of that PR.  Its TUI callers (merge detection in
     sync, the PR view's resource cleanup) run it in a daemon thread
     (`summary["reclaimed"] == "background"`) so the TUI never waits on a
-    multi-GB delete; `pm pr cleanup --resources` passes
+    multi-GB delete.  A merge the TUI only sees through a state reload
+    (`g` → `pm pr merge` on a local/vanilla backend, a CLI merge, another
+    session: the CLI saves `merged` and sends SIGUSR1) is cleaned up by
+    that reload (`sync.cleanup_merged_after_reload`, in a daemon thread):
+    sync's own newly-merged check compares against the TUI's
+    already-reloaded state and never fired, so `g` left the PR's
+    containers and scenario stores behind (QA S11).
+    `pm pr cleanup --resources` passes
     `wait_reclaim=True` and gets the removed paths in
     `summary["reclaimed"]`, because a CLI process that exits first would
     cut the deletion short (the `.pm-reclaiming-*` claim then lets the next

@@ -827,6 +827,10 @@ class ProjectManagerApp(App):
             # newly-unblocked or newly-in-scope PRs.
             from pm_core.tui import auto_start as _auto_start
             _auto_start.on_state_loaded(self, old_statuses, old_deps)
+            # ...and only here can merge cleanup see it: sync compares
+            # against this already-merged state (QA S11 story 5).
+            from pm_core.tui import sync as _sync
+            _sync.cleanup_merged_after_reload(self, old_statuses)
         except FileNotFoundError as e:
             if self._root is not None and Path(self._root).is_dir():
                 # The project's pm dir is still there and only project.yaml
