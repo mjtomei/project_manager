@@ -617,7 +617,26 @@ def _stream_load(runtime: str, image_ref: str, name: str,
                        "the shared cache: choose an image that has one "
                        "('pm container set image <image>'; 'pm container "
                        "build-base' builds pm-dev:latest)")
+            elif _lacks_mount_program(name):
+                # podman is there, but the overlay mount program its
+                # storage needs is not ("can't stat program"): no retry,
+                # prepare or cache-off launch can fix that either — a
+                # nested engine of this image cannot mount layers at all.
+                msg = (msg.rstrip(".") + ". '" + image_ref + "' lacks "
+                       "overlay support: it does not ship fuse-overlayfs "
+                       f"({MOUNT_PROGRAM}), so its nested podman cannot "
+                       "mount image layers, with or without the shared "
+                       "cache: choose an image that ships fuse-overlayfs "
+                       "('pm container set image <image>'; 'pm container "
+                       "build-base' builds pm-dev:latest)")
             raise ImageCacheError(msg)
+
+
+def _lacks_mount_program(name: str) -> bool:
+    """True when the prep container *name* has no runnable overlay mount
+    program (``test -x`` says no; an unanswerable probe says nothing)."""
+    return _rt("exec", name, "test", "-x", MOUNT_PROGRAM,
+               timeout=30).returncode == 1
 
 
 def _remove_quietly(name: str) -> None:

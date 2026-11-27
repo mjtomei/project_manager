@@ -59,6 +59,7 @@ class FakeRuntime:
         self.stale: list[tuple[str, str]] = []  # (prep name, key)
         self.users: list[tuple[str, str]] = []  # (consumer name, key)
         self.fail_users = False   # `ps` of an entry's consumers fails
+        self.missing: set[str] = set()   # paths `exec … test -x` lacks
         self.lock = threading.Lock()
 
     def __call__(self, *args, timeout=None, check=False):
@@ -89,6 +90,8 @@ class FakeRuntime:
                 for p in argv[2:]:
                     Path(self._host(p)).mkdir(parents=True, exist_ok=True)
                 return _cp()
+            if argv[:2] == ["test", "-x"]:
+                return _cp(1 if argv[2] in self.missing else 0)
             if argv[:1] == ["podman"] and "images" in argv:
                 return _cp(out=self.loaded_id + "\n")
             if argv[:1] == ["podman"] and "inspect" in argv:
@@ -426,6 +429,28 @@ class TestEnsurePrepared:
         with pytest.raises(ImageCacheError) as exc:
             image_cache.ensure_prepared("pm-dev:latest")
         assert "pm container set image" not in str(exc.value)
+        assert "fuse-overlayfs" not in str(exc.value)
+
+    def test_image_without_fuse_overlayfs_names_set_image(self, fake, home):
+        """An image with podman but no fuse-overlayfs: ``podman load``
+        fails with "can't stat program" (rc 125).  Retry, prepare and
+        cache-off cannot fix it, so the cause says the image lacks overlay
+        support and names the image remedy (QA S17)."""
+        fake.fail["popen:exec"] = 125
+        fake.missing.add(image_cache.MOUNT_PROGRAM)
+        with pytest.raises(ImageCacheError) as exc:
+            image_cache.ensure_prepared("pm-dev:latest")
+        msg = str(exc.value)
+        assert "load rc=125" in msg
+        assert "'pm-dev:latest' lacks overlay support" in msg
+        assert "ships fuse-overlayfs" in msg
+        assert "with or without the shared cache" in msg
+        assert "pm container set image <image>" in msg
+        assert "has no podman" not in msg
+        assert ("exec", fake.removed[0], "test", "-x",
+                image_cache.MOUNT_PROGRAM) in fake.calls
+        entries = home / ".pm" / "image-cache" / "entries"
+        assert list(entries.iterdir()) == []
 
     def test_retag_during_preparation_publishes_nothing(self, fake, home):
         """``save`` resolves the tag when it starts: a rebuild or retag
