@@ -284,11 +284,13 @@ vanilla/github).**
   not a parse/marker error.
 
 **R13. A user's git config cannot reintroduce the bug.**
-- Given: the user has `merge.autoStash=true`,
+- Given: the user has `merge.autoStash=true`, `rebase.autoStash=true`,
   `status.showUntrackedFiles=no` and `status.renames=false` set, and the
   main repo has:
   - a dirty registry;
-  - an untracked file that blocks the fast-forward;
+  - a dirty tracked file that blocks the fast-forward (lines the branch does
+    not touch);
+  - an unrelated untracked file;
   - a staged rename;
   - a staged deletion of unrelated files.
 - When: the merge runs.
@@ -296,10 +298,15 @@ vanilla/github).**
   - it exits 0;
   - no `autostash` or `pm: auto-stash for merge` entry is left;
   - the registry has no markers;
-  - the untracked file is restored;
+  - the tracked and untracked files are restored;
   - the staged rename and deletion are still staged exactly as before
     (`git diff --cached --name-status`);
   - nothing else was staged.
+
+  With only `merge.autoStash=true` and a registry-only overlap, git's own
+  autostash never takes the registry. With `status.showUntrackedFiles=no`
+  and an untracked file at a path the branch adds, the update still lands
+  and R7's kept-stash outcome follows; the update does not fail outright.
 
 **R14. Two updates of the same checkout serialize.**
 
@@ -328,7 +335,7 @@ them.
 
 ## 2. Edge cases
 
-- **E1. Registry clean but the target changes it.** Given: a main checkout
+- **E1. Registry clean but the target changes it** (hard to reach: a sign-off record always dirties the live registry, and committing it moves the base and invalidates the approval). Given: a main checkout
   whose registry is unchanged since the last commit. When: P (which commits
   a registry change) is merged. Then: the file becomes the target's version,
   and `git status` shows it clean afterwards (no spurious dirtiness).
