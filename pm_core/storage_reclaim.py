@@ -43,6 +43,7 @@ PRs, ``pm pr cleanup``), QA run start (earlier runs of the same PR) and
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import shutil
@@ -50,6 +51,7 @@ import subprocess
 import tarfile
 import threading
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -66,6 +68,10 @@ _STORE_MARKERS = ("overlay-layers", "vfs-layers", "overlay-images",
                   "vfs-images", "libpod")
 _MIN_ARCHIVE_BYTES = 1 << 20
 _MAX_TAR_MEMBERS = 50000
+# How long a reclaimer waits for another one's hold on a scratch dir before
+# leaving that dir to it (long enough to ride over a dry run's probe).
+_LOCK_GRACE = 2.0
+BUSY = "another reclaim is removing its stores right now"
 
 
 @dataclass
@@ -468,6 +474,63 @@ def _delete(d: Disposable) -> str:
         return str(exc)
 
 
+@contextmanager
+def _scratch_lock(scratch: Path, timeout: float | None = None):
+    """Hold *scratch*'s reclaim lock (an exclusive ``flock`` on the dir
+    itself, so no file is added to scratch, which is local disk); yields
+    False when another reclaimer still holds it after *timeout* seconds
+    (default ``_LOCK_GRACE``).
+
+    Removal and the ``.pm-reclaim.json`` update run under it, so two
+    reclaimers of one scratch dir — ``pm container reclaim`` beside ``pm pr
+    cleanup --resources`` or a QA start's background pass, in one process
+    or two — never both try the same store or archive (the loser's ``mv``
+    and ``unlink`` found it gone and reported failures) and never lose each
+    other's record entries.  A dir that cannot be opened is reclaimed
+    unlocked, as before.
+    """
+    try:
+        fd = os.open(scratch, os.O_RDONLY | os.O_DIRECTORY)
+    except OSError:
+        yield True
+        return
+    try:
+        deadline = time.monotonic() + (
+            _LOCK_GRACE if timeout is None else timeout)
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    yield False
+                    return
+                time.sleep(0.05)
+            except OSError:
+                break       # no flock support: reclaim unlocked, as before
+        yield True
+    finally:
+        os.close(fd)        # releases the lock
+
+
+def _lock_busy(scratch: Path) -> bool:
+    """True while another reclaimer holds *scratch*'s lock (a dry run looks
+    without waiting)."""
+    try:
+        fd = os.open(scratch, os.O_RDONLY | os.O_DIRECTORY)
+    except OSError:
+        return False
+    try:
+        fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+        return False
+    except BlockingIOError:
+        return True
+    except OSError:
+        return False
+    finally:
+        os.close(fd)
+
+
 def reclaim(pr_id: str | None = None, exclude_run: str | None = None,
             dry_run: bool = False, reason: str = "manual") -> Outcome:
     """Remove the disposables of every unheld scenario scratch dir."""
@@ -475,21 +538,43 @@ def reclaim(pr_id: str | None = None, exclude_run: str | None = None,
     for p in out.plans:
         if p.held or not p.items:
             continue
-        for d in p.items:
-            d.bytes = _du(d.path)
         if dry_run:
+            if _lock_busy(p.scratch):
+                p.held = BUSY
+                continue
+            for d in p.items:
+                d.bytes = _du(d.path)
             continue
-        done: list[Disposable] = []
-        for d in p.items:
-            err = _delete(d)
-            if err:
-                out.failed.append((d, err))
-                _log.warning("reclaim: could not remove %s: %s", d.path, err)
-            else:
-                out.removed.append(d)
-                done.append(d)
-        if done:
-            _append_record(p.scratch, done, reason)
+        with _scratch_lock(p.scratch) as got:
+            if not got:
+                p.held = BUSY
+                _log.info("reclaim(%s, %s): left %s to another reclaim "
+                          "removing its stores", pr_id or "*", reason,
+                          p.scratch)
+                continue
+            # A reclaimer that held this dir while ours planned may have
+            # removed some or all of its items: those are its to report.
+            present = [d for d in p.items if os.path.lexists(d.path)]
+            if len(present) < len(p.items):
+                _log.info("reclaim(%s, %s): %d of %d item(s) in %s were "
+                          "already removed by another reclaim",
+                          pr_id or "*", reason, len(p.items) - len(present),
+                          len(p.items), p.scratch)
+            p.items = present
+            for d in p.items:
+                d.bytes = _du(d.path)
+            done: list[Disposable] = []
+            for d in p.items:
+                err = _delete(d)
+                if err:
+                    out.failed.append((d, err))
+                    _log.warning("reclaim: could not remove %s: %s",
+                                 d.path, err)
+                else:
+                    out.removed.append(d)
+                    done.append(d)
+            if done:
+                _append_record(p.scratch, done, reason)
     if out.removed or out.failed:
         _log.info("reclaim(%s, %s): %s", pr_id or "*", reason, out.summary())
     return out

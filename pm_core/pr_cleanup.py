@@ -47,12 +47,15 @@ def cleanup_pr_resources(session: str | None, pr: dict, *,
     Returns a summary dict::
 
         {"windows": [...], "containers": [...], "registry_windows": [...],
-         "sockets": [...], "reclaimed": [...] | "background"}
+         "sockets": [...], "reclaimed": [...] | "background",
+         "reclaim_failed": [(path, error), ...],   # waited reclaim only
+         "reclaim_busy": [scratch, ...]}  # left to another reclaim (ditto)
     """
     pr_id = pr["id"]
     display_id = _pr_display_id(pr)
     summary = {"windows": [], "containers": [], "registry_windows": [],
-               "sockets": [], "runtime_state": False, "reclaimed": []}
+               "sockets": [], "runtime_state": False, "reclaimed": [],
+               "reclaim_failed": [], "reclaim_busy": []}
 
     if session:
         try:
@@ -74,6 +77,10 @@ def cleanup_pr_resources(session: str | None, pr: dict, *,
         if wait_reclaim:
             out = storage_reclaim.reclaim(pr_id, reason="pr-cleanup")
             summary["reclaimed"] = [str(d.path) for d in out.removed]
+            summary["reclaim_failed"] = [(str(d.path), err)
+                                         for d, err in out.failed]
+            summary["reclaim_busy"] = [str(p.scratch) for p in out.plans
+                                       if p.held == storage_reclaim.BUSY]
         else:
             storage_reclaim.reclaim_in_background(pr_id, reason="pr-cleanup")
             summary["reclaimed"] = "background"

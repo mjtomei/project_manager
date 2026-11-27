@@ -291,6 +291,18 @@ the task and on the measurements above.
 * Deletion uses `podman unshare rm -rf` for stores (their files are owned by
   sub-UIDs) and `unlink` for archives; a `.pm-reclaim.json` record (paths,
   bytes, time, reason) is left in the scratch dir.
+* Concurrent reclaimers (QA S5: `pm container reclaim` beside `pm pr
+  cleanup --resources`, or a QA start's background pass): sizing, removal
+  and the record update hold an exclusive `flock` on the scratch dir itself
+  (local disk, no file added).  A second reclaimer waits up to 2 s, then
+  leaves the dir to the first (`keep <scratch>: another reclaim is removing
+  its stores right now`; cleanup prints `left <scratch> to another
+  reclaim …`), and skips items the first already removed — so each item is
+  removed and recorded once and neither reports a failure (before: the
+  loser's `mv`/`unlink` printed `FAILED` for every item and exited 1).  A
+  dry run reports a held dir the same way without waiting.  `pm pr cleanup
+  --resources` prints reclaim failures (`could not reclaim <path>: …`) and
+  exits 1; they used to reach only the debug log.
 * Hooks (existing lifecycle owners only — no new scheduler):
   * `pr_cleanup.cleanup_pr_resources`, after containers are removed:
     reclaim every run of that PR.  Its TUI callers (merge detection in

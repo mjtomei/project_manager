@@ -437,3 +437,118 @@ class TestReclaimCli:
         assert "Nothing removed: the container runtime could not list" \
             in r.output
         assert st.exists()
+
+
+class TestConcurrentReclaimers:
+    """Two reclaimers of one scratch dir — ``pm container reclaim`` beside
+    ``pm pr cleanup --resources``, or a QA start's background pass: each
+    item is removed once, by one of them, and neither reports a failure
+    (QA S5: the loser printed ``FAILED (mv: cannot stat …)`` and
+    ``FAILED ([Errno 2] …)`` for every item and exited 1)."""
+
+    def test_dir_another_reclaimer_holds_is_left_to_it(self, home, rt,
+                                                        monkeypatch):
+        import fcntl
+        _, scratch = _run(home, "pr-1-c1")
+        st = _store(scratch / "eng")
+        ar = _archive(scratch / "exports" / "img.tar")
+        monkeypatch.setattr(sr, "_LOCK_GRACE", 0.1)
+        fd = os.open(scratch, os.O_RDONLY)
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        try:
+            out = sr.reclaim("pr-1")
+            dry = sr.reclaim("pr-1", dry_run=True)
+        finally:
+            os.close(fd)
+        assert out.plans[0].held == sr.BUSY
+        assert dry.plans[0].held == sr.BUSY
+        assert not out.failed and not out.removed
+        assert st.exists() and ar.exists()
+        assert not (scratch / sr.RECLAIM_RECORD).exists()
+        out = sr.reclaim("pr-1")            # released: now it is ours
+        assert {d.path for d in out.removed} == {st, ar} and not out.failed
+
+    def test_items_removed_by_the_other_first_are_not_failures(
+            self, home, rt, monkeypatch):
+        _, scratch = _run(home, "pr-1-c2")
+        st = _store(scratch / "eng")
+        ar = _archive(scratch / "exports" / "img.tar")
+        real_plan = sr.plan
+
+        def plan_then_rival_removes_archive(*a, **kw):
+            out = real_plan(*a, **kw)
+            ar.unlink()     # the other reclaimer, done before we lock
+            return out
+        monkeypatch.setattr(sr, "plan", plan_then_rival_removes_archive)
+        out = sr.reclaim("pr-1")
+        assert not out.failed
+        assert [d.path for d in out.removed] == [st]
+        assert out.summary().startswith("1 removed (")
+        assert "failed" not in out.summary() and "planned" not in out.summary()
+        rec = json.loads((scratch / sr.RECLAIM_RECORD).read_text())
+        assert [r["path"] for r in rec[0]["removed"]] == [str(st)]
+
+    def test_two_threads_at_once_remove_each_item_once(self, home, rt,
+                                                       monkeypatch):
+        import threading
+        import time as _time
+        _, scratch = _run(home, "pr-1-c3")
+        items = {_store(scratch / "eng"),
+                 _archive(scratch / "exports" / "a.tar"),
+                 _archive(scratch / "exports" / "a.oci", oci=True)}
+        real_delete = sr._delete
+
+        def slow_delete(d):
+            _time.sleep(0.2)
+            return real_delete(d)
+        monkeypatch.setattr(sr, "_delete", slow_delete)
+        start = threading.Barrier(2)
+        outs = []
+
+        def run(reason):
+            start.wait()
+            outs.append(sr.reclaim("pr-1", reason=reason))
+        ts = [threading.Thread(target=run, args=(r,))
+              for r in ("manual", "pr-cleanup")]
+        for t in ts:
+            t.start()
+        for t in ts:
+            t.join()
+        assert all(not o.failed for o in outs), [o.failed for o in outs]
+        removed = [d.path for o in outs for d in o.removed]
+        assert sorted(removed) == sorted(items)
+        assert not any(p.exists() for p in items)
+        rec = json.loads((scratch / sr.RECLAIM_RECORD).read_text())
+        assert sorted(r["path"] for e in rec for r in e["removed"]) \
+            == sorted(str(p) for p in items)
+
+
+def test_pr_cleanup_cli_reports_reclaim_failures(monkeypatch):
+    """``pm pr cleanup --resources`` used to drop reclaim failures (only the
+    debug log had them) and exit 0."""
+    from click.testing import CliRunner
+    from pm_core import pr_cleanup
+    from pm_core import loop_shared
+    from pm_core.cli import pr as pr_mod
+    pr = {"id": "pr-9", "title": "t"}
+    monkeypatch.setattr(pr_mod, "state_root", lambda: Path("/nonexistent"))
+    monkeypatch.setattr(pr_mod.store, "load", lambda root: {"prs": [pr]})
+    monkeypatch.setattr(pr_mod, "trigger_tui_refresh", lambda: None)
+    monkeypatch.setattr(loop_shared, "get_pm_session", lambda: None)
+    monkeypatch.setattr(pr_cleanup.container_mod, "cleanup_pr_containers",
+                        lambda pr_id, session_tag=None: [])
+    out = sr.Outcome(failed=[(sr.Disposable(Path("/s/x.tar"), "archive"),
+                              "Permission denied")])
+    monkeypatch.setattr(sr, "reclaim", lambda pr_id, **kw: out)
+    r = CliRunner().invoke(pr_mod.pr, ["cleanup", "--resources", "pr-9"])
+    assert r.exit_code == 1, r.output
+    assert "could not reclaim /s/x.tar: Permission denied" in r.output
+    assert "pm container reclaim --pr pr-9" in r.output
+    out.failed.clear()
+    out.plans.append(sr.ScratchPlan(Path("/s/qa/pr-9-l/s-1"), None,
+                                    held=sr.BUSY))
+    r = CliRunner().invoke(pr_mod.pr, ["cleanup", "--resources", "pr-9"])
+    assert r.exit_code == 0, r.output
+    assert "could not reclaim" not in r.output
+    assert ("left /s/qa/pr-9-l/s-1 to another reclaim removing its stores"
+            in r.output)

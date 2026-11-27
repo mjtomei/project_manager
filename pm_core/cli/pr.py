@@ -3348,7 +3348,18 @@ def pr_cleanup(pr_id: str | None, force: bool, cleanup_all: bool, prune: bool,
             click.echo(f"  containers: {', '.join(summary['containers'])}")
         if summary["registry_windows"]:
             click.echo(f"  registry: {', '.join(summary['registry_windows'])}")
+        for scratch in summary.get("reclaim_busy") or []:
+            click.echo(f"  left {scratch} to another reclaim removing its "
+                       "stores right now")
+        failed = summary.get("reclaim_failed") or []
+        for path, err in failed:
+            click.echo(f"  could not reclaim {path}: {err}", err=True)
+        if failed:
+            click.echo(f"Retry with 'pm container reclaim --pr {target['id']}' "
+                       "once the cause is fixed.", err=True)
         trigger_tui_refresh()
+        if failed:
+            raise SystemExit(1)
         return
 
     if prune:
