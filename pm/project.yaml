@@ -2477,8 +2477,38 @@ prs:
       list, note-f2c9066).'
     created_at: '2026-11-26T18:49:54Z'
     last_edited: '2026-11-26T18:49:54Z'
+  - id: note-5caeffd
+    text: 'QA S10 refiner (7c1c504b, live): E8/R9 FAILS in the plans view. w then
+      c/l/e (each ~0.3 s apart) fires the plan action (plan-review / "Loading PRs"
+      + no-PRs error / plan-edit pane) and leaves the w prefix armed, so an r within
+      2 s of w launches a second watcher-review session (in the per-plan window after
+      c/e, in main after l). The log never says "w cancelled". Cause: PlansPane.on_key
+      handles c/l/e (_KEY_ACTIONS) and calls event.stop(), so App.on_key never sees
+      the key while _w_mode is set. Tree-view w then j is the same, pre-existing:
+      the hint stays and r opens the watcher review. Fix idea: in App.on_key or PlansPane.on_key,
+      check app._w_mode first and let the key reach the w dispatch. Stories 1-3 and
+      6 hold: hint/2 s/Esc/x, ww "No watchers registered. Press ws to start one.",
+      w r prompt Forbidden list without breakdown, tree c prompt a/c/l. First w r
+      clones the pm repo to ~/.pm/workdirs/meta-<tag> (~16 s, TUI blocked); this container
+      lacked less/vi (apt install less vim-tiny).'
+    created_at: '2026-11-27T04:44:49Z'
+    last_edited: '2026-11-27T04:44:49Z'
+  - id: note-669f96e
+    text: 'QA S10 run (2026-11-27): E8 confirmed live at 7c1c504b, then fixed in e5573ed0.
+      Pre-fix, plans-view w c r / w l r / w e r each fired the plan action (plan-review
+      pane / Loading PRs + no-PRs error / vi plan-edit), the w prefix stayed armed,
+      and r opened a watcher review (+1 action: watcher_review each, no "w cancelled").
+      Fix: ProjectManagerApp.chord_prefix_armed() (w or y armed) and an early return
+      in PlansPane.on_key, so App.on_key resolves the chord. Post-fix, each logs "w
+      cancelled" then "Refreshed", with no window/pane/load and watcher_review count
+      unchanged. y c logs "y cancelled"; plain c/l/e still fire. Stories 1-3 and 6
+      hold pre- and post-fix. Test: tests/test_plans_pane.py::TestPlansPaneYieldsToChordPrefix
+      (7 fail on old plans_pane.py). Tree-view w j r is unchanged (pre-existing) and
+      filed as pr-c2bcb0a. Captures: /pm-captures/scenarios/10/{pre-fix,post-fix,unit-tests}.'
+    created_at: '2026-11-27T04:59:10Z'
+    last_edited: '2026-11-27T04:59:10Z'
   created_at: '2026-03-01T17:51:46.490716+00:00'
-  updated_at: '2026-11-26T18:49:55.120237+00:00'
+  updated_at: '2026-11-27T04:59:10.917887+00:00'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-30888b1-fold-plan-breakdown-into-plan-add-st-ab512a43
 - id: pr-3116896
   plan: tui-ux
@@ -56751,6 +56781,34 @@ prs:
   gh_pr_number: null
   created_at: '2026-11-27T04:18:47.775412+00:00'
   updated_at: '2026-11-27T04:18:47.775412+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-c2bcb0a
+  plan: bugs
+  title: 'Bug: tree-view w/y prefix then j/k/h/l/Enter moves the tree and leaves the
+    prefix armed, so a following r/s fires a watcher review or cleanup action'
+  branch: pm/pr-c2bcb0a-bug-tree-view-w-y-prefix-then-j-k-h-l-enter-moves-
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/tui/tech_tree.py TechTree._on_key_impl stops up/k/down/j/left/h/right/l/J/K/enter
+    before ProjectManagerApp.on_key sees them, so an armed w (watcher) or y (cleanup-then)
+    prefix does not resolve the next key. Repro (live, QA S10 of pr-30888b1, master
+    behaviour): tree view with a PR selected, send w, j, r about 0.3 s apart. The
+    log line keeps "w … (w=list f=focus s=start/stop r=review)" after j, and r then
+    logs "Launched watcher-review pane" (new "action: watcher_review" log line). Expected:
+    j resolves the chord ("w cancelled"), and r is a plain refresh. pr-30888b1 fixed
+    the plans-view twin (w then c/l/e fired the plan action) by adding ProjectManagerApp.chord_prefix_armed()
+    and an early return in PlansPane.on_key. TechTree._on_key_impl (and other focused
+    panes with their own on_key, e.g. qa_pane.QAPane.on_key) can use the same check.
+    Check that the parent ScrollableContainer arrow bindings do not then also scroll,
+    since App.on_key calls prevent_default and stop.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-27T04:57:04.933173+00:00'
+  updated_at: '2026-11-27T04:57:04.933173+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
