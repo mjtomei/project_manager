@@ -615,7 +615,9 @@ the task and on the measurements above.
 * A scratch dir unreadable in places (sub-UID owned): walk errors are
   skipped, never fatal.
 * `pm container reclaim` with the runtime down, not installed or hung:
-  nothing is deleted; the summary says the runtime could not be listed.
+  nothing is deleted; when a scratch dir holds a store or archive, the
+  summary says the runtime could not be listed (exit 1), and with nothing
+  at stake it is an ordinary empty pass (R4, review 278b i1).
   Both modules' runtime wrappers return a missing (rc 127) or timed-out
   (rc 124) command as a failed result instead of raising, so QA start's
   background reclaim on a host without a runtime logs no traceback and a

@@ -88,6 +88,28 @@ class TestKillMergedPrWindows:
 
         mock_cleanup.assert_called_once_with("pm-test", pr)
 
+    def test_one_failed_cleanup_does_not_stop_the_others(self):
+        """Shared with the reload path: a failure is logged per PR."""
+        from pm_core.tui import sync as sync_mod
+
+        prs = [{"id": "pr-a"}, {"id": "pr-b"}]
+        app = types.SimpleNamespace(_session_name="pm-test",
+                                    _data={"prs": prs})
+        done = []
+
+        def cleanup(session, pr):
+            if pr["id"] == "pr-a":
+                raise RuntimeError("boom")
+            done.append(pr["id"])
+            return {"windows": [], "containers": []}
+
+        with patch("pm_core.tmux.session_exists", return_value=True), \
+             patch("pm_core.pr_cleanup.cleanup_pr_resources",
+                   side_effect=cleanup):
+            sync_mod._kill_merged_pr_windows(app, ["pr-a", "pr-b"])
+
+        assert done == ["pr-b"]
+
 
 class TestLoadStateParseError:
     """app._load_state keeps previous state on an unloadable project.yaml."""
