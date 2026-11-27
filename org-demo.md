@@ -89,10 +89,14 @@ git add -A && git commit -m "Initial org structure with governance docs"
 pm init . \
   --name open-lab-org \
   --base-branch main \
-  --backend local
+  --backend local \
+  --no-import
 ```
 
-This creates `pm/` inside the org repo.
+This creates `pm/` inside the org repo. `--no-import` skips the repo-import
+session (and the "Import from existing repo" plan it registers), so the plan
+you add in step 4 is the only plan and the bare `pm plan review` and
+`pm plan load` in step 5 pick it.
 
 ## 4. Create a plan with Claude
 
@@ -114,8 +118,10 @@ pm plan review
 ```
 
 If the plan has no `## PRs` section yet, the review proposes one and writes
-it to the plan file. Then load the PRs with `pm plan load`. For this demo,
-simulate by running commands manually:
+it to the plan file. Then load the PRs with `pm plan load`. (With more than
+one plan, both commands refuse with "Multiple plans. Specify one:"; pass the
+plan id that `pm plan add` printed, e.g. `pm plan review plan-<id>`.) For this
+demo, simulate by running commands manually:
 
 Layer 0 — foundational work (no dependencies):
 
