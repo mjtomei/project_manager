@@ -410,6 +410,17 @@ def _prepare(root: Path, image_ref: str, image_id: str, tags: list[str],
         _exec_ok(name, ["mkdir", "-p", CONSUMER_STORE,
                         f"{CONSUMER_MOUNT}/probe"], "create the store")
         _stream_load(runtime, image_ref, name, flags)
+        # ``save`` resolved *image_ref* when it started, which may be after
+        # it was rebuilt or retagged (since resolve_image above): then the
+        # store holds another image ID, and inspecting it by *image_id*
+        # would only say "image not known".  Read which ID was loaded.
+        listed = _exec_ok(name, ["podman", *flags, "images", "--all",
+                                 "--quiet", "--no-trunc"],
+                          "list the loaded image")
+        loaded_ids = [i.split(":")[-1] for i in listed.stdout.split()]
+        if loaded_ids and image_id.split(":")[-1] not in loaded_ids:
+            raise ImageCacheError(_rebuilt_message(
+                loaded_ids[0], image_ref, image_id))
         loaded = _exec_ok(name, ["podman", *flags, "image", "inspect",
                                  image_id], "inspect the loaded image")
         try:
@@ -420,10 +431,8 @@ def _prepare(root: Path, image_ref: str, image_id: str, tags: list[str],
             raise ImageCacheError(
                 f"could not read the loaded image: {exc}") from exc
         if loaded_id.split(":")[-1] != image_id.split(":")[-1]:
-            raise ImageCacheError(
-                f"the loaded image ID {loaded_id[:19]} differs from "
-                f"{image_ref}'s ID {image_id[:19]} (was the image rebuilt "
-                f"during preparation?); retry")
+            raise ImageCacheError(_rebuilt_message(loaded_id, image_ref,
+                                                   image_id))
         for tag in tags:
             if tag not in names:
                 _exec_ok(name, ["podman", *flags, "tag", image_id, tag],
@@ -477,6 +486,17 @@ def _prepare(root: Path, image_ref: str, image_id: str, tags: list[str],
     _log.info("image cache: prepared %s (%s) in %.1fs, %s bytes", image_ref,
               key, meta["prep_seconds"], meta["store_bytes"])
     return CacheEntry(key=key, path=final, meta=meta)
+
+
+def _rebuilt_message(loaded_id: str, image_ref: str, image_id: str) -> str:
+    loaded_id = loaded_id.split(":")[-1]
+    image_id = image_id.split(":")[-1]
+    return (f"the loaded image ID {loaded_id[:12]} differs from "
+            f"{image_ref}'s ID {image_id[:12]} when this preparation "
+            f"started: '{image_ref}' was rebuilt or retagged during "
+            f"preparation, and nothing was published. Retry (launch again "
+            f"or run 'pm container cache prepare'): the next preparation "
+            f"copies its current image")
 
 
 def _entry_users(key: str) -> list[str] | None:
@@ -582,10 +602,18 @@ def _stream_load(runtime: str, image_ref: str, name: str,
             src = load_err if load_rc != 0 else save_err
             src.seek(0)
             detail = _podman_error(src.read().decode("utf-8", "replace"))
-            raise ImageCacheError(
-                f"cache preparation could not copy '{image_ref}' into the "
-                f"cache (save rc={save_rc}, load rc={load_rc}): "
-                f"{detail[:400]}")
+            msg = (f"cache preparation could not copy '{image_ref}' into "
+                   f"the cache (save rc={save_rc}, load rc={load_rc}): "
+                   f"{detail[:400]}")
+            if load_rc in (126, 127):
+                # ``exec … podman load`` found no runnable podman in the
+                # image itself: no retry or prepare can fix that.
+                msg = (msg.rstrip(".") + ". '" + image_ref + "' has no "
+                       "podman, so it cannot run nested podman or serve "
+                       "the shared cache: choose an image that has one "
+                       "('pm container set image <image>'; 'pm container "
+                       "build-base' builds pm-dev:latest)")
+            raise ImageCacheError(msg)
 
 
 def _remove_quietly(name: str) -> None:

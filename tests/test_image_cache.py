@@ -89,7 +89,13 @@ class FakeRuntime:
                 for p in argv[2:]:
                     Path(self._host(p)).mkdir(parents=True, exist_ok=True)
                 return _cp()
+            if argv[:1] == ["podman"] and "images" in argv:
+                return _cp(out=self.loaded_id + "\n")
             if argv[:1] == ["podman"] and "inspect" in argv:
+                # Like podman: an ID that was not loaded is not known.
+                if argv[-1].split(":")[-1] != self.loaded_id.split(":")[-1]:
+                    return _cp(125, err=f"Error: error inspecting object: "
+                                        f"{argv[-1]}: image not known")
                 return _cp(out=json.dumps([{"Id": self.loaded_id,
                                             "RepoTags": self.tags[:1]}]))
             if argv[:2] == ["podman", "unshare"] and "du" in argv:
@@ -401,6 +407,43 @@ class TestEnsurePrepared:
         assert list(entries.iterdir()) == []
         assert fake.removed  # prep container removed
 
+    def test_image_without_podman_names_set_image(self, fake, home):
+        """``exec … podman load`` in an image with no podman (alpine): no
+        retry or prepare can fix that, so the cause names the image
+        remedy."""
+        fake.fail["popen:exec"] = 127
+        with pytest.raises(ImageCacheError) as exc:
+            image_cache.ensure_prepared("pm-dev:latest")
+        msg = str(exc.value)
+        assert "load rc=127" in msg
+        assert "'pm-dev:latest' has no podman" in msg
+        assert "pm container set image <image>" in msg
+        entries = home / ".pm" / "image-cache" / "entries"
+        assert list(entries.iterdir()) == []
+
+    def test_other_load_failure_does_not_blame_the_image(self, fake, home):
+        fake.fail["popen:exec"] = 125
+        with pytest.raises(ImageCacheError) as exc:
+            image_cache.ensure_prepared("pm-dev:latest")
+        assert "pm container set image" not in str(exc.value)
+
+    def test_retag_during_preparation_publishes_nothing(self, fake, home):
+        """``save`` resolves the tag when it starts: a rebuild or retag
+        after resolve_image streams another image ID into the store.  The
+        cause says so and to retry (podman would only say "image not
+        known" for the ID resolved earlier), and nothing is published."""
+        fake.loaded_id = "sha256:" + "cd" * 32
+        with pytest.raises(ImageCacheError) as exc:
+            image_cache.ensure_prepared("pm-dev:latest")
+        msg = str(exc.value)
+        assert "image not known" not in msg
+        assert f"loaded image ID {'cd' * 6} differs" in msg
+        assert "rebuilt or retagged during preparation" in msg
+        assert "Retry" in msg and "pm container cache prepare" in msg
+        entries = home / ".pm" / "image-cache" / "entries"
+        assert list(entries.iterdir()) == []
+        assert fake.removed   # the prep container too
+
     def test_killed_preparer_leftovers_are_cleared(self, fake, home):
         """A preparer killed mid-way leaves its prep container and dir; the
         next preparation (holding the key's lock) removes both."""
@@ -465,7 +508,7 @@ class TestEnsurePrepared:
 
     def test_id_mismatch_aborts(self, fake, home):
         fake.loaded_id = "sha256:" + "ef" * 32
-        with pytest.raises(ImageCacheError, match="rebuilt during preparation"):
+        with pytest.raises(ImageCacheError, match="rebuilt or retagged during preparation"):
             image_cache.ensure_prepared("pm-dev:latest")
         assert list((home / ".pm" / "image-cache" / "entries").iterdir()) == []
 
