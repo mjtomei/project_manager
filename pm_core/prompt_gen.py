@@ -1739,6 +1739,9 @@ def generate_discovery_supervisor_prompt(data: dict, session_name: str | None = 
 
     id_label = f" [{loop_id}]" if loop_id else ""
     iteration_label = f" (iteration {iteration}){id_label}" if iteration else id_label
+    from pm_core.paths import captures_roots_globs
+    regression_prompts = " ".join(
+        f"{g}/regression/<id>/*/prompt.md" for g in captures_roots_globs())
 
     prompt = f"""This is one tick of the **Discovery Supervisor** watcher for project "{project_name}".{iteration_label}
 
@@ -1837,7 +1840,7 @@ clone, or building/creating its container). The runner writes the run's
 started runs newest first with:
 
 ```
-ls -t ~/.pm/sessions/*/captures/regression/<id>/*/prompt.md 2>/dev/null
+ls -t {regression_prompts} 2>/dev/null
 ```
 
 Run ids (the dir names) start with their UTC start time. If a test's pane has
@@ -2335,7 +2338,10 @@ state or depend on **another scenario's** side effects, and STEPS must
 include all setup the scenario needs. Within a single scenario you *can*
 spawn nested containers, background processes, or parallel actors to drive
 the system under test from multiple contexts at once — use that capability
-whenever the surface being tested is shared across users or workers.
+whenever the surface being tested is shared across users or workers. Nested
+containers use the shared image cache described in the Nested Containers
+instruction; reference that instruction instead of writing storage-driver,
+image import or rebuild steps into STEPS.
 
 Prefer fewer, broader scenarios over many narrow ones. Group related checks
 that share setup into one scenario with multi-step STEPS, including edge

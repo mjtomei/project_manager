@@ -28,6 +28,7 @@ import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Sequence
 from urllib.parse import quote
 
 _log = logging.getLogger("pm.behavior_report")
@@ -122,17 +123,26 @@ def extract_signoff_meta(report_path: Path) -> dict[str, str]:
     return out
 
 
-def gather_dashboard_rows(data: dict,
-                          captures_root_dir: Path) -> list[_DashRow]:
-    """Build one row per PR from ``project.yaml`` + per-PR ``report.html``."""
+def gather_dashboard_rows(data: dict, captures_root_dir: Path,
+                          fallback_roots: Sequence[Path] = ()
+                          ) -> list[_DashRow]:
+    """Build one row per PR from ``project.yaml`` + per-PR ``report.html``.
+
+    A PR's report is looked up in *captures_root_dir*, then in each of
+    *fallback_roots* (the order the dashboard server serves files in).
+    """
     rows: list[_DashRow] = []
+    roots = [captures_root_dir, *fallback_roots]
     for pr in data.get("prs") or []:
         pr_id = pr["id"]
         gh = pr.get("gh_pr_number")
         gh_label = f"#{gh}" if gh else ""
         title = pr.get("title", pr_id)
         status = pr.get("status", "")
-        report_path = captures_root_dir / pr_id / "report.html"
+        report_path = next(
+            (r / pr_id / "report.html" for r in roots
+             if (r / pr_id / "report.html").is_file()),
+            captures_root_dir / pr_id / "report.html")
         if report_path.is_file():
             verdict = _extract_verdict(report_path)
             try:

@@ -337,13 +337,17 @@ def _discard_unlaunched_run(qa_workdir: Path,
                             run_captures: Path | None = None) -> None:
     """Remove what a regression run that never launched created.
 
-    Drops the run's own workdir and, when given, its captures dir and the
-    test's dir if that was its first run.  Only empty captures dirs are
-    removed (``rmdir``), so no evidence is lost; the dir exists then only
-    because container creation made it for its mount.
+    Drops the run's own workdir and its scratch dir (which lives apart, on
+    local disk — see :func:`pm_core.paths.scenario_scratch_dir`) and, when
+    given, its captures dir and the test's dir if that was its first run.
+    Only empty captures dirs are removed (``rmdir``), so no evidence is
+    lost; the dir exists then only because container creation made it for
+    its mount.
     """
     import shutil
+    from pm_core.paths import run_scratch_dir
     shutil.rmtree(qa_workdir, ignore_errors=True)
+    shutil.rmtree(run_scratch_dir(qa_workdir), ignore_errors=True)
     if run_captures is None:
         return
     for d in (run_captures, run_captures.parent):
@@ -807,7 +811,8 @@ def qa_debug(instruction_id: str, branch: str | None, foreground: bool):
 
     # Create a workdir keyed to session + instruction (not PR)
     debug_id = secrets.token_hex(4)
-    base_dir = Path(os.path.expanduser("~/.pm/workdirs/qa"))
+    from pm_core.paths import qa_workdirs_root
+    base_dir = qa_workdirs_root()
     qa_workdir = base_dir / f"debug-{instruction_id}-{debug_id}"
     qa_workdir.mkdir(parents=True, exist_ok=True)
 
@@ -1118,9 +1123,9 @@ def qa_standalone(instruction_id: str):
 
     # Create workdir
     timestamp = int(time.time())
-    workdir = os.path.expanduser(
-        f"~/.pm/workdirs/qa/standalone-{instruction_id}-{timestamp}"
-    )
+    from pm_core.paths import qa_workdirs_root
+    workdir = str(qa_workdirs_root()
+                  / f"standalone-{instruction_id}-{timestamp}")
     os.makedirs(workdir, exist_ok=True)
 
     click.echo(f"Running standalone QA: {item['title']}")

@@ -12568,7 +12568,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-27T17:58:00.042338+00:00'
+  updated_at: '2026-11-26T15:58:27.044395+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -12653,6 +12653,28 @@ prs:
       there is one prefix-matching helper.'
     created_at: '2026-10-27T17:57:59Z'
     last_edited: '2026-10-27T17:57:59Z'
+  - id: note-753984f
+    text: 'From pr-abc1124 (shared image cache, #298) — lifecycle interface for your
+      reaper, no schedule dependency either way. (1) create_container (new-container
+      path, nested_podman + podman) now also: bind-mounts a host image-cache entry
+      read-only at /var/lib/pm-image-cache with label pm.image-cache=<key>, and runs
+      container.fit_subids(name, uid) as an exec --user 0 after setup. Cache GC (image_cache.gc
+      / ''pm container cache gc'') treats ANY existing container carrying pm.image-cache=<key>
+      (any state) as a consumer, so your retained/held containers keep their entry
+      without extra handling. (2) pm_core/storage_reclaim.py deletes only container
+      stores + image archives inside QA scenario scratch, and holds a scratch dir
+      while any existing container mounts it (or its run is live/resumable). It is
+      called from pr_cleanup.cleanup_pr_resources (background unless wait_reclaim=True)
+      and at QA run start (background, earlier runs of the PR). When your reaper removes
+      containers, calling storage_reclaim.reclaim(pr_id, reason=...) afterwards (or
+      from reconcile) is the intended hook — please don''t add a second scheduler
+      for it. It already uses container_mount_sources() as the ownership signal; it
+      does not read retention markers because a retained container still exists and
+      so still holds its scratch. (3) Scenario scratch moved from <qa_workdir>/s-N/scratch
+      to paths.scenario_scratch_dir() = ~/.pm/scratch/qa/<run>/s-N (legacy location
+      still honoured when it exists).'
+    created_at: '2026-11-26T15:58:26Z'
+    last_edited: '2026-11-26T15:58:26Z'
 - id: pr-d43d362
   plan: bugs
   title: Container pm user hardcoded at UID 1000 breaks for hosts with non-1000 UID
@@ -37370,7 +37392,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T22:50:28.195013+00:00'
-  updated_at: '2026-10-29T04:18:47.676391+00:00'
+  updated_at: '2026-11-27T10:49:33.478915+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -37386,6 +37408,20 @@ prs:
       (screen-after-restart.txt, windows-after-downtime.txt).'
     created_at: '2026-10-29T04:18:47Z'
     last_edited: '2026-10-29T04:18:47Z'
+  - id: note-97bff63
+    text: 'Seen again 2026-11-27 (pr-abc1124 QA S13, head e7ed2afc6), different shape:
+      after `kill -TERM` of the TUI window pane pids (window 0 "main" closes, handle_pane_exited
+      unregisters its panes), `pm session` logs roles_alive=set(), finds no "main"
+      window and falls back to the FIRST window by index (pm_core/cli/session.py ~L352
+      all_wins[0]) -> pane_layout._respawn_tui splits the TUI into that live window.
+      Here it was the user shell window `cli` (@2): the TUI became pane 1.0 beside
+      the shell. In a normal session the first window is an impl/review Claude window,
+      so the TUI would be squeezed into it. Expected: when no registered/main TUI
+      window exists, create a new window named main (index 0) instead of splitting
+      an arbitrary window. Debug log: "_respawn_tui: respawning TUI in pm-proj-b4194b3e:@2"
+      / "created pane %54 in window @2".'
+    created_at: '2026-11-27T10:49:33Z'
+    last_edited: '2026-11-27T10:49:33Z'
 - id: pr-97614ed
   plan: bugs
   title: 'Bug: finished review loop summary (⟳N✓ badge, runs popup/status review block)
@@ -39100,11 +39136,17 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-14T15:34:13.670942+00:00'
-  updated_at: '2026-10-14T15:34:13.670942+00:00'
+  updated_at: '2026-11-27T09:37:42.747515+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-4a54404
+    text: 'Same _list_settings rendering: container-runtime prints "(unset)" with
+      no "(default)" marker while other unset settings print "(unset) (default)" (seen
+      in pr-abc1124 QA S12 pm set list). Pre-existing on master; fix alongside qa-verify-pass.'
+    created_at: '2026-11-27T09:37:42Z'
+    last_edited: '2026-11-27T09:37:42Z'
 - id: pr-19e8114
   plan: bugs
   title: 'Bug: pm/prompts/ session prompt files are untracked and not gitignored in
@@ -54972,7 +55014,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-11-01T14:57:48.450085+00:00'
-  updated_at: '2026-11-01T20:38:42.683324+00:00'
+  updated_at: '2026-11-26T15:58:40.637263+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -55007,6 +55049,28 @@ prs:
       no unrelated PR is authorized.'
     created_at: '2026-11-01T20:38:42.683324+00:00'
     last_edited: '2026-11-01T20:38:42.683324+00:00'
+  - id: note-56c94b1
+    text: 'From pr-abc1124 (shared image cache, #298) — two new fail-closed steps
+      inside create_container''s new-container path, for your required_container_launch/ensure_container
+      interface. (a) Provider (host, nested_podman + podman, setting container-image-cache
+      auto/on): image_cache.ensure_prepared(config.image) runs after the image-exists/auto-build
+      step and before ''run''. Warm ≈0.5 s; cold (once per image ID) ≈2 min, flock-coordinated
+      across threads/processes. Failure raises ContainerError(''Container <name> was
+      not launched: the shared image cache … is unavailable … Cause: … To retry …'').
+      (b) Consumer (a pm inside a container that has /var/lib/pm-image-cache/entry.json):
+      never builds the image; raises ContainerError when the engine''s cache check
+      fails (overlay missing, wrong-level mapping probes, foreign storage.conf) or
+      when the configured image is not in the cache. Both happen before any container
+      exists, so release_unused has nothing to release; the prep container is removed
+      by image_cache itself (and leftovers of a killed preparer are cleared under
+      the key''s lock). If ensure_container takes over create_container''s body, keep
+      these two steps between the image check and ''run'', and keep the post-setup
+      fit_subids exec (nested containers only) — without it rootless engines in a
+      container launched from a container cannot start (newuidmap EPERM). Explicit
+      ''pm set container-image-cache off'' is the intentional no-cache path (it does
+      not change host/container policy).'
+    created_at: '2026-11-26T15:58:40Z'
+    last_edited: '2026-11-26T15:58:40Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
@@ -55686,11 +55750,26 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-11-01T22:52:52.821559+00:00'
-  updated_at: '2026-11-01T22:52:52.821559+00:00'
+  updated_at: '2026-11-26T22:21:26.203459+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-98bca7a
+    text: 'From pr-abc1124 (shared image cache, #298): QA scenario scratch no longer
+      lives inside the run workdir. New runs put it at paths.scenario_scratch_dir()
+      = <scratch-dir or ~/.pm/scratch>/qa/<run>/s-N (legacy <run>/s-N/scratch still
+      honoured), and QA runs may sit in any of paths.qa_workdirs_roots() when workdirs-dir
+      moved them. A reaper of <qa root>/<run> must therefore also remove the scratch
+      dir under each of paths.qa_scratch_roots()/<run> (paths.run_scratch_dir is the
+      new-run one), or it leaks scratch. Scratch can hold rootless engine stores owned
+      by sub-UIDs: delete with podman unshare rm -rf, as storage_reclaim._delete does.
+      storage_reclaim.plan() already reports whether a run scratch dir is held (a
+      container mounts it, run live/resumable, a process cwd in it, active mounts);
+      reuse that liveness check rather than adding a second one. No schedule dependency
+      either way.'
+    created_at: '2026-11-26T22:21:25Z'
+    last_edited: '2026-11-26T22:21:25Z'
 - id: pr-8984bc7
   plan: bugs
   title: 'Bug: read-only pm qa list and pm qa mocks list create empty pm/qa/regression/
@@ -56359,6 +56438,163 @@ prs:
   gh_pr_number: null
   created_at: '2026-11-02T08:57:36.104793+00:00'
   updated_at: '2026-11-02T08:57:36.104793+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-794a2a9
+  plan: bugs
+  title: 'Bug: pm container build-base kills a slow cold pm-dev build at a hard 600
+    s timeout, and the killed build''s runtime keeps writing'
+  branch: pm/pr-794a2a9-bug-pm-container-build-base-kills-a-slow-cold-pm-d
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/container.py build_image() runs ''podman build''
+    with subprocess.run(timeout=600). That timeout is on master too. create_container''s
+    auto-build goes through it as well. Repro (pr-abc1124 QA S2, 2026-11-26, nested
+    QA container, podman 3.4.4): a cold ''pm container build-base'' (apt + Playwright
+    Chromium download) was killed at 600 s. Only the podman parent was killed: its
+    buildah-oci-runtime child kept running and writing to the same stdout for about
+    2 more minutes. So ''pm container build-base 2>&1 | tail -15'' hung until it exited,
+    and the ''Error: … timed out'' line scrolled out of the tail. Only a dangling
+    1.03 GB intermediate image was left. Rerunning resumed from cached layers and
+    finished in 5m17s. Fix: drop the timeout or make it generous/configurable, kill
+    the whole process group on timeout, and name the timeout in the error.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-26T23:55:12.707153+00:00'
+  updated_at: '2026-11-26T23:55:12.707153+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-15aa4f5
+  plan: bugs
+  title: 'Bug: removing a running QA scenario container waits podman''s 10 s stop
+    timeout (PID 1 is sleep infinity)'
+  branch: pm/pr-15aa4f5-bug-removing-a-running-qa-scenario-container-waits
+  status: pending
+  depends_on: []
+  description: 'pm_core/container.py create_container ends the container command with
+    ''exec sleep infinity'' and passes no --stop-timeout, so podman keeps its 10 s
+    default (podman inspect --format ''{{.Config.StopTimeout}}'' = 10). sleep as PID
+    1 ignores SIGTERM, so every ''podman rm -f'' of a running scenario container waits
+    the full 10 s and then SIGKILLs. Repro (pr-abc1124 QA S5 story 6): end a container-mode
+    QA run (its scenario container stays Up), then ''z t'' (/pr qa fresh) on the same
+    PR: the debug log shows ''remove_container: name=…-s2'' at 02:35:43 and the next
+    line at 02:35:54, so the orphan cleanup delays the new run''s Scenario 0 by 10
+    s per container. ''pm pr cleanup --resources'' on a PR with Up containers waits
+    too. Same pattern pr-abc1124 fixed for its prep container in 08ab1428: pass --stop-timeout
+    0, or run an init that exits on TERM. Present on master (exec sleep infinity,
+    no stop timeout).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-27T02:38:41.312863+00:00'
+  updated_at: '2026-11-27T02:38:41.312863+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-c0ab8ae
+  plan: bugs
+  title: 'Bug: pm guide outside a pm tmux session crashes in assist mode (launch_claude
+    missing session_key/pm_root)'
+  branch: pm/pr-c0ab8ae-bug-pm-guide-outside-a-pm-tmux-session-crashes-in-
+  status: pending
+  depends_on: []
+  description: 'pm_core/cli/guide.py:101 (assist branch, PRs exist, not in a pm-*
+    tmux session) calls launch_claude(prompt, session_type="guide") but launch_claude(prompt,
+    session_key, pm_root, ...) requires session_key and pm_root, so `pm guide` dies
+    with "TypeError: launch_claude() missing 2 required positional arguments: session_key
+    and pm_root" before Claude starts. Same on origin/master. Repro: throwaway project
+    (git init; pm init --backend local --no-import; pm pr add x), then run `pm guide`
+    from a plain shell or a tmux session not named pm-*. The setup branch (line ~146)
+    passes session_key="guide:setup", pm_root=root. Found in pr-abc1124 QA S6 (2026-11-27);
+    the tmux branch (pm guide in a pm-* pane) works.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-27T03:34:20.060550+00:00'
+  updated_at: '2026-11-27T03:34:20.060550+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-caccef7
+  plan: bugs
+  title: 'Bug: a QA run started with /pr qa on an in_progress PR is silently dropped
+    at the next TUI restart'
+  branch: pm/pr-caccef7-bug-a-qa-run-started-with-pr-qa-on-an-in-progress-
+  status: pending
+  depends_on: []
+  description: 'pm_core/tui/qa_loop_ui.py _resume_incomplete_qa only resumes runs
+    of PRs in status qa and clears any other own snapshot as "the PR has left QA".
+    _enter_qa_status only moves in_review -> qa, so `/pr qa <id>` (or t) on an in_progress
+    PR runs QA with status in_progress, and `pm tui restart` deletes its qa_resume.json:
+    the run is never resumed and its scenario windows/containers are left with no
+    driver (no log line says so). Repro: pm pr start X (status in_progress), /pr qa
+    X with a long fake-claude qa_scenario delay, pm tui restart -> no "Resuming QA
+    for X", ~/.pm/workdirs/qa/X-*/qa_resume.json gone. Same class as S47 (in_review)
+    which was fixed by entering qa. Found in pr-abc1124 QA S6 (2026-11-27).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-27T03:34:26.900623+00:00'
+  updated_at: '2026-11-27T03:34:26.900623+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-5b47a2a
+  plan: bugs
+  title: 'Bug: pm session without a terminal prints a TmuxCommandError traceback after
+    creating the session'
+  branch: pm/pr-5b47a2a-bug-pm-session-without-a-terminal-prints-a-tmuxcom
+  status: pending
+  depends_on: []
+  description: 'pm_core/cli/session.py _session_start calls tmux_mod.attach (pm_core/tmux.py
+    attach, check=True) unguarded, so when stdin is not a terminal (pm session </dev/null,
+    or a scripted caller) the session is created and then a full Python traceback
+    ends in "TmuxCommandError: Command [tmux, attach-session, -t, pm-<tag>~1] returned
+    non-zero exit status 1. tmux: open terminal failed: not a terminal" with rc 1.
+    Repro: in a project dir, pm session </dev/null. Same code on master. Found in
+    pr-abc1124 QA S12 (captures /pm-captures/scenarios/12/story3/cli). Fix: when stdin
+    is not a tty (or attach fails with "not a terminal"), print that the session was
+    created and how to attach (tmux attach -t <session>), exit 0 without a traceback.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-27T09:37:32.725281+00:00'
+  updated_at: '2026-11-27T09:37:32.725281+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-0707023
+  plan: bugs
+  title: 'Bug: remove_container logs ERROR "container runtime failed (rc=125): podman
+    inspect" on every successful removal'
+  branch: pm/pr-0707023-bug-remove-container-logs-error-container-runtime-
+  status: pending
+  depends_on: []
+  description: 'pm_core/container.py remove_container() polls `_run_runtime("inspect",
+    name, check=False)` until the container is gone; _run_runtime logs every non-zero
+    rc at ERROR, so the expected "no such container" answer is logged as `ERROR [container]
+    container runtime failed (rc=125): podman inspect <ctr>` + stderr on every successful
+    removal (seen in QA S18 of pr-abc1124 for each merge cleanup, pm pr cleanup --resources
+    and create_container/container_is_running probes; same code on master). Repro:
+    container mode, run QA so a scenario container exists, then pm pr cleanup --resources
+    <pr>; grep -a "container runtime failed (rc=125): podman inspect" ~/.pm/debug/<tag>.log.
+    Expected: probes whose failure means "absent" log at debug (e.g. a quiet=True
+    flag on _run_runtime for check=False existence probes), so real runtime errors
+    stay visible.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-27T15:38:51.543350+00:00'
+  updated_at: '2026-11-27T15:38:51.543350+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null

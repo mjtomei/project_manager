@@ -197,6 +197,61 @@ def _nested_podman_run_args() -> list[str]:
     return args
 
 
+# Root-run setup step for nested-podman containers: make /etc/subuid and
+# /etc/subgid fit this container's own user namespace.  The kernel accepts a
+# new uid_map extent only when it lies inside ONE extent of the parent map,
+# and newuidmap passes each subuid line as one extent.  The image's
+# ``pm:1:999`` / ``pm:1001:64535`` fit a container launched from the host,
+# but in a container launched from inside a container (its map is
+# ``0 1 999; 999 1000 1; 1000 0 1; 1001 1001 64534``) uids 1-999 span two
+# extents and 65535 does not exist, so every rootless engine there died with
+# "newuidmap: write to uid_map failed: Operation not permitted".  The files
+# are rewritten (split at the extent boundaries, never handing out uid 0 or
+# the user's own id) only when an existing range does not fit, so a
+# host-launched container keeps the image's ranges unchanged.
+_FIT_SUBID_SCRIPT = r"""
+fit() {
+  awk -v skip="$3" -v user="$4" '
+    FNR == NR {
+      f = $1; l = $1 + $3 - 1; if (f < 1) f = 1
+      if (skip >= f && skip <= l) {
+        if (skip > f) { n++; s[n] = f; e[n] = skip - 1 }
+        if (skip < l) { n++; s[n] = skip + 1; e[n] = l }
+      } else if (l >= f) { n++; s[n] = f; e[n] = l }
+      next
+    }
+    {
+      split($0, a, ":"); if (a[1] != user) next
+      seen = 1; lf = a[2] + 0; ll = a[2] + a[3] - 1; ok = 0
+      for (i = 1; i <= n; i++) if (lf >= s[i] && ll <= e[i]) ok = 1
+      if (!ok) bad = 1
+    }
+    END {
+      if (bad || !seen)
+        for (i = 1; i <= n; i++) printf "%s:%d:%d\n", user, s[i], e[i] - s[i] + 1
+    }' "$1" "$2"
+}
+u=$(id -u "$1") && g=$(id -g "$1") && name=$(id -un "$1") || exit 0
+touch /etc/subuid /etc/subgid
+new=$(fit /proc/self/uid_map /etc/subuid "$u" "$name")
+[ -n "$new" ] && printf '%s\n' "$new" > /etc/subuid
+new=$(fit /proc/self/gid_map /etc/subgid "$g" "$name")
+[ -n "$new" ] && printf '%s\n' "$new" > /etc/subgid
+exit 0
+"""
+
+
+def fit_subids(name: str, uid: int) -> None:
+    """Run :data:`_FIT_SUBID_SCRIPT` as root in container *name* (best
+    effort) for the container user with *uid*."""
+    try:
+        _run_runtime("exec", "--user", "0", name, "sh", "-c",
+                     _FIT_SUBID_SCRIPT, "fit-subids", str(uid),
+                     timeout=15, check=False)
+    except Exception:
+        _log.debug("subid fit failed in %s", name, exc_info=True)
+
+
 def _get_dockerfile_path() -> Path:
     """Return the path to the bundled Dockerfile."""
     return Path(__file__).resolve().parent.parent / "Dockerfile"
@@ -784,6 +839,24 @@ def create_container(
 
     remove_container(name)
 
+    from pm_core import image_cache
+    runtime = _get_runtime()
+    _nested = "podman" in runtime and _nested_podman_enabled()
+
+    # Inside a container that got a shared image-cache entry, this pm's
+    # engine sees the cached image read-only.  Never build, pull or import
+    # it here — that is the per-engine copy the cache replaces — and never
+    # launch without it: a missing image is an actionable error.
+    if "podman" in runtime and image_cache.is_consumer():
+        try:
+            image_cache.ensure_consumer_engine()
+        except image_cache.ImageCacheError as exc:
+            raise ContainerError(
+                f"Container '{name}' was not launched: {exc}") from exc
+        if not image_exists(config.image):
+            raise ContainerError(
+                image_cache.missing_in_consumer_message(config.image))
+
     # Auto-build the pm-dev image if it's the default and not yet built.
     # Use a lock so concurrent create_container calls don't all build at once.
     if config.image == DEFAULT_IMAGE and not image_exists(config.image):
@@ -799,7 +872,26 @@ def create_container(
             f"'pm container build-base' for the base image."
         )
 
-    runtime = _get_runtime()
+    # Shared image cache: the nested engine in this container reads the
+    # image's layers from one host-prepared, read-only entry instead of
+    # holding its own copy (see pm_core.image_cache).  A cache that cannot
+    # be prepared fails the launch — no launch without it, no VFS, no host.
+    cache_entry = None
+    if image_cache.provider_enabled(runtime, _nested):
+        try:
+            cache_entry = image_cache.ensure_prepared(config.image)
+        except image_cache.ImageCacheError as exc:
+            cause = str(exc).rstrip()
+            if cause and cause[-1] not in ".!?":
+                cause += "."   # causes end on a remedy or a podman error
+            raise ContainerError(
+                f"Container '{name}' was not launched: the shared image "
+                f"cache for '{config.image}' is unavailable.\n\nCause: {cause}"
+                f"\n\nTo retry: fix the cause and launch again, or prepare "
+                f"it explicitly with 'pm container cache prepare'. To launch "
+                f"without the shared cache, run "
+                f"'pm set {image_cache.MODE_SETTING} off'.") from exc
+
     cmd = [
         "run", "-d",
         "--name", name,
@@ -812,7 +904,7 @@ def create_container(
     # workload starts.  Skip the limits there — they're unenforceable in
     # that environment anyway — matching the relaxed-sandbox intent of the
     # nested_podman opt-in (see _nested_podman_run_args).
-    if not ("podman" in runtime and _nested_podman_enabled()):
+    if not _nested:
         cmd += ["--memory", config.memory_limit, "--cpus", config.cpu_limit]
     cmd += [
         "-v", f"{workdir}:{_CONTAINER_WORKDIR}",
@@ -843,8 +935,10 @@ def create_container(
     # useradd/groupadd.  Harmless under Podman rootful (no-op).
     if "podman" in runtime:
         cmd.extend(["--userns=keep-id"])
-        if _nested_podman_enabled():
+        if _nested:
             cmd.extend(_nested_podman_run_args())
+    if cache_entry is not None:
+        cmd.extend(image_cache.consumer_run_args(cache_entry))
 
     # --- Claude binary ---
     # Mount the resolved claude binary into the container so the
@@ -1025,6 +1119,10 @@ def create_container(
             )
     if git_setup:
         setup_parts.append(git_setup)
+    if cache_entry is not None:
+        # The default user's engine reads the shared store; rootless podman
+        # honours additionalimagestores only from this user config.
+        setup_parts.append(image_cache.consumer_setup_script(_CONTAINER_HOME))
     # pm is made available inside the container via a shim at
     # /usr/local/bin/pm (installed in the base image) that execs
     # ``python3 -m pm_core.wrapper``, picking up pm_core through
@@ -1065,6 +1163,11 @@ def create_container(
             f"The system may be under memory pressure (try stopping unused "
             f"containers with 'pm session cleanup')."
         )
+
+    if _nested:
+        # Let rootless engines start in this container whatever its depth
+        # (see _FIT_SUBID_SCRIPT); a no-op for host-launched containers.
+        fit_subids(name, host_uid)
 
     # Repair ownership of ~/.pm inside the container.  When we bind-mount
     # ~/.pm/hooks, the container runtime auto-creates the parent
@@ -1467,12 +1570,16 @@ def cleanup_qa_containers(pr_id: str, loop_id: str,
 
 
 def cleanup_pr_containers(pr_id: str,
-                          session_tag: str | None = None) -> list[str]:
+                          session_tag: str | None = None,
+                          problems: list[str] | None = None) -> list[str]:
     """Remove every QA container for a PR across all loop ids.
 
     Matches both legacy (``pm-qa-{pr_id}-``) and session-tagged
     (``pm-{session_tag}-qa-{pr_id}-``) name prefixes. Returns the list of
-    container names removed.
+    container names removed.  A listing the runtime refused or did not
+    answer is appended to *problems* (when given), so a caller can tell "no
+    containers" from "could not look".  No runtime installed at all (a
+    host-only user) is "no containers": none can exist.
     """
     prefixes = []
     if session_tag:
@@ -1482,12 +1589,24 @@ def cleanup_pr_containers(pr_id: str,
     candidates: list[str] = []
     seen: set[str] = set()
     for prefix in prefixes:
-        result = _run_runtime(
-            "ps", "-a", "--filter", f"name={prefix}",
-            "--format", "{{.Names}}",
-            check=False, timeout=30,
-        )
+        try:
+            result = _run_runtime(
+                "ps", "-a", "--filter", f"name={prefix}",
+                "--format", "{{.Names}}",
+                check=False, timeout=30,
+            )
+        except FileNotFoundError:
+            _log.debug("cleanup_pr_containers(%s): no container runtime "
+                       "installed", pr_id)
+            return []
+        except subprocess.TimeoutExpired:
+            if problems is not None and not problems:
+                problems.append("the container runtime did not answer")
+            break
         if result.returncode != 0:
+            if problems is not None and not problems:
+                problems.append("the container runtime could not list "
+                                "containers")
             continue
         for line in result.stdout.strip().splitlines():
             cname = line.strip()

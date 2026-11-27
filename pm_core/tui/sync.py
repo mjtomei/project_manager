@@ -59,7 +59,6 @@ def _kill_merged_pr_windows(app, merged_pr_ids: set[str]) -> None:
     containers, sockets, and registry entries to linger indefinitely
     after merge-detection.
     """
-    from pm_core import pr_cleanup
     from pm_core import tmux as tmux_mod
 
     if not app._session_name or not merged_pr_ids:
@@ -70,14 +69,66 @@ def _kill_merged_pr_windows(app, merged_pr_ids: set[str]) -> None:
 
     for pr_id in merged_pr_ids:
         pr = store.get_pr(app._data, pr_id)
-        if not pr:
-            continue
+        if pr:
+            _cleanup_merged_pr(session, pr)
+
+
+def _cleanup_merged_pr(session: str, pr: dict) -> None:
+    """Merge cleanup of one merged *pr*, logging what it removed.
+
+    A failure is logged and does not stop the caller's other PRs.
+    """
+    from pm_core import pr_cleanup
+    try:
         summary = pr_cleanup.cleanup_pr_resources(session, pr)
-        for win_name in summary.get("windows", []):
-            _log.info("Killed window '%s' for merged %s", win_name, pr_id)
-        if summary.get("containers"):
-            _log.info("Cleaned %d container(s) for merged %s",
-                      len(summary["containers"]), pr_id)
+    except Exception:
+        _log.warning("merge cleanup for %s failed", pr["id"], exc_info=True)
+        return
+    for win_name in summary.get("windows", []):
+        _log.info("Killed window '%s' for merged %s", win_name, pr["id"])
+    if summary.get("containers"):
+        _log.info("Cleaned %d container(s) for merged %s",
+                  len(summary["containers"]), pr["id"])
+
+
+def cleanup_merged_after_reload(app, old_statuses: dict):
+    """Run merge cleanup for PRs a state reload shows newly merged.
+
+    ``g`` (``pm pr merge`` on a local/vanilla backend), a CLI merge or
+    another session saves ``merged`` and sends SIGUSR1; the TUI's
+    state-only reload then holds the merged status before any sync runs,
+    so sync's own newly-merged check (which compares against the TUI's
+    state) never saw the change and merge cleanup — containers, pane
+    registry, scenario stores — never ran (QA S11 story 5).  Called from
+    the reload with the statuses it replaced.  The cleanup runs in a
+    daemon thread, because removing an Up container waits podman's stop
+    timeout and the TUI must not freeze for it (the stores themselves are
+    reclaimed in a further background thread by ``cleanup_pr_resources``).
+    Returns that thread, or None when nothing newly merged.
+    """
+    import threading
+    session = getattr(app, "_session_name", None)
+    if not session or not old_statuses:
+        return None
+    merged = [pr for pr in usable_prs((app._data or {}).get("prs"))
+              if pr.get("status") == "merged"
+              and pr["id"] in old_statuses
+              and old_statuses[pr["id"]] != "merged"]
+    if not merged:
+        return None
+    _log.info("reload saw %s merged: cleaning up their resources",
+              sorted(pr["id"] for pr in merged))
+
+    def _run() -> None:
+        from pm_core import tmux as tmux_mod
+        for pr in merged:
+            if not tmux_mod.session_exists(session):
+                return
+            _cleanup_merged_pr(session, pr)
+
+    t = threading.Thread(target=_run, name="merge-cleanup", daemon=True)
+    t.start()
+    return t
 
 
 async def background_sync(app) -> None:

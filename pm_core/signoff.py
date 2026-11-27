@@ -385,9 +385,9 @@ def merge_gate_refusal(pr: dict, current_sha: str | None,
     recorded_hash = (pr.get("signoff") or {}).get("report_hash")
     if recorded_hash:
         import hashlib
-        from pm_core.paths import captures_root
-        croot = captures_root()
-        report = croot / pr_id / "report.html" if croot else None
+        from pm_core.paths import host_pr_captures_dir
+        cdir = host_pr_captures_dir(pr_id)
+        report = cdir / "report.html" if cdir else None
         current_hash = (
             hashlib.sha256(report.read_bytes()).hexdigest()
             if report is not None and report.is_file() else None)
@@ -449,8 +449,8 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
     # exclusive per-PR lock makes the loser wait, then take the existing-
     # window fast path below.
     import fcntl
-    from pm_core.paths import workdirs_base
-    _launch_lock_path = workdirs_base() / f".signoff-launch-{pm_session}-{pr_id}.lock"
+    from pm_core.paths import workdir_locks_dir
+    _launch_lock_path = workdir_locks_dir() / f".signoff-launch-{pm_session}-{pr_id}.lock"
     _launch_lock_f = open(_launch_lock_path, "w")
     try:
         fcntl.flock(_launch_lock_f.fileno(), fcntl.LOCK_EX)
@@ -688,11 +688,11 @@ def apply_signoff_hop(root: Path, pr_id: str, hop: str,
 def report_meta(pr_id: str) -> dict[str, str]:
     """``pm-signoff-*`` meta tags of the PR's ``report.html`` (or {})."""
     from pm_core.behavior_report import extract_signoff_meta
-    from pm_core.paths import captures_root
-    croot = captures_root()
-    if not croot:
+    from pm_core.paths import host_pr_captures_dir
+    cdir = host_pr_captures_dir(pr_id)
+    if not cdir:
         return {}
-    return extract_signoff_meta(croot / pr_id / "report.html")
+    return extract_signoff_meta(cdir / "report.html")
 
 
 def build_return_record(pr: dict, verdict: str, hop: str, *,
@@ -1231,8 +1231,8 @@ def _step_lock(pr_id: str):
 
     Yields False when another driver still holds it after _STEP_LOCK_WAIT.
     """
-    from pm_core.paths import workdirs_base
-    with store.bounded_flock(workdirs_base() / f".signoff-step-{pr_id}.lock",
+    from pm_core.paths import workdir_locks_dir
+    with store.bounded_flock(workdir_locks_dir() / f".signoff-step-{pr_id}.lock",
                              _STEP_LOCK_WAIT) as held:
         yield held
 

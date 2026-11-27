@@ -131,15 +131,15 @@ def target_for(data: dict, pr: dict, root: Path | None = None) -> tuple[str, str
     base_branch = project.get("base_branch", "master")
     if project.get("backend") == "local":
         from pm_core.cli.helpers import _resolve_repo_dir, state_root
-        from pm_core.paths import workdirs_base
+        from pm_core.paths import workdirs_roots
         repo_dir = _resolve_repo_dir(root or state_root(), data)
         # Run from a PR workdir (a pm clone of the main repo), the clone's
         # own base branch is stale: the main repo is the clone's origin.
         # An unreachable origin stays the target so the fetch fails loudly
         # instead of checking against the clone's own stale branch.
         try:
-            in_workdirs = repo_dir.resolve().is_relative_to(
-                workdirs_base().resolve())
+            in_workdirs = any(repo_dir.resolve().is_relative_to(r.resolve())
+                              for r in workdirs_roots())
         except OSError:
             in_workdirs = False
         if in_workdirs:
@@ -397,9 +397,9 @@ def omitted_path_count(vals: list, total, omitted_from_list: int) -> int:
 
 
 def integration_json_path(pr_id: str) -> Path | None:
-    from pm_core.paths import captures_root
-    croot = captures_root()
-    return croot / pr_id / "integration.json" if croot else None
+    from pm_core.paths import host_pr_captures_dir
+    cdir = host_pr_captures_dir(pr_id)
+    return cdir / "integration.json" if cdir else None
 
 
 def integration_pointer(pr_id: str) -> str:

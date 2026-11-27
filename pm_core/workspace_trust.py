@@ -11,7 +11,8 @@ interface so the launcher (``claude_launcher``) stays the only place
 that knows which runtime is in use:
 
 * :func:`approved_path` — the narrow policy: only PM-created workdirs
-  (under ``~/.pm/workdirs``) and paths the user explicitly authorized
+  (under ``~/.pm/workdirs``, plus QA scenario scratch under
+  ``~/.pm/scratch/qa``) and paths the user explicitly authorized
   with ``pm trust add`` may be trusted automatically.  Nothing else is
   ever written; unknown workspaces keep their explicit prompt.
 * :class:`TrustRuntime` — per-runtime mechanics: ``bootstrap`` records
@@ -146,9 +147,30 @@ def remove_authorized_root(root: str) -> bool:
 
 
 def approved_roots() -> list[str]:
-    """Roots under which pm may establish workspace trust automatically."""
-    from pm_core.paths import workdirs_base
-    return [_real(workdirs_base())] + [_real(r) for r in authorized_roots()]
+    """Roots under which pm may establish workspace trust automatically.
+
+    pm's workdirs, and the QA scenarios' scratch: scratch used to live
+    inside the QA workdir (``<workdirs>/qa/<run>/s-N/scratch``), and moving
+    it onto local disk (``<scratch>/qa/<run>/s-N``) must not change which
+    of the dirs pm creates are trusted — a host-mode scenario's throwaway
+    test project there would otherwise stall at the prompt.
+    """
+    from pm_core.paths import qa_scratch_roots, workdirs_roots
+    pm_roots = [_real(r) for r in workdirs_roots() + qa_scratch_roots()]
+    # A pm location set to the home dir or above it (hand-written, or
+    # remembered as an earlier location) would approve every workspace;
+    # 'pm set workdirs-dir' refuses such a value.
+    return ([r for r in pm_roots if not covers_home(r)]
+            + [_real(r) for r in authorized_roots()])
+
+
+def covers_home(path: str | Path) -> bool:
+    """True when *path* is the home directory or one of its ancestors
+    (``/``, ``/home``): approving it would trust every workspace the user
+    has — the blanket trust pm deliberately avoids."""
+    home = str(Path.home())
+    p = os.path.abspath(os.path.expanduser(str(path)))
+    return is_within(home, p) or is_within(_real(home), _real(p))
 
 
 def approved_path(path: str | Path) -> bool:
@@ -458,7 +480,8 @@ def blocked_message(path: str, waited: float) -> str:
     return (
         f"Claude is waiting at the workspace-trust prompt for {where} "
         f"(visible {waited:.0f}s). pm only auto-trusts pm-created workdirs "
-        f"(~/.pm/workdirs) and paths authorized with `pm trust add`. "
+        f"and QA scenario scratch (`pm trust list` shows where) and paths "
+        f"authorized with `pm trust add`. "
         f"To proceed: run `pm trust add {path or '<path>'}` (or accept the "
         f"prompt in the pane), then restart this step."
     )

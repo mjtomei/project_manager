@@ -1896,15 +1896,15 @@ def pr_signoff_record(pr_id: str):
 
     from pm_core import signoff as signoff_mod
     from pm_core.behavior_report import _extract_verdict
-    from pm_core.paths import captures_root
+    from pm_core.paths import host_pr_captures_dir
 
     root = state_root()
     data = store.load(root)
     pr_entry = _require_pr(data, pr_id)
     pr_id = pr_entry["id"]
 
-    croot = captures_root()
-    report = croot / pr_id / "report.html" if croot else None
+    cdir = host_pr_captures_dir(pr_id)
+    report = cdir / "report.html" if cdir else None
     if report is None or not report.is_file():
         click.echo(
             f"PR {pr_id}: no report.html to approve — run "
@@ -2258,9 +2258,9 @@ def _pull_after_merge(data: dict, pr_entry: dict, repo_dir: str,
 def _publish_lock(data: dict):
     """Serialize pm publications into one repository (across PRs)."""
     import fcntl
-    from pm_core.paths import workdirs_base
+    from pm_core.paths import workdir_locks_dir
     repo_id = data["project"].get("repo_id", "")
-    path = workdirs_base() / f".publish-{repo_id}.lock"
+    path = workdir_locks_dir() / f".publish-{repo_id}.lock"
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w") as f:
         try:
@@ -2867,9 +2867,9 @@ def pr_merge(pr_id: str | None, resolve_window: bool | None, background: bool,
     # exception traceback keeps the fd alive, and a same-process second flock
     # on the same file blocks.
     import fcntl as _fcntl
-    from pm_core.paths import workdirs_base as _workdirs_base
+    from pm_core.paths import workdir_locks_dir as _workdir_locks_dir
     _repo_id = data["project"].get("repo_id", "")
-    _merge_lock_path = _workdirs_base() / f".merge-{_repo_id}-{pr_id}.lock"
+    _merge_lock_path = _workdir_locks_dir() / f".merge-{_repo_id}-{pr_id}.lock"
     _merge_lock_f = open(_merge_lock_path, "w")
     _fcntl.flock(_merge_lock_f.fileno(), _fcntl.LOCK_EX)
     try:
@@ -3309,7 +3309,9 @@ def _cleanup_pr(pr_entry: dict, root: Path, force: bool) -> bool:
 @click.option("--prune", is_flag=True, default=False, help="Clear workdir references for paths that no longer exist")
 @click.option("--resources", is_flag=True, default=False,
               help="Tear down live resources (tmux windows, QA containers, "
-                   "pane registry, push-proxy sockets) instead of the workdir")
+                   "pane registry, push-proxy sockets) instead of the "
+                   "workdir, then reclaim the container stores and image "
+                   "exports its QA scenarios left in scratch")
 def pr_cleanup(pr_id: str | None, force: bool, cleanup_all: bool, prune: bool,
                resources: bool):
     """Remove work directory for a PR.
@@ -3319,7 +3321,9 @@ def pr_cleanup(pr_id: str | None, force: bool, cleanup_all: bool, prune: bool,
     still has a workdir — the explicit step `pm pr close` points at.
     Use --all to clean up all PR workdirs at once.
     Use --prune to clear stale workdir references from project.yaml.
-    Use --resources to kill live tmux/docker/registry resources for a PR.
+    Use --resources to kill live tmux/docker/registry resources for a PR
+    and reclaim its scenarios' container stores and image exports
+    (see 'pm container reclaim').
     """
     root = state_root()
     data = store.load(root)
@@ -3335,7 +3339,8 @@ def pr_cleanup(pr_id: str | None, force: bool, cleanup_all: bool, prune: bool,
         from pm_core import pr_cleanup as pr_cleanup_mod
         from pm_core.loop_shared import get_pm_session
         session = get_pm_session()
-        summary = pr_cleanup_mod.cleanup_pr_resources(session, target)
+        summary = pr_cleanup_mod.cleanup_pr_resources(session, target,
+                                                      wait_reclaim=True)
         click.echo(f"Cleaned {target['id']}: {pr_cleanup_mod.format_summary(summary)}")
         if summary["windows"]:
             click.echo(f"  windows: {', '.join(summary['windows'])}")
@@ -3343,7 +3348,22 @@ def pr_cleanup(pr_id: str | None, force: bool, cleanup_all: bool, prune: bool,
             click.echo(f"  containers: {', '.join(summary['containers'])}")
         if summary["registry_windows"]:
             click.echo(f"  registry: {', '.join(summary['registry_windows'])}")
+        for scratch in summary.get("reclaim_busy") or []:
+            click.echo(f"  left {scratch} to another reclaim removing its "
+                       "stores right now")
+        failed = summary.get("reclaim_failed") or []
+        for path, err in failed:
+            click.echo(f"  could not reclaim {path}: {err}", err=True)
+        skipped = summary.get("skipped") or {}
+        if failed:
+            click.echo(f"Retry with 'pm container reclaim --pr {target['id']}' "
+                       "once the cause is fixed.", err=True)
+        elif skipped:
+            click.echo(f"Retry with 'pm pr cleanup --resources {target['id']}' "
+                       "once the container runtime works.", err=True)
         trigger_tui_refresh()
+        if failed or skipped:
+            raise SystemExit(1)
         return
 
     if prune:
@@ -4801,24 +4821,28 @@ def pr_dashboard(port: int | None, bind: str | None, do_open: bool):
     ``project.yaml`` + the captures dir on every ``/`` request, so a new
     sign-off report shows up on the next page load with no regeneration
     step. Per-PR ``report.html`` and its evidence siblings are served
-    straight from ``~/.pm/sessions/<tag>/captures/<pr_id>/``.
+    straight from the PR's captures dir (``pm qa captures-path <pr_id>``:
+    under ``captures-dir`` when set, else ``~/.pm/sessions/<tag>/captures``,
+    or wherever the PR's evidence began before that setting changed).
 
     Foreground / blocking. Ctrl-C shuts the server down.
     """
     from pm_core import dashboard_server
-    from pm_core.paths import captures_root
+    from pm_core.paths import captures_roots
 
     root = state_root()
-    # captures_root() creates the dir when a tag resolves, so croot exists
-    # by the time we get a non-None path back.
-    croot = captures_root()
-    if croot is None:
+    # captures_roots() creates the first root when a tag resolves, so it
+    # exists by the time we get a non-empty list back.  A second root is
+    # the default one when 'captures-dir' moved new evidence elsewhere.
+    croots = captures_roots()
+    if not croots:
         click.echo(
             "Could not resolve the captures root (not inside a git repo / no "
             "session tag?).", err=True)
         raise SystemExit(1)
     dashboard_server.serve(
-        pm_root=root, captures_root_dir=croot,
+        pm_root=root, captures_root_dir=croots[0],
+        fallback_roots=croots[1:],
         host=bind or dashboard_server.DEFAULT_BIND,
         port=port if port is not None else dashboard_server.DEFAULT_PORT,
         open_browser=do_open)

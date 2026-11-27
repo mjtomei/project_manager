@@ -1152,7 +1152,13 @@ def _ensure_workdir(data: dict, pr_entry: dict, root: Path) -> str | None:
     project_dir = _workdirs_dir(data)
     project_dir.mkdir(parents=True, exist_ok=True)
 
-    lock_path = project_dir / f".workdir-{pr_id}.lock"
+    # Beside the project's workdirs by default (workdir_locks_dir() is then
+    # the workdirs root); on local disk when 'workdirs-dir' moved them,
+    # possibly onto a NAS where flock is unreliable.
+    from pm_core.paths import workdir_locks_dir
+    lock_dir = workdir_locks_dir() / project_dir.name
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = lock_dir / f".workdir-{pr_id}.lock"
     lock_fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o644)
     try:
         fcntl.flock(lock_fd, fcntl.LOCK_EX)

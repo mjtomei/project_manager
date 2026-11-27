@@ -431,17 +431,62 @@ class TestQAWorkdirs:
         assert "qa" in str(wd)
         assert "pr-001-abc123" in str(wd)
 
-    def test_create_scenario_workdir(self, tmp_path):
-        d, scratch = create_scenario_workdir(tmp_path, 1)
+    def test_create_scenario_workdir(self, tmp_path, monkeypatch):
+        """Source goes under the run's workdir, scratch under the local
+        scratch root — never under the (possibly network) workdir."""
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path / "home")
+        qa_workdir = tmp_path / "pr-001-abc"
+        d, scratch = create_scenario_workdir(qa_workdir, 1)
         assert d.exists()
         assert d.name == "repo"
         assert d.parent.name == "s-1"
         assert scratch.exists()
-        assert scratch.name == "scratch"
-        assert scratch.parent.name == "s-1"
+        assert scratch == (tmp_path / "home" / ".pm" / "scratch" / "qa"
+                           / "pr-001-abc" / "s-1")
+        assert not (qa_workdir / "s-1" / "scratch").exists()
 
-    def test_create_scenario_workdir_with_clone(self, tmp_path):
-        """Clone mode creates repo + scratch under s-N/."""
+    def test_create_scenario_workdir_keeps_legacy_scratch(self, tmp_path,
+                                                         monkeypatch):
+        """A run started before scratch moved keeps the scratch dir its
+        container already mounts."""
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path / "home")
+        legacy = tmp_path / "run" / "s-2" / "scratch"
+        legacy.mkdir(parents=True)
+        _, scratch = create_scenario_workdir(tmp_path / "run", 2)
+        assert scratch == legacy
+
+    def test_create_scenario_workdir_honours_scratch_dir(self, tmp_path,
+                                                        monkeypatch):
+        from pm_core.paths import set_global_setting_value
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path / "home")
+        set_global_setting_value("scratch-dir", str(tmp_path / "fast"))
+        _, scratch = create_scenario_workdir(tmp_path / "run", 3)
+        assert scratch == tmp_path / "fast" / "qa" / "run" / "s-3"
+
+    def test_create_scenario_workdir_refuses_network_scratch(
+            self, tmp_path, monkeypatch):
+        """Scratch holds private container engines: on a NAS it is refused
+        with the setting that moves it, never silently used."""
+        import pytest as _pytest
+        from pm_core import paths
+        from pm_core.paths import NonLocalPathError, set_global_setting_value
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path / "home")
+        nas = tmp_path / "nas"
+        nas.mkdir()
+        set_global_setting_value("scratch-dir", str(nas / "scratch"))
+        mountinfo = tmp_path / "mountinfo"
+        mountinfo.write_text(
+            "1 0 0:1 / / rw - ext4 /dev/sda1 rw\n"
+            f"2 1 0:2 / {nas} rw - nfs4 nas:/export rw\n")
+        monkeypatch.setattr(paths, "_MOUNTINFO", str(mountinfo))
+        with _pytest.raises(NonLocalPathError) as exc:
+            create_scenario_workdir(tmp_path / "run", 1)
+        assert "scratch-dir" in str(exc.value)
+        assert "nfs4" in str(exc.value)
+
+    def test_create_scenario_workdir_with_clone(self, tmp_path, monkeypatch):
+        """Clone mode creates repo under s-N/ and scratch on local scratch."""
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path / "home")
         qa_workdir = tmp_path / "qa"
         qa_workdir.mkdir()
 
@@ -463,10 +508,10 @@ class TestQAWorkdirs:
         assert clone_path.name == "repo"
         assert clone_path.parent.name == "s-1"
         assert scratch.exists()
-        assert scratch.name == "scratch"
-        assert scratch.parent.name == "s-1"
+        assert scratch == (tmp_path / "home" / ".pm" / "scratch" / "qa"
+                           / "qa" / "s-1")
 
-    def test_clone_does_not_force_hardlinks(self, tmp_path):
+    def test_clone_does_not_force_hardlinks(self, tmp_path, monkeypatch):
         """The clone must not spell out ``--local``.
 
         With an explicit ``--local`` git dies with "failed to create link
@@ -475,6 +520,9 @@ class TestQAWorkdirs:
         user's project checkout); a plain path clone hardlinks when it
         can and copies otherwise.
         """
+        # The scenario scratch is created under the scratch root: keep it
+        # out of the real ~/.pm (or the user's configured scratch-dir).
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path / "home")
         qa_workdir = tmp_path / "qa"
         repo_root = tmp_path / "repo"
         repo_root.mkdir()
@@ -494,6 +542,142 @@ class TestQAWorkdirs:
         assert clone == [("clone", str(repo_root),
                           str(qa_workdir / "s-0" / "repo"),
                           "--branch", "master")]
+
+    @staticmethod
+    def _git_repo(path):
+        import subprocess as _sp
+        path.mkdir(parents=True)
+        import os as _os
+        env = {**_os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+               "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
+        _sp.run(["git", "init", "-q", "-b", "master", str(path)], check=True)
+        (path / "f.txt").write_text("x\n")
+        _sp.run(["git", "-C", str(path), "add", "f.txt"], check=True, env=env)
+        _sp.run(["git", "-C", str(path), "commit", "-q", "-m", "c"],
+                check=True, env=env)
+
+    @staticmethod
+    def _object_link_counts(repo):
+        objs = repo / ".git" / "objects"
+        return {p.stat().st_nlink for p in objs.glob("??/*")}
+
+    def test_clone_on_network_storage_copies_objects(self, tmp_path,
+                                                     monkeypatch):
+        """With ``workdirs-dir`` on a NAS the PR workdir and the run's
+        checkouts share that filesystem, so git hard-links the objects —
+        and on sshfs (inode numbers made up per path) dies with "hardlink
+        different from source" for every scenario (QA S6 of pr-abc1124).
+        On network storage the objects are copied; locally they stay
+        hard-linked."""
+        from pm_core import paths
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path / "home")
+        nas = tmp_path / "nas"
+        self._git_repo(nas / "pr-workdir")
+        mountinfo = tmp_path / "mountinfo"
+        mountinfo.write_text(
+            "1 0 0:1 / / rw - ext4 /dev/sda1 rw\n"
+            f"2 1 0:2 / {nas} rw - fuse.sshfs nas:/export rw\n")
+        monkeypatch.setattr(paths, "_MOUNTINFO", str(mountinfo))
+        with patch("pm_core.push_proxy.resolve_real_origin",
+                   return_value=None):
+            clone, _ = create_scenario_workdir(
+                nas / "qa" / "run", 1, repo_root=nas / "pr-workdir",
+                branch="master")
+            assert (clone / "f.txt").read_text() == "x\n"
+            assert self._object_link_counts(clone) == {1}
+
+            # Control: the same clone on local disk keeps the hard links.
+            mountinfo.write_text("1 0 0:1 / / rw - ext4 /dev/sda1 rw\n")
+            local, _ = create_scenario_workdir(
+                nas / "qa" / "run", 2, repo_root=nas / "pr-workdir",
+                branch="master")
+            assert self._object_link_counts(local) == {2}
+
+    def test_clone_failure_names_git_error(self, tmp_path, monkeypatch):
+        """A failed clone says why: the scenario's verdict reason and the
+        log line used to carry only "returned non-zero exit status 128"."""
+        import subprocess as _sp
+        import pytest as _pytest
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path / "home")
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        err = _sp.CalledProcessError(
+            128, ["git", "clone"],
+            stderr="fatal: hardlink different from source at 'x'\n")
+        with patch("pm_core.git_ops.run_git", side_effect=err):
+            with _pytest.raises(RuntimeError) as exc:
+                create_scenario_workdir(tmp_path / "qa", 1,
+                                        repo_root=repo_root, branch="b")
+        assert "hardlink different from source" in str(exc.value)
+        assert "rc 128" in str(exc.value)
+
+
+    def test_clone_failure_leads_with_git_error(self, tmp_path, monkeypatch):
+        """git's last fatal:/error: line comes first and its "Cloning into"
+        progress line is dropped; the paths follow (QA S12 of pr-abc1124:
+        with the paths first, git's error started ~300 columns in and no
+        on-screen surface showed it)."""
+        import subprocess as _sp
+        import pytest as _pytest
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path / "home")
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        err = _sp.CalledProcessError(
+            128, ["git", "clone"],
+            stderr=("Cloning into '/q/s-1/repo'...\n"
+                    "warning: something odd\n"
+                    "fatal: failed to copy file to '/q/s-1/repo/.git/objects/"
+                    "ab/cd': Permission denied\n"))
+        with patch("pm_core.git_ops.run_git", side_effect=err):
+            with _pytest.raises(RuntimeError) as exc:
+                create_scenario_workdir(tmp_path / "qa", 1,
+                                        repo_root=repo_root, branch="b")
+        msg = str(exc.value)
+        assert msg.startswith(
+            "git clone failed (rc 128): fatal: failed to copy file to "
+            "'/q/s-1/repo/.git/objects/ab/cd': Permission denied — cloning "
+            f"{repo_root} into ")
+        assert "Cloning into" not in msg
+        assert msg.endswith("; git also said: warning: something odd")
+        assert "\n" not in msg
+
+    def test_clone_of_unreadable_object_on_nas_names_git_error(
+            self, tmp_path, monkeypatch):
+        """Real git: an object on the share the user cannot read fails the
+        copying (network-storage) clone, and the reason leads with git's
+        own "Permission denied" line."""
+        import os as _os
+        import pytest as _pytest
+        if _os.geteuid() == 0:
+            _pytest.skip("root reads a mode-000 file")
+        from pm_core import paths
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path / "home")
+        nas = tmp_path / "nas"
+        src = nas / "pr-workdir"
+        self._git_repo(src)
+        import subprocess as _sp
+        blob = _sp.run(["git", "-C", str(src), "rev-parse", "HEAD:f.txt"],
+                       check=True, capture_output=True,
+                       text=True).stdout.strip()
+        obj = src / ".git" / "objects" / blob[:2] / blob[2:]
+        mountinfo = tmp_path / "mountinfo"
+        mountinfo.write_text(
+            "1 0 0:1 / / rw - ext4 /dev/sda1 rw\n"
+            f"2 1 0:2 / {nas} rw - fuse.sshfs nas:/export rw\n")
+        monkeypatch.setattr(paths, "_MOUNTINFO", str(mountinfo))
+        obj.chmod(0)
+        try:
+            with patch("pm_core.push_proxy.resolve_real_origin",
+                       return_value=None):
+                with _pytest.raises(RuntimeError) as exc:
+                    create_scenario_workdir(nas / "qa" / "run", 1,
+                                            repo_root=src, branch="master")
+        finally:
+            obj.chmod(0o444)
+        msg = str(exc.value)
+        assert msg.startswith("git clone failed (rc 128): fatal: "), msg
+        assert "Permission denied" in msg.split(" — cloning ")[0]
+        assert "Cloning into" not in msg
 
 
 class TestQALoopState:
@@ -2022,6 +2206,8 @@ class TestScenarioRetryLogic:
         from pm_core import qa_loop
         clone = tmp_path / "s-5" / "repo"
         clone.mkdir(parents=True)
+        # The scenario's scratch (legacy layout: this run predates the move).
+        (tmp_path / "s-5" / "scratch").mkdir()
         sc = QAScenario(index=5, title="S78 one", focus="f")
         sc.window_name = "qa-pr-001-s5"
         sc.worktree_path = str(clone)

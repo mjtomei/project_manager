@@ -86,6 +86,14 @@ RUN printf 'pm:1:999\npm:1001:64535\n' > /etc/subuid && \
 # Configure Podman for nested container use. Use overlay + fuse-overlayfs
 # (requires --device /dev/fuse on the outer container, gated by the
 # project-level nested_podman setting in pm_core/container.py).
+# This system config only sets the driver for engines without a user config.
+# When pm launches a container with the shared image cache
+# (pm_core/image_cache.py) it also writes the default user's
+# ~/.config/containers/storage.conf: rootless podman honours
+# additionalimagestores (the read-only cache mounted at
+# /var/lib/pm-image-cache) only from the user config, and an explicit
+# --root drops this file's mount_program.  Never switch these to vfs: vfs
+# copies every parent layer (a ~2 GB image becomes a ~17 GB store).
 RUN mkdir -p /etc/containers && \
     printf '[storage]\ndriver = "overlay"\n[storage.options.overlay]\nmount_program = "/usr/bin/fuse-overlayfs"\n' > /etc/containers/storage.conf && \
     printf '[containers]\nnetns = "host"\n' > /etc/containers/containers.conf

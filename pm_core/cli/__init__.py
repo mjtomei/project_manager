@@ -22,6 +22,7 @@ import click
 from pm_core import store, git_ops, prompt_gen
 from pm_core.backend import detect_backend
 from pm_core.providers import PROVIDER_SETTING_HINT, ProviderNotFoundError
+from pm_core.paths import PATH_SETTINGS
 from pm_core.workspace_trust import DEFAULT_PROMPT_GRACE_SECONDS
 
 # Import helpers used directly in this module.  Submodules import from
@@ -264,7 +265,10 @@ _INT_SETTINGS = {"min-pane-width", "mobile-width-threshold",
                  "qa-max-scenarios", "qa-verify-retries",
                  "qa-verdict-reminder-timeout", "trust-prompt-grace-seconds"}
 _ENUM_SETTINGS = {"spec-mode": {"auto", "review", "prompt"},
-                  "container-runtime": {"docker", "podman"}}
+                  "container-runtime": {"docker", "podman"},
+                  "container-image-cache": {"auto", "on", "off"}}
+# Absolute directory paths; 'default' clears them (see pm_core.paths).
+_PATH_SETTINGS = set(PATH_SETTINGS)
 _SETTING_DEFAULTS = {
     "hide-assist": "off",
     "hide-merged": "off",
@@ -278,14 +282,28 @@ _SETTING_DEFAULTS = {
     "qa-verdict-reminder-timeout": "(unset)",
     "trust-prompt-grace-seconds": str(DEFAULT_PROMPT_GRACE_SECONDS),
     "spec-mode": "prompt",
+    "container-image-cache": "auto",
+    "workdirs-dir": "~/.pm/workdirs",
+    "captures-dir": "~/.pm/sessions/<tag>/captures",
+    "scratch-dir": "~/.pm/scratch",
+    "image-cache-dir": "~/.pm/image-cache",
 }
 _LIST_ALIASES = {"list", "ls", "l"}
 
 
 def _list_settings():
     """Print all settings and their current values."""
-    from pm_core.paths import get_global_setting, get_global_setting_value
-    all_settings = sorted(_BOOLEAN_SETTINGS | _INT_SETTINGS | set(_ENUM_SETTINGS))
+    import os
+    from pm_core.paths import (IMAGE_CACHE_DIR_SETTING, SCRATCH_DIR_SETTING,
+                               WORKDIRS_DIR_SETTING, configured_dir,
+                               earlier_dirs, get_global_setting,
+                               get_global_setting_value, pm_home)
+    all_settings = sorted(_BOOLEAN_SETTINGS | _INT_SETTINGS
+                          | set(_ENUM_SETTINGS) | _PATH_SETTINGS)
+    # Default locations an earlier value may alias (captures-dir's default
+    # is per session tag, never the shape of a captures-dir value).
+    default_dirs = {WORKDIRS_DIR_SETTING: pm_home() / "workdirs",
+                    SCRATCH_DIR_SETTING: pm_home() / "scratch"}
     width = max(map(len, all_settings))
     for name in all_settings:
         if name in _BOOLEAN_SETTINGS:
@@ -296,6 +314,18 @@ def _list_settings():
         default = _SETTING_DEFAULTS.get(name, "")
         marker = " (default)" if val == default else ""
         click.echo(f"  {name:<{width}} {val}{marker}")
+        if name in _PATH_SETTINGS and name != IMAGE_CACHE_DIR_SETTING:
+            # What pm still searches besides the current value (and the
+            # default); it stops once the directory is gone.  An earlier
+            # image cache is only emptied ('pm container cache gc').  A
+            # spelling of the current location (a symlink to it) is that
+            # location, not an earlier one (paths._existing_roots).
+            current = configured_dir(name) or default_dirs.get(name)
+            current_real = os.path.realpath(current) if current else None
+            for d in earlier_dirs(name):
+                if d.is_dir() and os.path.realpath(d) != current_real:
+                    click.echo(f"  {'':<{width}}   earlier, still searched: "
+                               f"{d}")
 
 
 @cli.command("set")
@@ -337,6 +367,30 @@ def set_cmd(setting, value):
                                   workspace-trust prompt before pm fails it (default 120)
 
       spec-mode            Spec generation mode: auto, review, or prompt (default: prompt)
+
+      container-image-cache  Shared read-only image cache for nested container
+                             engines: auto (default; on for nested_podman
+                             projects on a podman host), on, or off
+
+    Location settings (absolute paths; 'default' restores the default).
+    Changing one affects paths created afterwards; nothing is migrated, and
+    pm keeps finding what began in an earlier location while it exists:
+
+      workdirs-dir     PR, meta and QA source workdirs (may be network storage).
+                       pm trusts everything under it, so it may not be your
+                       home directory or a parent of it
+
+      captures-dir     Retained QA/review evidence, as <dir>/<session-tag>/<pr>
+                       (may be network storage). A PR whose evidence already
+                       exists in the old location keeps using it; move that
+                       PR's dir by hand to switch it
+
+      scratch-dir      QA scenario scratch and private container engines
+                       (must be local disk)
+
+      image-cache-dir  Shared image cache (must be local disk). Entries left
+                       in an earlier location are evicted once no container
+                       uses them ('pm container cache gc')
     """
     if setting in _LIST_ALIASES:
         _list_settings()
@@ -344,7 +398,8 @@ def set_cmd(setting, value):
     if value is None:
         raise click.UsageError("Missing argument 'VALUE'.")
     from pm_core.paths import set_global_setting, set_global_setting_value
-    known = _BOOLEAN_SETTINGS | _INT_SETTINGS | set(_ENUM_SETTINGS)
+    known = (_BOOLEAN_SETTINGS | _INT_SETTINGS | set(_ENUM_SETTINGS)
+             | _PATH_SETTINGS)
     if setting not in known:
         click.echo(f"Unknown setting: {setting}", err=True)
         click.echo(f"Available: {', '.join(sorted(known))}", err=True)
@@ -360,6 +415,39 @@ def set_cmd(setting, value):
             click.echo(f"Setting '{setting}' takes one of: {', '.join(sorted(valid))}", err=True)
             raise SystemExit(1)
         set_global_setting_value(setting, value)
+    elif setting in _PATH_SETTINGS:
+        import os
+        from pathlib import Path
+        from pm_core.paths import (LOCAL_ONLY_PATH_SETTINGS, NonLocalPathError,
+                                   require_local_path, set_path_setting)
+        if value == "default":
+            set_path_setting(setting, None)
+            click.echo(f"{setting} = {_SETTING_DEFAULTS.get(setting)} (default)")
+            return
+        path = Path(os.path.expanduser(value))
+        if not path.is_absolute():
+            click.echo(f"Setting '{setting}' takes an absolute path "
+                       f"(or 'default')", err=True)
+            raise SystemExit(1)
+        if setting in LOCAL_ONLY_PATH_SETTINGS:
+            try:
+                require_local_path(path, setting, setting)
+            except NonLocalPathError as exc:
+                click.echo(f"Error: {exc}", err=True)
+                raise SystemExit(1)
+        from pm_core.paths import WORKDIRS_DIR_SETTING
+        from pm_core.workspace_trust import covers_home
+        if setting == WORKDIRS_DIR_SETTING and covers_home(path):
+            # pm trusts everything under its workdirs root automatically
+            # (and keeps trusting an earlier one while it exists).
+            click.echo(f"Error: refusing {setting} = {path}: pm "
+                       f"automatically trusts everything under its workdirs "
+                       f"root, and that would include your whole home "
+                       f"directory. Pick a dedicated directory, e.g. "
+                       f"{path / 'pm-workdirs'}", err=True)
+            raise SystemExit(1)
+        set_path_setting(setting, path)
+        value = str(path)
     elif setting in _INT_SETTINGS:
         try:
             int(value)

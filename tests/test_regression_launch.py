@@ -123,6 +123,12 @@ def _qa_workdirs(home: Path) -> list[Path]:
     return sorted(d.iterdir()) if d.is_dir() else []
 
 
+def _qa_scratch(home: Path) -> list[Path]:
+    """Runs' scratch dirs, which live apart from the QA workdirs."""
+    d = home / ".pm" / "scratch" / "qa"
+    return sorted(d.iterdir()) if d.is_dir() else []
+
+
 def _run_captures(home: Path) -> list[Path]:
     return sorted((home / ".pm" / "sessions").rglob("prompt.md"))
 
@@ -160,7 +166,8 @@ def test_host_run_is_isolated_and_needs_no_pm_session(project, home,
     (workdir,) = _qa_workdirs(home)
     assert workdir.name.startswith("regression-demo-")
     clone = workdir / "s-0" / "repo"
-    scratch = workdir / "s-0" / "scratch"
+    # Scratch lives on the local scratch root, apart from the source.
+    scratch = home / ".pm" / "scratch" / "qa" / workdir.name / "s-0"
     # A real clone of the project's base branch at its current commit.
     assert _git(clone, "rev-parse", "HEAD") == project.head
     assert _git(clone, "rev-parse", "--abbrev-ref", "HEAD") == "master"
@@ -252,7 +259,8 @@ def test_container_run_uses_a_qa_container(project, home, monkeypatch):
     run_id = workdir.name.removeprefix("regression-demo-")
     kw = spies.create.call_args.kwargs
     assert kw["workdir"] == workdir / "s-0" / "repo"
-    assert kw["scratch_path"] == workdir / "s-0" / "scratch"
+    assert kw["scratch_path"] == (home / ".pm" / "scratch" / "qa"
+                                  / workdir.name / "s-0")
     # Mounts only this run's captures dir, never captures/regression/.
     assert kw["pr_id"] == f"regression/demo/{run_id}"
     assert kw["allowed_push_branch"] is None
@@ -523,9 +531,11 @@ def test_container_create_failure_launches_nothing(project, home):
     spies.build.assert_not_called()
     spies.execvpe.assert_not_called()
     # A run that never launched leaves no evidence of one: no captures dir
-    # with a prompt, and this run's own workdir/clone is gone.
+    # with a prompt, and this run's own workdir/clone and scratch (with the
+    # recipes copied into it) are gone.
     assert _run_captures(home) == []
     assert _qa_workdirs(home) == []
+    assert _qa_scratch(home) == []
     assert _clone_overrides(home) == []
 
 
@@ -586,6 +596,7 @@ def test_missing_branch_is_a_clean_error(project, home):
     assert "Could not clone 'nope'" in result.output
     spies.execvpe.assert_not_called()
     assert _qa_workdirs(home) == []
+    assert _qa_scratch(home) == []
     assert _run_captures(home) == []
 
 

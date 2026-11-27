@@ -749,6 +749,20 @@ def test_restart_ends_only_this_images_snapshotless_runs(home):
     assert qa_loop.read_run_record(done)["ended_at"] == 5.0
 
 
+def test_restart_ends_a_run_left_in_the_old_workdirs_root(home):
+    """A run started before 'workdirs-dir' moved stays in the old root
+    (nothing is migrated); the restart still ends it when it died."""
+    from pm_core import paths
+    lost = _own_run(home, loop_id="lost")
+    paths.set_global_setting_value("workdirs-dir", str(home / "elsewhere"))
+    assert not lost.is_relative_to(paths.qa_workdirs_root())
+
+    ended = qa_loop.end_runs_orphaned_by_restart([])
+
+    assert [wd for wd, _ in ended] == [lost]
+    assert qa_loop.read_run_record(lost)["ended_at"]
+
+
 def test_a_reqa_rerun_killed_by_a_plain_restart_starts_again_once(tmp_path,
                                                                     home):
     """The S131 repro: the TUI routed the REQA and started the owed re-run

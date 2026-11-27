@@ -19,6 +19,7 @@ import subprocess
 import tempfile
 import time
 from pathlib import Path
+from typing import NamedTuple
 
 # Cache for session tags to avoid repeated subprocess calls
 _session_tag_cache: dict[str, str | None] = {}
@@ -61,11 +62,362 @@ def debug_dir() -> Path:
     return d
 
 
+# ---------------------------------------------------------------------------
+# Configurable locations
+#
+# Source workdirs and retained evidence may live on network storage (a NAS);
+# scratch, the shared image cache and container storage must stay on local
+# disk.  Each location is a global setting holding an absolute path
+# (``pm set <name> <path>``); unset means the default under ~/.pm.  Changing
+# a setting affects paths created afterwards — nothing is migrated.
+# ---------------------------------------------------------------------------
+
+WORKDIRS_DIR_SETTING = "workdirs-dir"
+CAPTURES_DIR_SETTING = "captures-dir"
+SCRATCH_DIR_SETTING = "scratch-dir"
+IMAGE_CACHE_DIR_SETTING = "image-cache-dir"
+
+# Settings whose location may be a NAS, and those that must be local.
+NETWORK_OK_PATH_SETTINGS = (WORKDIRS_DIR_SETTING, CAPTURES_DIR_SETTING)
+LOCAL_ONLY_PATH_SETTINGS = (SCRATCH_DIR_SETTING, IMAGE_CACHE_DIR_SETTING)
+PATH_SETTINGS = NETWORK_OK_PATH_SETTINGS + LOCAL_ONLY_PATH_SETTINGS
+
+
+def configured_dir(setting: str) -> Path | None:
+    """The absolute directory a path *setting* names, or None when unset.
+
+    ``~`` is expanded; a relative value (which ``pm set`` refuses) is taken
+    relative to the home directory rather than the caller's cwd.
+    """
+    raw = get_global_setting_value(setting, "")
+    if not raw:
+        return None
+    p = Path(os.path.expanduser(raw))
+    if not p.is_absolute():
+        p = Path.home() / p
+    return p
+
+
+# Earlier configured values of each path setting, most recent first: one
+# absolute path per line in ``~/.pm/settings/<setting>.earlier``.
+_EARLIER_SUFFIX = ".earlier"
+_EARLIER_MAX = 20
+
+
+def earlier_dirs(setting: str) -> list[Path]:
+    """Directories path *setting* named before its current value, most
+    recent first, as recorded by :func:`set_path_setting`.
+
+    Nothing is migrated when a location setting changes, so what was
+    created under an earlier location (an in-flight run's scenario
+    scratch, QA runs, evidence) stays there.  The roots functions
+    (:func:`workdirs_roots`, :func:`qa_scratch_roots`,
+    :func:`captures_roots`) keep searching these, like the default
+    location, as long as they exist.
+    """
+    f = pm_home() / "settings" / f"{setting}{_EARLIER_SUFFIX}"
+    try:
+        lines = f.read_text().splitlines()
+    except OSError:
+        return []
+    out: list[Path] = []
+    for line in lines:
+        line = line.strip()
+        if line and os.path.isabs(line) and Path(line) not in out:
+            out.append(Path(line))
+    return out
+
+
+def set_path_setting(setting: str, value: Path | str | None) -> None:
+    """Set path *setting* to the absolute *value* (None: back to the
+    default), remembering the location it configured until now in
+    :func:`earlier_dirs` so what began there is still found.  The default
+    location is always searched, so only configured values are kept."""
+    old = configured_dir(setting)
+    new = Path(value) if value is not None else None
+    earlier = [p for p in earlier_dirs(setting) if p not in (old, new)]
+    if old is not None and old != new:
+        earlier.insert(0, old)
+    d = pm_home() / "settings"
+    d.mkdir(parents=True, exist_ok=True)
+    f = d / f"{setting}{_EARLIER_SUFFIX}"
+    if earlier:
+        f.write_text("".join(f"{p}\n" for p in earlier[:_EARLIER_MAX]))
+    else:
+        f.unlink(missing_ok=True)
+    if new is None:
+        (d / setting).unlink(missing_ok=True)
+    else:
+        set_global_setting_value(setting, str(new))
+
+
+def _existing_roots(first: Path, candidates: list[Path]) -> list[Path]:
+    """*first*, then each existing directory of *candidates* not already
+    listed, in order.
+
+    Compared by real path: another spelling of a listed root (a symlink to
+    it, e.g. a ``~/.pm/workdirs`` symlinked to the NAS dir ``workdirs-dir``
+    now names, or a value with ``..``) is that root.  Listed twice, every
+    run, scratch dir and report in it was found twice, and the TUI's resume
+    scan dropped a run's only snapshot as superseded by itself.
+    """
+    roots = [first]
+    seen = {os.path.realpath(first)}
+    for c in candidates:
+        real = os.path.realpath(c)
+        if real not in seen and c.is_dir():
+            seen.add(real)
+            roots.append(c)
+    return roots
+
+
 def workdirs_base() -> Path:
-    """Return the workdirs base directory (~/.pm/workdirs/)."""
+    """Return the workdirs base directory.
+
+    ``~/.pm/workdirs/`` unless the ``workdirs-dir`` setting names another
+    location (which may be a NAS).  Scratch never lives here — see
+    :func:`scratch_base`.
+    """
+    d = configured_dir(WORKDIRS_DIR_SETTING) or (pm_home() / "workdirs")
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def workdirs_roots() -> list[Path]:
+    """Every root holding pm-created workdirs.
+
+    :func:`workdirs_base` plus, when ``workdirs-dir`` moved it, each
+    earlier location it named (:func:`earlier_dirs`) and the default
+    ``~/.pm/workdirs`` that still exist: workdirs created before a change
+    stay where they are (nothing is migrated) and are still pm's own
+    clones — for workspace trust and for recognising a PR clone.
+    """
+    return _existing_roots(
+        workdirs_base(),
+        earlier_dirs(WORKDIRS_DIR_SETTING) + [pm_home() / "workdirs"])
+
+
+def workdir_locks_dir() -> Path:
+    """Return the directory for pm's cross-process workdir lock files.
+
+    Always the default workdirs root ``~/.pm/workdirs``, where these locks
+    have always lived — also when ``workdirs-dir`` moves source workdirs
+    elsewhere, possibly onto a NAS, where flock is emulated or unsupported
+    and can hang while the share stalls.
+    """
     d = pm_home() / "workdirs"
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def qa_workdirs_root() -> Path:
+    """Return the root of QA run workdirs (``<workdirs>/qa``).
+
+    Not created here: readers glob it and treat a missing root as "no runs".
+    """
+    return workdirs_base() / "qa"
+
+
+def qa_workdirs_roots() -> list[Path]:
+    """Every root that may hold QA run workdirs (``<root>/qa`` for each of
+    :func:`workdirs_roots`).
+
+    New runs are created under :func:`qa_workdirs_root`; code that looks
+    for *existing* runs (resume, orphan ending, the latest status, scenario
+    numbering, reclaim) scans all of these, so a run started before
+    ``workdirs-dir`` moved — which stays where it is — is still found.
+    Not created here.
+    """
+    return [root / "qa" for root in workdirs_roots()]
+
+
+def scratch_base() -> Path:
+    """Return the local scratch root (``~/.pm/scratch/`` by default).
+
+    Throwaway test projects, private container engines and build scratch
+    live here, separate from source workdirs, so configuring workdirs onto a
+    NAS never moves container storage there.  Locality is checked where
+    scratch is created (:func:`require_local_path`).
+    """
+    d = configured_dir(SCRATCH_DIR_SETTING) or (pm_home() / "scratch")
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def qa_scratch_root() -> Path:
+    """Return the root of QA runs' local scratch (``<scratch>/qa``).
+
+    Holds one ``<run>/s-N`` dir per scenario, where ``<run>`` is the QA
+    run workdir's name.  New scenarios get their scratch below this root
+    (see :func:`qa_scratch_roots` for older ones).  Not created here.
+    """
+    return scratch_base() / "qa"
+
+
+def qa_scratch_roots() -> list[Path]:
+    """Every root that may hold QA scenario scratch, :func:`qa_scratch_root`
+    first.
+
+    The ``qa`` dirs of each earlier ``scratch-dir`` location
+    (:func:`earlier_dirs`) and of the default ``~/.pm/scratch`` follow when
+    they still exist: scenarios begun before a change keep their scratch
+    there (nothing is migrated) — for their relaunches, workspace trust and
+    reclaim.  Not created here.
+    """
+    return _existing_roots(
+        qa_scratch_root(),
+        [d / "qa" for d in earlier_dirs(SCRATCH_DIR_SETTING)]
+        + [pm_home() / "scratch" / "qa"])
+
+
+def run_scratch_dir(qa_workdir: Path) -> Path:
+    """Return the local scratch dir of a *new* QA run at *qa_workdir*
+    (``<scratch>/qa/<run>``); its scenarios' scratch dirs live below it.
+    Existing scenarios are found with :func:`scenario_scratch_dir`.  Not
+    created here."""
+    return qa_scratch_root() / Path(qa_workdir).name
+
+
+def scenario_scratch_dir(qa_workdir: Path, scenario_index: int) -> Path:
+    """Return the scratch dir of scenario *scenario_index* of a QA run.
+
+    An existing dir is kept wherever it is, so a scenario's relaunched
+    container mounts — and its prompt names — the scratch it started with:
+    the legacy ``{qa_workdir}/s-N/scratch`` (runs from before scratch moved
+    out of the workdir), else ``<root>/<run>/s-N`` in the first of
+    :func:`qa_scratch_roots` holding it (``scratch-dir`` changed during the
+    run).  A new scenario gets ``<scratch>/qa/<run>/s-N`` on local disk.
+    Not created here.
+    """
+    qa_workdir = Path(qa_workdir)
+    legacy = qa_workdir / f"s-{scenario_index}" / "scratch"
+    if legacy.is_dir():
+        return legacy
+    dirs = [root / qa_workdir.name / f"s-{scenario_index}"
+            for root in qa_scratch_roots()]
+    return next((d for d in dirs if d.is_dir()), dirs[0])
+
+
+# Filesystem types that are network storage.  Container storage, runtime
+# dirs, the image cache and scratch must not be on any of these: rootless
+# overlay/fuse-overlayfs, sub-UID ownership and lock files are unreliable or
+# unsupported there, and every layer write would cross the network.
+NETWORK_FILESYSTEM_TYPES = frozenset({
+    "nfs", "nfs4", "cifs", "smb", "smb2", "smb3", "smbfs", "9p", "ceph",
+    "glusterfs", "lustre", "afs", "gpfs", "beegfs", "davfs", "ncpfs",
+    "coda", "ocfs2", "gfs2", "orangefs", "pvfs2",
+    "fuse.sshfs", "fuse.rclone", "fuse.s3fs", "fuse.gcsfuse",
+    "fuse.glusterfs", "fuse.cephfs", "fuse.ceph", "fuse.davfs2",
+    "fuse.goofys", "fuse.juicefs", "fuse.seaweedfs",
+})
+
+_MOUNTINFO = "/proc/self/mountinfo"
+
+
+def _unescape_mount_path(field: str) -> str:
+    """Decode the octal escapes (``\\040`` etc.) mountinfo uses."""
+    out, i = [], 0
+    while i < len(field):
+        if (field[i] == "\\" and i + 4 <= len(field)
+                and field[i + 1:i + 4].isdigit()):
+            out.append(chr(int(field[i + 1:i + 4], 8)))
+            i += 4
+        else:
+            out.append(field[i])
+            i += 1
+    return "".join(out)
+
+
+class MountEntry(NamedTuple):
+    """One line of a ``mountinfo`` table (the fields pm uses)."""
+    mount_point: str   # unescaped
+    options: str       # per-mount options, e.g. "ro,relatime"
+    fstype: str        # "" when the line has no "-" separator
+
+
+def read_mountinfo(table: str | None = None) -> list[MountEntry] | None:
+    """Parse a ``mountinfo`` table (default ``/proc/self/mountinfo``), in
+    file order — a later entry over-mounts an earlier one at the same
+    point.  Malformed lines are skipped; None when the table is
+    unreadable."""
+    try:
+        lines = Path(table or _MOUNTINFO).read_text().splitlines()
+    except OSError:
+        return None
+    out = []
+    for line in lines:
+        parts = line.split()
+        if len(parts) < 6:
+            continue
+        try:
+            fstype = parts[parts.index("-", 6) + 1]
+        except (ValueError, IndexError):
+            fstype = ""
+        out.append(MountEntry(_unescape_mount_path(parts[4]), parts[5],
+                              fstype))
+    return out
+
+
+def filesystem_type(path: Path | str) -> str | None:
+    """Return the filesystem type the (possibly not yet existing) *path* is on.
+
+    Resolves the deepest existing ancestor and picks the longest mount point
+    containing it from ``/proc/self/mountinfo``.  Returns None when the
+    mount table cannot be read.
+    """
+    p = Path(os.path.abspath(os.path.expanduser(str(path))))
+    while not p.exists() and p != p.parent:
+        p = p.parent
+    try:
+        real = os.path.realpath(p)
+    except OSError:
+        real = str(p)
+    entries = read_mountinfo()
+    if entries is None:
+        return None
+    best_len, best_type = -1, None
+    for m in entries:
+        if not m.fstype:
+            continue
+        if m.mount_point != "/" and not (
+                real == m.mount_point
+                or real.startswith(m.mount_point + "/")):
+            continue
+        # Later lines over-mount earlier ones at the same point.
+        if len(m.mount_point) >= best_len:
+            best_len, best_type = len(m.mount_point), m.fstype
+    return best_type
+
+
+def is_network_filesystem(path: Path | str) -> bool:
+    """True when *path* is on a network filesystem (NFS, SMB, sshfs, …)."""
+    fstype = filesystem_type(path)
+    return bool(fstype) and fstype.lower() in NETWORK_FILESYSTEM_TYPES
+
+
+class NonLocalPathError(ValueError):
+    """A location that must be on local disk is on network storage."""
+
+
+def require_local_path(path: Path | str, purpose: str,
+                       setting: str | None = None) -> None:
+    """Raise :class:`NonLocalPathError` when *path* is on network storage.
+
+    *purpose* names what would live there ("QA scratch", "the image cache",
+    "container storage"); *setting* is the ``pm set`` name that relocates it.
+    """
+    if not is_network_filesystem(path):
+        return
+    fstype = filesystem_type(path)
+    remedy = (f"set '{setting}' to a directory on local disk "
+              f"(pm set {setting} <local-path>)" if setting
+              else "use a directory on local disk")
+    raise NonLocalPathError(
+        f"{purpose} must be on local disk, but {path} is on a network "
+        f"filesystem ({fstype}). Container storage, runtime dirs, the image "
+        f"cache and scratch are kept local; only source workdirs "
+        f"('{WORKDIRS_DIR_SETTING}') and evidence ('{CAPTURES_DIR_SETTING}') "
+        f"may live on network storage. To fix: {remedy}.")
 
 
 def _resolve_session_tag(start_path: Path | None = None) -> str | None:
@@ -98,9 +450,13 @@ def captures_dir(pr_id: str,
     surface (host orchestrator, scenario container, bug-fix flow
     session, review pane, CLI). Resolution:
 
-    1. The host path ``~/.pm/sessions/<tag>/captures/<pr_id>/`` if it
-       already exists. ``tag`` is *session_tag* if supplied, else the
-       tmux-derived tag, else the cwd-derived tag.
+    1. The host path ``~/.pm/sessions/<tag>/captures/<pr_id>/`` (or
+       ``<captures-dir>/<tag>/<pr_id>/``) if it already exists. ``tag`` is
+       *session_tag* if supplied, else the tmux-derived tag, else the
+       cwd-derived tag. When ``captures-dir`` changed and only an earlier
+       location (or the default) holds the PR's dir — evidence from before
+       the change, which is not migrated — that dir is used, so one PR's
+       evidence never splits across two places.
     2. Otherwise the container bind-mount at
        :data:`CONTAINER_CAPTURES_MOUNT` if it exists and belongs to
        *pr_id*: the container's :data:`CAPTURES_PR_ENV` names the mounted
@@ -126,9 +482,12 @@ def captures_dir(pr_id: str,
         session_tag = _resolve_session_tag(start_path)
     host_path: Path | None = None
     if session_tag:
-        host_path = sessions_dir() / session_tag / "captures" / pr_id
+        host_path = _captures_root_for_tag(session_tag) / pr_id
         if host_path.is_dir():
             return host_path
+        for earlier in _earlier_captures_roots(session_tag):
+            if (earlier / pr_id).is_dir():
+                return earlier / pr_id
     mount = Path(CONTAINER_CAPTURES_MOUNT)
     # The mount belongs to one PR (PM_CAPTURES_PR, set at container
     # creation). A throwaway pm project driven inside the container
@@ -160,9 +519,92 @@ def captures_root(session_tag: str | None = None,
         session_tag = _resolve_session_tag(start_path)
     if not session_tag:
         return None
-    root = sessions_dir() / session_tag / "captures"
+    root = _captures_root_for_tag(session_tag)
     root.mkdir(parents=True, exist_ok=True)
     return root
+
+
+def _captures_root_for_tag(session_tag: str) -> Path:
+    """Captures root of one session: ``<captures-dir>/<tag>`` when the
+    ``captures-dir`` setting is set (evidence may live on a NAS), else
+    ``~/.pm/sessions/<tag>/captures``.  Not created here."""
+    configured = configured_dir(CAPTURES_DIR_SETTING)
+    if configured is not None:
+        return configured / session_tag
+    return sessions_dir() / session_tag / "captures"
+
+
+def _earlier_captures_roots(session_tag: str | None = None,
+                            start_path: Path | None = None) -> list[Path]:
+    """The session's captures roots under earlier ``captures-dir``
+    locations (:func:`earlier_dirs`), then the default
+    ``~/.pm/sessions/<tag>/captures``, that exist and are not the current
+    root: they hold evidence from before a change (nothing is migrated).
+    The tag is resolved only when ``captures-dir`` was ever set.
+    """
+    earlier = earlier_dirs(CAPTURES_DIR_SETTING)
+    if configured_dir(CAPTURES_DIR_SETTING) is None and not earlier:
+        return []
+    if session_tag is None:
+        session_tag = _resolve_session_tag(start_path)
+    if not session_tag:
+        return []
+    current = _captures_root_for_tag(session_tag)
+    return _existing_roots(
+        current, [d / session_tag for d in earlier]
+        + [sessions_dir() / session_tag / "captures"])[1:]
+
+
+def host_pr_captures_dir(pr_id: str, session_tag: str | None = None,
+                         start_path: Path | None = None) -> Path | None:
+    """The host captures dir of *pr_id*, for host code that reads or writes
+    one file there (``report.html``, ``integration.json``).
+
+    The same dir :func:`captures_dir` resolves on the host: the PR's dir in
+    :func:`captures_root`, or — when ``captures-dir`` changed and only an
+    earlier root or the default holds it (evidence from before the
+    change) — that one.
+    Not created; None when no session tag can be derived.
+    """
+    root = captures_root(session_tag, start_path)
+    if root is None:
+        return None
+    d = root / pr_id
+    if not d.is_dir():
+        for earlier in _earlier_captures_roots(session_tag, start_path):
+            if (earlier / pr_id).is_dir():
+                return earlier / pr_id
+    return d
+
+
+def captures_roots(session_tag: str | None = None,
+                   start_path: Path | None = None) -> list[Path]:
+    """Every host captures root of the session, :func:`captures_root` first.
+
+    The roots under earlier ``captures-dir`` locations and the default
+    ``~/.pm/sessions/<tag>/captures`` follow when ``captures-dir`` moved new
+    evidence elsewhere and they still exist: PRs whose evidence started
+    there keep it there.  Empty when no tag can be derived.
+    """
+    root = captures_root(session_tag, start_path)
+    if root is None:
+        return []
+    return [root] + _earlier_captures_roots(session_tag, start_path)
+
+
+def captures_roots_globs() -> list[str]:
+    """Shell globs matching every session's captures roots, for prompts
+    that list runs across sessions: ``~/.pm/sessions/*/captures`` by
+    default; ``<captures-dir>/*`` (shell-quoted) first when ``captures-dir``
+    is set, then each earlier ``captures-dir`` location that still exists,
+    then the default, which still hold evidence (and the runs of any PR or
+    test dir) begun before a change."""
+    default = "~/.pm/sessions/*/captures"
+    configured = configured_dir(CAPTURES_DIR_SETTING)
+    dirs = [configured] if configured is not None else []
+    dirs += [d for d in earlier_dirs(CAPTURES_DIR_SETTING)
+             if d not in dirs and d.is_dir()]
+    return [f"{shlex.quote(str(d))}/*" for d in dirs] + [default]
 
 
 # Container-internal path where the host's captures_dir is bind-mounted
@@ -183,7 +625,8 @@ def latest_qa_status_path(pr_id: str) -> Path | None:
 
     Single source of truth for locating a PR's latest QA status file under
     ``~/.pm/workdirs/qa/<pr_id>-*/qa_status.json`` (a fresh QA run gets a new
-    ``<pr_id>-<hex>`` workdir, so several may exist; the newest mtime wins).
+    ``<pr_id>-<hex>`` workdir, so several may exist; the newest mtime wins),
+    in every QA root (:func:`qa_workdirs_roots`).
     Shared by the auto-sequence QA gate and the sign-off prompt/evidence
     surfaces so they never drift.
 
@@ -199,10 +642,8 @@ def latest_qa_status_path(pr_id: str) -> Path | None:
     """
     from pm_core.qa_loop import (is_instruction_run, launched_elsewhere,
                                  own_session_tag, read_run_record)
-    qa_dir = workdirs_base() / "qa"
-    if not qa_dir.is_dir():
-        return None
-    candidates = [p for p in qa_dir.glob(f"{pr_id}-*/qa_status.json")
+    candidates = [p for qa_dir in qa_workdirs_roots()
+                  for p in qa_dir.glob(f"{pr_id}-*/qa_status.json")
                   if not is_instruction_run(pr_id, p.parent)]
     if own_session_tag():
         candidates = [p for p in candidates if not launched_elsewhere(

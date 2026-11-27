@@ -18,6 +18,7 @@ import re
 import sys
 import threading
 from pathlib import Path
+from typing import Sequence
 
 _log = logging.getLogger("pm.dashboard_server")
 
@@ -29,27 +30,45 @@ _RANGE_RE = re.compile(r"^bytes=(\d*)-(\d*)$")
 _COPY_CHUNK = 64 * 1024
 
 
-def _make_handler(pm_root: Path, captures_root_dir: Path):
+def _make_handler(pm_root: Path, captures_root_dir: Path,
+                  fallback_roots: Sequence[Path] = ()):
     """Return a request handler subclass bound to *pm_root* and *captures_root_dir*.
 
     The handler renders ``/`` (and ``/index.html``) dynamically from
     ``behavior_report.gather_dashboard_rows`` + ``render_dashboard_html``;
     everything else is served by ``SimpleHTTPRequestHandler`` rooted at
     ``captures_root_dir`` so per-PR reports and their evidence siblings
-    resolve naturally.
+    resolve naturally.  A path missing there is looked up in each of
+    *fallback_roots* in turn (the default captures root when
+    ``captures-dir`` moved new evidence elsewhere; see
+    :func:`pm_core.paths.captures_roots`).
     """
     captures_str = str(captures_root_dir)
+    fallback_strs = [str(r) for r in fallback_roots]
 
     class _Handler(http.server.SimpleHTTPRequestHandler):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, directory=captures_str, **kwargs)
+
+        def translate_path(self, path):
+            fs_path = super().translate_path(path)
+            if not fallback_strs or os.path.exists(fs_path):
+                return fs_path
+            # The base class has already dropped '..' segments, so the
+            # path is inside the primary root; map it into each fallback.
+            rel = os.path.relpath(fs_path, captures_str)
+            for root in fallback_strs:
+                alt = os.path.join(root, rel)
+                if os.path.exists(alt):
+                    return alt
+            return fs_path
 
         def _serve_dashboard(self) -> None:
             from pm_core import behavior_report, store
             try:
                 data = store.load(pm_root)
                 rows = behavior_report.gather_dashboard_rows(
-                    data, captures_root_dir)
+                    data, captures_root_dir, fallback_roots)
                 page_html = behavior_report.render_dashboard_html(rows)
             except Exception as exc:  # noqa: BLE001
                 _log.exception("failed to build dashboard")
@@ -168,6 +187,7 @@ class _QuietDisconnectServer(http.server.ThreadingHTTPServer):
 
 
 def serve(*, pm_root: Path, captures_root_dir: Path,
+          fallback_roots: Sequence[Path] = (),
           host: str = DEFAULT_BIND, port: int = DEFAULT_PORT,
           open_browser: bool = False) -> None:
     """Start the dashboard server and block until interrupted.
@@ -176,13 +196,15 @@ def serve(*, pm_root: Path, captures_root_dir: Path,
         pm_root: Path to the pm state root (``state_root()``).
         captures_root_dir: Captures root directory served as static files
             (typically ``~/.pm/sessions/<tag>/captures/``).
+        fallback_roots: Further captures roots, searched in order for
+            files missing from *captures_root_dir*.
         host: Bind address. Defaults to loopback; pass an explicit value to
             expose on a non-loopback interface.
         port: TCP port. ``0`` lets the OS pick a free port.
         open_browser: When True, launch the user's browser at the served URL
             once the server is listening.
     """
-    handler_cls = _make_handler(pm_root, captures_root_dir)
+    handler_cls = _make_handler(pm_root, captures_root_dir, fallback_roots)
     try:
         httpd = _QuietDisconnectServer((host, port), handler_cls)
     except OSError as exc:

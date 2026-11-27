@@ -43,6 +43,44 @@ class TestCleanupPrContainers:
         assert removed == []
         mock_remove.assert_not_called()
 
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._run_runtime")
+    def test_listing_failure_is_reported(self, mock_runtime, mock_remove):
+        """A refused listing is not "no containers" (QA S11)."""
+        mock_runtime.return_value = MagicMock(returncode=125, stdout="")
+        problems = []
+        assert container_mod.cleanup_pr_containers(
+            "pr-001", session_tag="s", problems=problems) == []
+        assert problems == ["the container runtime could not list containers"]
+        mock_remove.assert_not_called()
+
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._run_runtime")
+    def test_no_runtime_installed_is_no_containers(self, mock_runtime,
+                                                   mock_remove):
+        """A host-only user has no runtime: nothing was skipped.  Reporting
+        it made every TUI cleanup say "skipped containers ([Errno 2] …)"
+        and ``pm pr cleanup --resources`` exit 1."""
+        mock_runtime.side_effect = FileNotFoundError(
+            2, "No such file or directory: 'podman'")
+        problems = []
+        assert container_mod.cleanup_pr_containers(
+            "pr-001", session_tag="s", problems=problems) == []
+        assert problems == []
+        mock_remove.assert_not_called()
+
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._run_runtime")
+    def test_hung_runtime_is_reported_once(self, mock_runtime, mock_remove):
+        import subprocess
+        mock_runtime.side_effect = subprocess.TimeoutExpired(["podman"], 30)
+        problems = []
+        assert container_mod.cleanup_pr_containers(
+            "pr-001", session_tag="s", problems=problems) == []
+        assert problems == ["the container runtime did not answer"]
+        assert mock_runtime.call_count == 1     # not 30 s per prefix
+        mock_remove.assert_not_called()
+
     @patch("pm_core.container._run_runtime")
     def test_parallel_removal(self, mock_runtime):
         # Simulate four containers each taking 0.5s to remove. Sequential
@@ -99,7 +137,7 @@ class TestCleanupPrResources:
         assert summary["registry_windows"] == ["pr-001"]
         # Session tag should strip the pm- prefix
         mock_container.cleanup_pr_containers.assert_called_once_with(
-            "pr-001", session_tag="mysess")
+            "pr-001", session_tag="mysess", problems=[])
 
     def test_clears_runtime_state_file(self, tmp_path, monkeypatch):
         # Reproducer for the stale-state bug: after cleanup, a fresh

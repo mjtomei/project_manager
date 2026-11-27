@@ -307,6 +307,46 @@ def test_resume_incomplete_respawns_loop(tmp_path):
     assert _resume_file_path(qa_dir).is_file()
 
 
+def test_resume_finds_a_run_in_the_old_workdirs_root(tmp_path):
+    """A run started before 'workdirs-dir' moved stays in the old root
+    (nothing is migrated); the restart's resume scan still adopts it."""
+    from pm_core import paths
+    app = _make_app(tmp_path)
+    with patch("pathlib.Path.home", return_value=tmp_path):
+        qa_dir = _seed_run(tmp_path, overall="")
+        paths.set_global_setting_value("workdirs-dir",
+                                       str(tmp_path / "elsewhere"))
+        assert paths.qa_workdirs_root() == tmp_path / "elsewhere" / "qa"
+        with patch.object(qa_loop, "resume_qa_background") as resume_bg:
+            qa_loop_ui._resume_incomplete_qa(app)
+
+    resume_bg.assert_called_once()
+    assert "pr-001" in app._qa_loops
+    assert _resume_file_path(qa_dir).is_file()
+
+
+def test_resume_keeps_a_run_seen_through_two_spellings(tmp_path):
+    """'workdirs-dir' set to the directory a symlinked ~/.pm/workdirs
+    points at names the same QA root twice.  The scan must see the run
+    once: as two snapshots of one run, the second was dropped as
+    superseded, deleting the only resume snapshot of an orphaned run."""
+    from pm_core import paths
+    real = tmp_path / "nas-workdirs"
+    real.mkdir()
+    (tmp_path / ".pm").mkdir()
+    (tmp_path / ".pm" / "workdirs").symlink_to(real)
+    app = _make_app(tmp_path)
+    with patch("pathlib.Path.home", return_value=tmp_path):
+        qa_dir = _seed_run(tmp_path, overall="")
+        paths.set_global_setting_value("workdirs-dir", str(real))
+        assert paths.qa_workdirs_roots() == [real / "qa"]
+        with patch.object(qa_loop, "resume_qa_background") as resume_bg:
+            qa_loop_ui._resume_incomplete_qa(app)
+
+    resume_bg.assert_called_once()
+    assert _resume_file_path(qa_dir).is_file()
+
+
 def test_resume_incomplete_starts_poll_timer(tmp_path):
     # Only the poll timer processes the resumed run's completion.
     app = _make_app(tmp_path)

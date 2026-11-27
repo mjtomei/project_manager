@@ -33,20 +33,31 @@ def _candidate_window_names(display_id: str, session: str) -> list[str]:
     return base
 
 
-def cleanup_pr_resources(session: str | None, pr: dict) -> dict:
+def cleanup_pr_resources(session: str | None, pr: dict, *,
+                         wait_reclaim: bool = False) -> dict:
     """Remove every live resource for *pr*.
 
     Kills tmux windows, removes QA containers (and their push-proxy sockets
-    via remove_container), and prunes the pane registry. Safe to call when
-    no resources exist. Returns a summary dict::
+    via remove_container), and prunes the pane registry. Then reclaims the
+    container stores and image archives its QA scenarios left in scratch
+    (pm_core.storage_reclaim: only what no remaining container mounts; the
+    checkouts, captures and other scratch files stay) — in a background
+    thread unless *wait_reclaim* (a CLI process must wait, or its exit
+    would cut the deletion short). Safe to call when no resources exist.
+    Returns a summary dict::
 
         {"windows": [...], "containers": [...], "registry_windows": [...],
-         "sockets": [...]}
+         "sockets": [...], "reclaimed": [...] | "background",
+         "reclaim_failed": [(path, error), ...],   # waited reclaim only
+         "reclaim_busy": [scratch, ...],  # left to another reclaim (ditto)
+         "skipped": {what: why}}  # e.g. the runtime could not list
+                                  # containers: nothing of that kind removed
     """
     pr_id = pr["id"]
     display_id = _pr_display_id(pr)
     summary = {"windows": [], "containers": [], "registry_windows": [],
-               "sockets": [], "runtime_state": False}
+               "sockets": [], "runtime_state": False, "reclaimed": [],
+               "reclaim_failed": [], "reclaim_busy": [], "skipped": {}}
 
     if session:
         try:
@@ -55,11 +66,37 @@ def cleanup_pr_resources(session: str | None, pr: dict) -> dict:
             _log.warning("kill_pr_windows failed: %s", e)
 
     session_tag = session.removeprefix("pm-") if session else None
+    problems: list[str] = []
     try:
         summary["containers"] = container_mod.cleanup_pr_containers(
-            pr_id, session_tag=session_tag)
+            pr_id, session_tag=session_tag, problems=problems)
     except Exception as e:  # pragma: no cover
         _log.warning("cleanup_pr_containers failed: %s", e)
+        problems.append(str(e) or type(e).__name__)
+    if problems:
+        # A failed listing used to read as "no containers" (QA S11).
+        summary["skipped"]["containers"] = problems[0]
+
+    # Disposable scenario engine stores / image exports, now that this PR's
+    # containers are gone (whatever still mounts a scratch dir keeps it).
+    try:
+        from pm_core import storage_reclaim
+        if wait_reclaim:
+            out = storage_reclaim.reclaim(pr_id, reason="pr-cleanup")
+            summary["reclaimed"] = [str(d.path) for d in out.removed]
+            summary["reclaim_failed"] = [(str(d.path), err)
+                                         for d, err in out.failed]
+            summary["reclaim_busy"] = [str(p.scratch) for p in out.plans
+                                       if p.held == storage_reclaim.BUSY]
+            if out.problem:
+                # e.g. the runtime could not list containers, so nothing
+                # could be shown unmounted: this was "nothing to clean".
+                summary["skipped"]["scenario stores/exports"] = out.problem
+        else:
+            storage_reclaim.reclaim_in_background(pr_id, reason="pr-cleanup")
+            summary["reclaimed"] = "background"
+    except Exception as e:  # pragma: no cover - best effort
+        _log.warning("scenario storage reclaim failed: %s", e)
 
     # Best-effort socket cleanup for any container we found (remove_container
     # already calls stop_push_proxy, but cover the case where a socket lingers
@@ -105,4 +142,17 @@ def format_summary(summary: dict) -> str:
         parts.append(f"{len(summary['containers'])} container(s)")
     if summary["registry_windows"]:
         parts.append(f"{len(summary['registry_windows'])} registry entry(s)")
+    if isinstance(summary.get("reclaimed"), list) and summary["reclaimed"]:
+        parts.append(f"{len(summary['reclaimed'])} scenario store(s)/export(s)")
+    if summary.get("reclaim_failed"):
+        parts.append(f"{len(summary['reclaim_failed'])} reclaim failure(s)")
+    skipped = summary.get("skipped") or {}
+    if skipped:
+        # Grouped by reason: one runtime failure skips both kinds.
+        by_why: dict[str, list[str]] = {}
+        for what, why in skipped.items():
+            by_why.setdefault(why, []).append(what)
+        text = "; ".join(f"skipped {' and '.join(whats)} ({why})"
+                         for why, whats in by_why.items())
+        return ", ".join(parts + [text]) if parts else f"nothing removed, {text}"
     return ", ".join(parts) if parts else "nothing to clean"

@@ -348,8 +348,9 @@ class QALoopState:
 # ---------------------------------------------------------------------------
 
 def create_qa_workdir(pr_id: str, loop_id: str) -> Path:
-    """Create the QA session workdir: ~/.pm/workdirs/qa/{pr_id}-{loop_id}/."""
-    workdir = Path.home() / ".pm" / "workdirs" / "qa" / f"{pr_id}-{loop_id}"
+    """Create the QA session workdir: <workdirs>/qa/{pr_id}-{loop_id}/."""
+    from pm_core.paths import qa_workdirs_root
+    workdir = qa_workdirs_root() / f"{pr_id}-{loop_id}"
     workdir.mkdir(parents=True, exist_ok=True)
     return workdir
 
@@ -375,12 +376,14 @@ def _next_scenario_offset(pr_id: str, current_loop_id: str) -> int:
     """Find the highest scenario index used in previous runs for this PR.
 
     Scans ``~/.pm/workdirs/qa/{pr_id}-*/s-*`` dirs (excluding the
-    current run) to find the max index, so new scenarios continue numbering
-    from where previous runs left off.
+    current run; every QA root, see
+    :func:`pm_core.paths.qa_workdirs_roots`) to find the max index, so new
+    scenarios continue numbering from where previous runs left off.
     """
-    qa_root = Path.home() / ".pm" / "workdirs" / "qa"
+    from pm_core.paths import qa_workdirs_roots
     max_idx = 0
-    for d in qa_root.glob(f"{pr_id}-*/s-*"):
+    for d in (d for qa_root in qa_workdirs_roots()
+              for d in qa_root.glob(f"{pr_id}-*/s-*")):
         # Skip the current run
         if current_loop_id and d.parent.name == f"{pr_id}-{current_loop_id}":
             continue
@@ -392,6 +395,32 @@ def _next_scenario_offset(pr_id: str, current_loop_id: str) -> int:
     return max_idx
 
 
+def _clone_failure_message(exc: subprocess.CalledProcessError,
+                           repo_root: Path, clone_path: Path) -> str:
+    """git's own error first, then the paths: why a scenario clone failed.
+
+    The reason is shown cut to one pane width (the QA status pane) and
+    bounded in the PR note, so it leads with git's last ``fatal:`` /
+    ``error:`` line.  git's "Cloning into '…'..." progress line is dropped
+    and the source/target paths follow the error: with them first, git's
+    error started some 300 characters in and no on-screen surface showed it
+    (QA S12 of pr-abc1124, a NAS clone failing on an unreadable object).
+    """
+    lines = [ln.strip() for ln in (exc.stderr or exc.stdout or "").splitlines()]
+    lines = [ln for ln in lines
+             if ln and not ln.startswith("Cloning into ")]
+    lead_at = next((i for i in range(len(lines) - 1, -1, -1)
+                    if lines[i].startswith(("fatal:", "error:"))),
+                   len(lines) - 1)
+    lead = lines[lead_at] if lines else str(exc)
+    msg = (f"git clone failed (rc {exc.returncode}): {lead} — cloning "
+           f"{repo_root} into {clone_path}")
+    rest = lines[:lead_at] + lines[lead_at + 1:]
+    if rest:
+        msg += "; git also said: " + " | ".join(rest)
+    return msg
+
+
 def create_scenario_workdir(qa_workdir: Path, scenario_index: int,
                             repo_root: Path | None = None,
                             pr_id: str = "",
@@ -401,11 +430,18 @@ def create_scenario_workdir(qa_workdir: Path, scenario_index: int,
                             ) -> tuple[Path, Path]:
     """Create an isolated working area for one QA scenario.
 
-    Everything for a single scenario lives under one directory::
+    The scenario's source and its scratch live apart::
 
-        {qa_workdir}/s-{N}/
-            repo/       — local ``git clone`` of the target repo
-            scratch/    — empty dir for throwaway test projects
+        {qa_workdir}/s-{N}/repo/   — local ``git clone`` of the target repo
+        {scratch}/qa/{run}/s-{N}/  — empty local dir for throwaway test
+                                     projects and private container engines
+
+    Source workdirs may be configured onto network storage
+    (``workdirs-dir``); scratch never follows them, so container storage
+    created there stays on local disk (``scratch-dir``; refused on a network
+    filesystem).  A run that already has the legacy
+    ``{qa_workdir}/s-{N}/scratch`` keeps it (see
+    :func:`pm_core.paths.scenario_scratch_dir`).
 
     The clone checks out *branch* (the PR branch) so the scenario can
     commit and push fixes directly.
@@ -421,10 +457,14 @@ def create_scenario_workdir(qa_workdir: Path, scenario_index: int,
     """
     from pm_core import git_ops
 
+    from pm_core.paths import (SCRATCH_DIR_SETTING, require_local_path,
+                               scenario_scratch_dir)
+
     scenario_dir = qa_workdir / f"s-{scenario_index}"
     scenario_dir.mkdir(parents=True, exist_ok=True)
 
-    scratch = scenario_dir / "scratch"
+    scratch = scenario_scratch_dir(qa_workdir, scenario_index)
+    require_local_path(scratch, "QA scenario scratch", SCRATCH_DIR_SETTING)
     scratch.mkdir(parents=True, exist_ok=True)
 
     if repo_root is None:
@@ -445,11 +485,17 @@ def create_scenario_workdir(qa_workdir: Path, scenario_index: int,
     # out would make a failed hardlink fatal ("Invalid cross-device
     # link") when the source repo (a regression/debug run's project
     # checkout) is on another filesystem than ~/.pm, instead of falling
-    # back to copying the objects.
+    # back to copying the objects.  On network storage (``workdirs-dir`` on
+    # a NAS) the objects are always copied: see git_ops.no_hardlink_args.
     clone_args = ["clone", str(repo_root), str(clone_path)]
     if branch:
         clone_args.extend(["--branch", branch])
-    git_ops.run_git(*clone_args)
+    clone_args.extend(git_ops.no_hardlink_args(clone_path))
+    try:
+        git_ops.run_git(*clone_args)
+    except subprocess.CalledProcessError as exc:
+        raise RuntimeError(_clone_failure_message(
+            exc, repo_root, clone_path)) from exc
 
     # The clone got `origin = <repo_root>` from the local clone.  Swap it
     # to the *real* upstream so push/fetch/pull from inside the scenario
@@ -646,19 +692,37 @@ def _planner_code_changes(workdir_path: str, before: str | None,
                   if p and not p.startswith("pm/"))
 
 
-def qa_outcome_detail(state: QALoopState) -> str:
+# Longest per-scenario reason a QA note carries (one line, "…" past it).
+_NOTE_REASON_MAX = 300
+
+
+def qa_outcome_detail(state: QALoopState, reasons: bool = False) -> str:
     """Per-scenario verdict summary, or why no scenario ran.
 
     When no scenario ran (an incomplete plan that was not consumed, or a
     failed handoff after a parsed plan) the reason lives in
     ``state._error``; without it the completion line and the QA note would
     end in an empty or all-"?" summary.
+
+    With *reasons* (the QA note) each scenario that did not PASS carries its
+    verdict reason, on one line and bounded: a scenario that never started
+    (e.g. its clone failed) otherwise left a note saying only
+    "INPUT_REQUIRED", and the next session could not tell why.
     """
     if state._error and not any(s.index in state.scenario_verdicts
                                 for s in state.scenarios):
         return " ".join(state._error.split())
-    parts = [f"{s.title}: {state.scenario_verdicts.get(s.index, '?')}"
-             for s in state.scenarios]
+    parts = []
+    for s in state.scenarios:
+        verdict = state.scenario_verdicts.get(s.index, "?")
+        part = f"{s.title}: {verdict}"
+        reason = " ".join(
+            (state.scenario_verdict_reasons.get(s.index) or "").split())
+        if reasons and reason and verdict not in (VERDICT_PASS, "?"):
+            if len(reason) > _NOTE_REASON_MAX:
+                reason = reason[:_NOTE_REASON_MAX - 1] + "…"
+            part += f" ({reason})"
+        parts.append(part)
     return "; ".join(parts)
 
 
@@ -1538,8 +1602,9 @@ def end_runs_orphaned_by_restart(
         return []
     skip = {str(w) for w in exclude_workdirs}
     ended = []
-    qa_root = Path.home() / ".pm" / "workdirs" / "qa"
-    for rec_path in qa_root.glob(f"*/{_RUN_RECORD}"):
+    from pm_core.paths import qa_workdirs_roots
+    for rec_path in (r for qa_root in qa_workdirs_roots()
+                     for r in qa_root.glob(f"*/{_RUN_RECORD}")):
         qa_wd = rec_path.parent
         if str(qa_wd) in skip or _resume_file_path(qa_wd).exists():
             continue
@@ -1630,7 +1695,8 @@ def write_launch_record(pr_id: str, loop_id: str, owner_pid: int) -> None:
 
 def drop_launch_record(pr_id: str, loop_id: str) -> None:
     """Remove a launch record whose driver was never spawned."""
-    qa_wd = Path.home() / ".pm" / "workdirs" / "qa" / f"{pr_id}-{loop_id}"
+    from pm_core.paths import qa_workdirs_root
+    qa_wd = qa_workdirs_root() / f"{pr_id}-{loop_id}"
     if (read_run_record(qa_wd) or {}).get("launch"):
         shutil.rmtree(qa_wd, ignore_errors=True)
 
@@ -1702,16 +1768,20 @@ def instruction_run_live(pr_id: str) -> bool:
     verdict is not the PR's QA result), so the picker would show the last
     full run's badge over it (S125).
 
-    Reads only that run's fixed workdir, owner first: the picker calls
+    Reads only that run's fixed workdir (in each QA root, see
+    :func:`pm_core.paths.qa_workdirs_roots`), owner first: the picker calls
     this on every render, and finished runs' records are kept, each
     costing tmux lookups in :func:`launched_elsewhere`."""
-    qa_wd = (Path.home() / ".pm" / "workdirs" / "qa"
-             / f"{pr_id}-{instruction_run_loop_id(pr_id)}")
-    rec = read_run_record(qa_wd)
-    return bool(rec and rec.get("pr_id") == pr_id
+    from pm_core.paths import qa_workdirs_roots
+    name = f"{pr_id}-{instruction_run_loop_id(pr_id)}"
+    for qa_root in qa_workdirs_roots():
+        rec = read_run_record(qa_root / name)
+        if (rec and rec.get("pr_id") == pr_id
                 and not rec.get("ended_at")
                 and resume_owned_elsewhere(rec)
-                and not launched_elsewhere(rec.get("session_tag")))
+                and not launched_elsewhere(rec.get("session_tag"))):
+            return True  # the first live one; later roots are not read
+    return False
 
 
 def run_driven_elsewhere(pr_id: str) -> bool:
@@ -1733,8 +1803,9 @@ def run_driven_elsewhere(pr_id: str) -> bool:
 def _own_run_records(pr_id: str):
     """Yield (QA workdir, start record) for each run of *pr_id* this pm
     session launched."""
-    qa_root = Path.home() / ".pm" / "workdirs" / "qa"
-    for rec_path in qa_root.glob(f"{pr_id}-*/{_RUN_RECORD}"):
+    from pm_core.paths import qa_workdirs_roots
+    for rec_path in (r for qa_root in qa_workdirs_roots()
+                     for r in qa_root.glob(f"{pr_id}-*/{_RUN_RECORD}")):
         rec = read_run_record(rec_path.parent)
         if (rec and rec.get("pr_id") == pr_id
                 and not launched_elsewhere(rec.get("session_tag"))):
@@ -2772,8 +2843,9 @@ def _launch_scenario_0(
             loop_id=state.loop_id,
             branch=branch,
         )
-    except Exception:
-        _log.warning("Failed to create workdir for Scenario 0, skipping")
+    except Exception as exc:
+        _log.warning("Failed to create workdir for Scenario 0, skipping: %s",
+                     exc)
         return None
 
     scenario.worktree_path = str(clone_path)
@@ -3642,7 +3714,9 @@ def _build_scenario_run_cmd(
         captures_root = CONTAINER_CAPTURES_MOUNT
     else:
         wd_in = host_clone
-        scratch = str(Path(state.qa_workdir) / f"s-{scenario.index}" / "scratch")
+        from pm_core.paths import scenario_scratch_dir
+        scratch = str(scenario_scratch_dir(Path(state.qa_workdir),
+                                           scenario.index))
         sess_for_prompt = session
         host_captures = captures_dir(state.pr_id, session_tag=state.session_tag)
         captures_root = str(host_captures) if host_captures else ""
@@ -3717,7 +3791,8 @@ def _ensure_scenario_container(
         # failure carries the cause.
         pass
     clone = scenario.worktree_path
-    scratch = Path(state.qa_workdir) / f"s-{scenario.index}" / "scratch"
+    from pm_core.paths import scenario_scratch_dir
+    scratch = scenario_scratch_dir(Path(state.qa_workdir), scenario.index)
     try:
         if not clone or not Path(clone).is_dir():
             raise RuntimeError(f"scenario clone {clone or '(none)'} is gone")
@@ -5674,6 +5749,19 @@ def _run_qa_sync(
             from pm_core import container as container_mod
             container_mod.cleanup_orphaned_qa_containers(
                 session, state.pr_id, session_tag=state.session_tag)
+
+        # Reclaim container stores / image exports that earlier runs' scenarios
+        # left in scratch (only where no container mounts it any more and
+        # that run has ended) — in the background, so this run does not pay
+        # for the last one's cleanup.
+        try:
+            from pm_core import storage_reclaim
+            storage_reclaim.reclaim_in_background(
+                state.pr_id, exclude_run=Path(state.qa_workdir).name,
+                reason="qa-start")
+        except Exception:
+            _log.warning("QA: could not start scenario storage reclaim",
+                         exc_info=True)
 
         # Final out-of-band status guard, immediately before any QA window is
         # created (scenario 0 / planner).  Re-load fresh: a concurrent merge

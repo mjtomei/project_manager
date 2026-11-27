@@ -354,6 +354,40 @@ class TestEdgeCases:
         assert text == expected
 
 
+class TestScenarioReasons:
+    """A scenario that did not PASS carries its reason into the note (QA
+    S12 of pr-abc1124: a clone failure left "INPUT_REQUIRED" and no cause)."""
+
+    def test_non_pass_reason_included_pass_reason_omitted(self, tmp_path):
+        app = _make_app(tmp_path)
+        state = _make_state(verdict="INPUT_REQUIRED",
+                            verdicts={1: "PASS", 2: "INPUT_REQUIRED"},
+                            qa_workdir="/w/qa/pr-001-ab")
+        state.scenario_verdict_reasons = {
+            1: "all good",
+            2: ("workdir setup failed: git clone failed (rc 128): fatal: "
+                "failed to copy file to 'x':\n Permission denied"),
+        }
+        _record_qa_note(app, state)
+
+        text = store.get_pr(store.load(tmp_path), "pr-001")["notes"][0]["text"]
+        assert text == (
+            "QA INPUT_REQUIRED: Login Flow: PASS; Dashboard: INPUT_REQUIRED "
+            "(workdir setup failed: git clone failed (rc 128): fatal: failed "
+            "to copy file to 'x': Permission denied) (workdir: /w/qa/pr-001-ab)")
+
+    def test_reason_bounded(self, tmp_path):
+        app = _make_app(tmp_path)
+        state = _make_state(verdict="NEEDS_WORK",
+                            verdicts={1: "NEEDS_WORK", 2: "PASS"})
+        state.scenario_verdict_reasons = {1: "x" * 1000}
+        _record_qa_note(app, state)
+
+        text = store.get_pr(store.load(tmp_path), "pr-001")["notes"][0]["text"]
+        assert "x" * 299 + "\u2026)" in text
+        assert "x" * 300 not in text
+
+
 class TestProgressLogLine:
     def test_bracketed_text_survives_log_markup(self):
         """The log line renders markup; the "[pr-…]" prefix and the
