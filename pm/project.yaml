@@ -37392,7 +37392,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T22:50:28.195013+00:00'
-  updated_at: '2026-10-29T04:18:47.676391+00:00'
+  updated_at: '2026-11-27T10:49:33.478915+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -37408,6 +37408,20 @@ prs:
       (screen-after-restart.txt, windows-after-downtime.txt).'
     created_at: '2026-10-29T04:18:47Z'
     last_edited: '2026-10-29T04:18:47Z'
+  - id: note-97bff63
+    text: 'Seen again 2026-11-27 (pr-abc1124 QA S13, head e7ed2afc6), different shape:
+      after `kill -TERM` of the TUI window pane pids (window 0 "main" closes, handle_pane_exited
+      unregisters its panes), `pm session` logs roles_alive=set(), finds no "main"
+      window and falls back to the FIRST window by index (pm_core/cli/session.py ~L352
+      all_wins[0]) -> pane_layout._respawn_tui splits the TUI into that live window.
+      Here it was the user shell window `cli` (@2): the TUI became pane 1.0 beside
+      the shell. In a normal session the first window is an impl/review Claude window,
+      so the TUI would be squeezed into it. Expected: when no registered/main TUI
+      window exists, create a new window named main (index 0) instead of splitting
+      an arbitrary window. Debug log: "_respawn_tui: respawning TUI in pm-proj-b4194b3e:@2"
+      / "created pane %54 in window @2".'
+    created_at: '2026-11-27T10:49:33Z'
+    last_edited: '2026-11-27T10:49:33Z'
 - id: pr-97614ed
   plan: bugs
   title: 'Bug: finished review loop summary (⟳N✓ badge, runs popup/status review block)
