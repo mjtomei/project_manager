@@ -2579,8 +2579,19 @@ prs:
       HOME: /pm-captures/pr-30888b1-review-bb8a-i3/.'
     created_at: '2026-11-27T06:24:15Z'
     last_edited: '2026-11-27T06:24:15Z'
+  - id: note-ab8a8fe
+    text: 'Review bb8a i4 (b1cbdd99): doc-only. org-demo.md still described a separate
+      "Break the plan into PRs" step after plan add; step 4 now says plan add writes
+      the plan and its PRs, step 5 is "Review and load the PRs" (plan review proposes
+      a breakdown only when ## PRs is missing). Spec R5 lists it. Code diff re-read
+      clean; master still ac719072; no origin/pm/* branch pushed since i3. pr-ace66e5
+      qa.md R4 still names plan breakdown, but that PR is merged (historical spec,
+      left as is). 233 targeted + 1380 tests in 26 related files pass twice in one
+      HOME: /pm-captures/pr-30888b1-review-bb8a-i4/.'
+    created_at: '2026-11-27T06:33:30Z'
+    last_edited: '2026-11-27T06:33:30Z'
   created_at: '2026-03-01T17:51:46.490716+00:00'
-  updated_at: '2026-11-27T06:24:16.275970+00:00'
+  updated_at: '2026-11-27T06:33:31.247377+00:00'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-30888b1-fold-plan-breakdown-into-plan-add-st-ab512a43
 - id: pr-3116896
   plan: tui-ux
