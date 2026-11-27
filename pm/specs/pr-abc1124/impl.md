@@ -322,7 +322,14 @@ the task and on the measurements above.
   exactly like a healthy no-op (QA S11), while `pm container reclaim` and
   `cache gc` already said `Nothing removed: …` and exited 1.  A background
   pass (QA start, merge cleanup) logs `reclaim(<pr>, <reason>): nothing
-  removed: <problem>`.
+  removed: <problem>`.  Only what was at stake is reported (review 278b
+  i1): the reclaim skip only when some scratch dir has a store or archive
+  (each such dir is held with the reason), and no installed runtime at all
+  is "no containers", not a skip; a hung listing reads `the container
+  runtime did not answer`.  A host-only user without podman or docker
+  (host-mode QA still leaves scratch dirs) otherwise saw `skipped
+  containers ([Errno 2] No such file or directory: 'podman')` on every TUI
+  cleanup and `pm pr cleanup --resources` exited 1.
 * Hooks (existing lifecycle owners only — no new scheduler):
   * `pr_cleanup.cleanup_pr_resources`, after containers are removed:
     reclaim every run of that PR.  Its TUI callers (merge detection in

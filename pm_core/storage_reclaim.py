@@ -383,7 +383,18 @@ def plan(pr_id: str | None = None, exclude_run: str | None = None) -> Outcome:
     out = Outcome()
     sources = container_mount_sources()
     if sources is None:
-        out.problem = "the container runtime could not list containers"
+        # Nothing can be shown unmounted, so every scratch dir is held.  Say
+        # so only where something was there to remove: host-mode QA leaves
+        # scratch dirs on hosts with no container runtime at all, and their
+        # cleanups must not report a skip (and exit 1) for nothing.
+        problem = "the container runtime could not list containers"
+        for run_dir, scratch in scenario_scratch_dirs(pr_id, exclude_run):
+            items = find_disposables(scratch)
+            if items:
+                out.plans.append(ScratchPlan(scratch=scratch, run_dir=run_dir,
+                                             items=items, held=problem))
+        if out.plans:
+            out.problem = problem
         return out
     # Resolved once, not per scratch dir: every container's mounts against
     # every scenario's scratch, resolved pairwise, took ~17 s for 300

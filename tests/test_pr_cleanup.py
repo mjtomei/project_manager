@@ -54,6 +54,33 @@ class TestCleanupPrContainers:
         assert problems == ["the container runtime could not list containers"]
         mock_remove.assert_not_called()
 
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._run_runtime")
+    def test_no_runtime_installed_is_no_containers(self, mock_runtime,
+                                                   mock_remove):
+        """A host-only user has no runtime: nothing was skipped.  Reporting
+        it made every TUI cleanup say "skipped containers ([Errno 2] …)"
+        and ``pm pr cleanup --resources`` exit 1."""
+        mock_runtime.side_effect = FileNotFoundError(
+            2, "No such file or directory: 'podman'")
+        problems = []
+        assert container_mod.cleanup_pr_containers(
+            "pr-001", session_tag="s", problems=problems) == []
+        assert problems == []
+        mock_remove.assert_not_called()
+
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._run_runtime")
+    def test_hung_runtime_is_reported_once(self, mock_runtime, mock_remove):
+        import subprocess
+        mock_runtime.side_effect = subprocess.TimeoutExpired(["podman"], 30)
+        problems = []
+        assert container_mod.cleanup_pr_containers(
+            "pr-001", session_tag="s", problems=problems) == []
+        assert problems == ["the container runtime did not answer"]
+        assert mock_runtime.call_count == 1     # not 30 s per prefix
+        mock_remove.assert_not_called()
+
     @patch("pm_core.container._run_runtime")
     def test_parallel_removal(self, mock_runtime):
         # Simulate four containers each taking 0.5s to remove. Sequential

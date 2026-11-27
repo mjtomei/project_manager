@@ -1576,9 +1576,10 @@ def cleanup_pr_containers(pr_id: str,
 
     Matches both legacy (``pm-qa-{pr_id}-``) and session-tagged
     (``pm-{session_tag}-qa-{pr_id}-``) name prefixes. Returns the list of
-    container names removed.  A listing the runtime refused is appended to
-    *problems* (when given), so a caller can tell "no containers" from
-    "could not look".
+    container names removed.  A listing the runtime refused or did not
+    answer is appended to *problems* (when given), so a caller can tell "no
+    containers" from "could not look".  No runtime installed at all (a
+    host-only user) is "no containers": none can exist.
     """
     prefixes = []
     if session_tag:
@@ -1588,11 +1589,20 @@ def cleanup_pr_containers(pr_id: str,
     candidates: list[str] = []
     seen: set[str] = set()
     for prefix in prefixes:
-        result = _run_runtime(
-            "ps", "-a", "--filter", f"name={prefix}",
-            "--format", "{{.Names}}",
-            check=False, timeout=30,
-        )
+        try:
+            result = _run_runtime(
+                "ps", "-a", "--filter", f"name={prefix}",
+                "--format", "{{.Names}}",
+                check=False, timeout=30,
+            )
+        except FileNotFoundError:
+            _log.debug("cleanup_pr_containers(%s): no container runtime "
+                       "installed", pr_id)
+            return []
+        except subprocess.TimeoutExpired:
+            if problems is not None and not problems:
+                problems.append("the container runtime did not answer")
+            break
         if result.returncode != 0:
             if problems is not None and not problems:
                 problems.append("the container runtime could not list "

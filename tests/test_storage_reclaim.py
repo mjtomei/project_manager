@@ -224,6 +224,25 @@ class TestPlan:
         out = sr.reclaim("pr-1")
         assert st.exists() and "could not list" in out.problem
 
+    def test_runtime_unavailable_nothing_at_stake_is_no_problem(self, home,
+                                                                 rt):
+        """Host-mode QA leaves scratch dirs (a checkout's notes, drafts) on
+        hosts without a container runtime: with no store or archive in them
+        there is nothing a listing could have unblocked, so no skip is
+        reported — else every cleanup there said so and exited 1."""
+        _, scratch = _run(home, "pr-1-hmode")
+        (scratch / "notes.md").write_text("draft")
+        rt.fail = True
+        out = sr.reclaim("pr-1")
+        assert out.problem == "" and not out.plans and not out.removed
+        # ...while a store anywhere among the PR's runs still is one.
+        _, scratch2 = _run(home, "pr-1-hmode2")
+        st = _store(scratch2 / "eng")
+        out = sr.reclaim("pr-1")
+        assert st.exists() and "could not list" in out.problem
+        assert [(p.scratch, p.held) for p in out.plans] == [
+            (scratch2, "the container runtime could not list containers")]
+
     def test_dry_run(self, home, rt):
         _, scratch = _run(home, "pr-1-ggg")
         st = _store(scratch / "eng")
@@ -556,7 +575,7 @@ def test_pr_cleanup_cli_reports_reclaim_failures(monkeypatch):
             in r.output)
 
 
-def test_pr_cleanup_cli_reports_unlistable_runtime(monkeypatch):
+def test_pr_cleanup_cli_reports_unlistable_runtime(monkeypatch, home):
     """With a runtime that cannot list containers, ``pm pr cleanup
     --resources`` printed "Cleaned <pr>: nothing to clean" and exited 0 —
     exactly like a healthy no-op — while ``pm container reclaim`` said the
@@ -565,6 +584,8 @@ def test_pr_cleanup_cli_reports_unlistable_runtime(monkeypatch):
     from pm_core import pr_cleanup
     from pm_core import loop_shared
     from pm_core.cli import pr as pr_mod
+    _, scratch = _run(home, "pr-9-dead")
+    st = _store(scratch / "eng")
     pr = {"id": "pr-9", "title": "t"}
     monkeypatch.setattr(pr_mod, "state_root", lambda: Path("/nonexistent"))
     monkeypatch.setattr(pr_mod.store, "load", lambda root: {"prs": [pr]})
@@ -582,3 +603,32 @@ def test_pr_cleanup_cli_reports_unlistable_runtime(monkeypatch):
     assert ("Cleaned pr-9: nothing removed, skipped containers and scenario "
             "stores/exports (the container runtime could not list "
             "containers)") in r.output
+    assert st.exists()
+
+
+def test_pr_cleanup_cli_without_any_runtime(monkeypatch, home):
+    """A host-only user — no podman or docker installed — whose host-mode QA
+    runs left scratch dirs (no stores in them): "nothing to clean", exit 0.
+    Reporting the absent runtime as a skip printed "skipped containers
+    ([Errno 2] No such file or directory: 'podman')" on every cleanup and
+    exited 1."""
+    from click.testing import CliRunner
+    from pm_core import loop_shared
+    from pm_core.cli import pr as pr_mod
+    _, scratch = _run(home, "pr-9-host")
+    (scratch / "notes.md").write_text("draft")
+    pr = {"id": "pr-9", "title": "t"}
+    monkeypatch.setattr(pr_mod, "state_root", lambda: Path("/nonexistent"))
+    monkeypatch.setattr(pr_mod.store, "load", lambda root: {"prs": [pr]})
+    monkeypatch.setattr(pr_mod, "trigger_tui_refresh", lambda: None)
+    monkeypatch.setattr(loop_shared, "get_pm_session", lambda: None)
+    monkeypatch.setattr(sr, "_runtime", lambda: "podman")
+
+    def missing(*a, **kw):
+        raise FileNotFoundError(2, "No such file or directory: 'podman'")
+    monkeypatch.setattr("pm_core.container._run_runtime", missing)
+    r = CliRunner().invoke(pr_mod.pr, ["cleanup", "--resources", "pr-9"])
+    assert r.exit_code == 0, r.output
+    assert "Cleaned pr-9: nothing to clean" in r.output
+    assert "skipped" not in r.output and "Errno" not in r.output
+    assert (scratch / "notes.md").exists()
