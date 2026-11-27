@@ -56989,3 +56989,30 @@ prs:
       pins both lists to live plans-pane keys. Close this PR once pr-30888b1 merges.'
     created_at: '2026-11-27T06:10:47Z'
     last_edited: '2026-11-27T06:10:47Z'
+- id: pr-21033e4
+  plan: bugs
+  title: 'Bug: Claude-facing TUI prompts forbid `pm pr done`, a command removed by
+    the pr done -> pr review rename'
+  branch: pm/pr-21033e4-bug-claude-facing-tui-prompts-forbid-pm-pr-done-a-
+  status: pending
+  depends_on: []
+  description: 'The "do not run" / Forbidden lists in three Claude-facing prompts
+    still name `pm pr done`, which no longer exists (7a81d8795 renamed it to `pm pr
+    review`; `pm pr done --help` exits 2 with "No such command ''done''"). Locations:
+    pm_core/prompt_gen.py:110 (guide setup/assist TUI-usage block), pm_core/prompt_gen.py:3020
+    (watcher review Forbidden list), pm_core/tui/pane_ops.py:378 (TUI interactive
+    Claude session). Same on master@ac719072. Repro: open the guide (H) with any stand-in
+    claude that records argv, or run `pm guide` without claude on PATH; the prompt
+    says "(e.g. `pm pr start`, `pm pr done`, `pm plan add`, `pm plan review`)". Fix:
+    replace `pm pr done` with `pm pr review` (it launches a review window, so it belongs
+    in the list) and update tests/QA specs that quote the list (pr-30888b1 qa.md E9
+    + scenario Thens). Found by pr-30888b1 QA S17.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-27T07:51:54.472618+00:00'
+  updated_at: '2026-11-27T07:51:54.472618+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
