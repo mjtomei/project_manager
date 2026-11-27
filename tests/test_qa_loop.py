@@ -612,6 +612,74 @@ class TestQAWorkdirs:
         assert "rc 128" in str(exc.value)
 
 
+    def test_clone_failure_leads_with_git_error(self, tmp_path, monkeypatch):
+        """git's last fatal:/error: line comes first and its "Cloning into"
+        progress line is dropped; the paths follow (QA S12 of pr-abc1124:
+        with the paths first, git's error started ~300 columns in and no
+        on-screen surface showed it)."""
+        import subprocess as _sp
+        import pytest as _pytest
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path / "home")
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        err = _sp.CalledProcessError(
+            128, ["git", "clone"],
+            stderr=("Cloning into '/q/s-1/repo'...\n"
+                    "warning: something odd\n"
+                    "fatal: failed to copy file to '/q/s-1/repo/.git/objects/"
+                    "ab/cd': Permission denied\n"))
+        with patch("pm_core.git_ops.run_git", side_effect=err):
+            with _pytest.raises(RuntimeError) as exc:
+                create_scenario_workdir(tmp_path / "qa", 1,
+                                        repo_root=repo_root, branch="b")
+        msg = str(exc.value)
+        assert msg.startswith(
+            "git clone failed (rc 128): fatal: failed to copy file to "
+            "'/q/s-1/repo/.git/objects/ab/cd': Permission denied — cloning "
+            f"{repo_root} into ")
+        assert "Cloning into" not in msg
+        assert msg.endswith("; git also said: warning: something odd")
+        assert "\n" not in msg
+
+    def test_clone_of_unreadable_object_on_nas_names_git_error(
+            self, tmp_path, monkeypatch):
+        """Real git: an object on the share the user cannot read fails the
+        copying (network-storage) clone, and the reason leads with git's
+        own "Permission denied" line."""
+        import os as _os
+        import pytest as _pytest
+        if _os.geteuid() == 0:
+            _pytest.skip("root reads a mode-000 file")
+        from pm_core import paths
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path / "home")
+        nas = tmp_path / "nas"
+        src = nas / "pr-workdir"
+        self._git_repo(src)
+        import subprocess as _sp
+        blob = _sp.run(["git", "-C", str(src), "rev-parse", "HEAD:f.txt"],
+                       check=True, capture_output=True,
+                       text=True).stdout.strip()
+        obj = src / ".git" / "objects" / blob[:2] / blob[2:]
+        mountinfo = tmp_path / "mountinfo"
+        mountinfo.write_text(
+            "1 0 0:1 / / rw - ext4 /dev/sda1 rw\n"
+            f"2 1 0:2 / {nas} rw - fuse.sshfs nas:/export rw\n")
+        monkeypatch.setattr(paths, "_MOUNTINFO", str(mountinfo))
+        obj.chmod(0)
+        try:
+            with patch("pm_core.push_proxy.resolve_real_origin",
+                       return_value=None):
+                with _pytest.raises(RuntimeError) as exc:
+                    create_scenario_workdir(nas / "qa" / "run", 1,
+                                            repo_root=src, branch="master")
+        finally:
+            obj.chmod(0o444)
+        msg = str(exc.value)
+        assert msg.startswith("git clone failed (rc 128): fatal: "), msg
+        assert "Permission denied" in msg.split(" — cloning ")[0]
+        assert "Cloning into" not in msg
+
+
 class TestQALoopState:
     def test_defaults(self):
         state = QALoopState(pr_id="pr-001")

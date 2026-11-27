@@ -51,6 +51,9 @@ _CLEAR_SCREEN = "\033[H\033[2J"
 # Appended to a scenario's verdict while its worker waits for input.
 _WAITING_SUFFIX = " (waiting)"
 _WAITING_SUFFIX_WIDTH = len(_WAITING_SUFFIX)
+# Most lines a scenario's verdict reason wraps to while the pane has rows to
+# spare; past that (or with no spare rows) it is cut with an ellipsis.
+_REASON_MAX_LINES = 4
 
 _VERDICT_COLORS = {
     "PASS": _GREEN,
@@ -167,6 +170,16 @@ def _render(status: dict | None, selected: int, rows: int, cols: int,
 
     spinner = _SPINNER_FRAMES[tick % len(_SPINNER_FRAMES)]
 
+    # Rows left once every scenario and a one-line reason each are drawn,
+    # plus the four lines after the table (blank, overall/progress, blank,
+    # key help).  A long reason (a failed clone names git's error and both
+    # paths) wraps into them instead of being cut at the pane width, so
+    # the cause stays readable; it never pushes the header off the top.
+    reason_indent = " " * (2 + 3 + 2)  # prefix + idx col + gap
+    reason_width = max(cols - len(reason_indent) - 4, 10)
+    spare_rows = rows - (len(lines) + len(scenarios) + 4 + sum(
+        1 for sc in scenarios if sc.get("verdict_reason")))
+
     for i, sc in enumerate(scenarios):
         idx = sc.get("index", "?")
         title = _truncate(sc.get("title", ""), title_width)
@@ -208,13 +221,22 @@ def _render(status: dict | None, selected: int, rows: int, cols: int,
 
         lines.append(f"{prefix}{idx:>3}  {title:<{title_width}}  {verdict_display}{suffix}")
         if verdict_reason:
-            # Render the reason on a continuation line, indented to align
+            # Render the reason on continuation lines, indented to align
             # under the title column and dimmed so it doesn't compete with
             # the verdict colour above.
-            reason_indent = " " * (2 + 3 + 2)  # prefix + idx col + gap
-            reason_text = _truncate(verdict_reason,
-                                    max(cols - len(reason_indent) - 4, 10))
-            lines.append(f"{reason_indent}{_DIM}↳ {reason_text}{_RESET}")
+            wrapped = textwrap.wrap(verdict_reason, reason_width,
+                                    break_long_words=True,
+                                    break_on_hyphens=False) or [""]
+            take = max(1, min(_REASON_MAX_LINES, 1 + spare_rows,
+                              len(wrapped)))
+            spare_rows -= take - 1
+            shown = wrapped[:take]
+            if len(wrapped) > take:
+                shown[-1] = _truncate(" ".join(wrapped[take - 1:]),
+                                      reason_width)
+            lines.append(f"{reason_indent}{_DIM}↳ {shown[0]}{_RESET}")
+            for cont in shown[1:]:
+                lines.append(f"{reason_indent}  {_DIM}{cont}{_RESET}")
 
     lines.append("")
 

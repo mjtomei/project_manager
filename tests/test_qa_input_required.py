@@ -1474,6 +1474,48 @@ def test_error_block_wraps_inside_the_pane():
         assert "disable container mode" in joined
 
 
+def test_long_verdict_reason_wraps_into_spare_rows():
+    """A failed scenario clone's reason (git's error plus both paths, some
+    300 columns) wraps under its row while the pane has rows to spare,
+    instead of being cut at one pane width before git's error — QA S12 of
+    pr-abc1124 saw only "…git clone of <path> into <path…" on screen."""
+    import re
+
+    from pm_core import qa_status
+
+    fatal = ("fatal: failed to copy file to '/nas/pm-workdirs/qa/pr-1-ab/"
+             "s-1/repo/.git/objects/12/3456789abcdef': Permission denied")
+    reason = ("workdir setup failed: git clone failed (rc 128): " + fatal
+              + " — cloning /nas/pm-workdirs/proj/pm-pr-1 into "
+              "/nas/pm-workdirs/qa/pr-1-ab/s-1/repo")
+    status = {"pr_id": "pr-1", "overall": VERDICT_INPUT_REQUIRED,
+              "error": "",
+              "scenarios": [{"index": i, "title": f"S{i}",
+                             "verdict": VERDICT_INPUT_REQUIRED,
+                             "verdict_reason": reason} for i in (1, 2)]}
+
+    def visible(rows, cols):
+        out = qa_status._render(status, -1, rows, cols, tick=0)
+        return [re.sub(r"\033\[[0-9;?]*[A-Za-z]", "", line)
+                for line in out.splitlines()]
+
+    tall = visible(50, 109)
+    assert all(len(v) <= 109 for v in tall)
+    joined = " ".join(v.strip() for v in tall)
+    assert joined.count("Permission denied") == 2
+    assert "Overall: INPUT_REQUIRED" in joined
+    assert tall[0].startswith("QA Status: pr-1")
+
+    # No spare rows: each reason stays one cut line and the header and the
+    # footer still fit the pane.
+    short = visible(12, 109)
+    assert len(short) <= 12, short
+    assert short[0].startswith("QA Status: pr-1")
+    assert "Permission denied" not in " ".join(short)
+    assert sum(v.lstrip().startswith("\u21b3") for v in short) == 2
+    assert any("Overall: INPUT_REQUIRED" in v for v in short)
+
+
 def test_status_pane_tolerates_a_non_object_status_file(tmp_path):
     """A valid-JSON non-object qa_status.json must not kill the status pane.
 

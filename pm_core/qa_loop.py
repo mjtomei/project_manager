@@ -395,6 +395,32 @@ def _next_scenario_offset(pr_id: str, current_loop_id: str) -> int:
     return max_idx
 
 
+def _clone_failure_message(exc: subprocess.CalledProcessError,
+                           repo_root: Path, clone_path: Path) -> str:
+    """git's own error first, then the paths: why a scenario clone failed.
+
+    The reason is shown cut to one pane width (the QA status pane) and
+    bounded in the PR note, so it leads with git's last ``fatal:`` /
+    ``error:`` line.  git's "Cloning into '…'..." progress line is dropped
+    and the source/target paths follow the error: with them first, git's
+    error started some 300 characters in and no on-screen surface showed it
+    (QA S12 of pr-abc1124, a NAS clone failing on an unreadable object).
+    """
+    lines = [ln.strip() for ln in (exc.stderr or exc.stdout or "").splitlines()]
+    lines = [ln for ln in lines
+             if ln and not ln.startswith("Cloning into ")]
+    lead_at = next((i for i in range(len(lines) - 1, -1, -1)
+                    if lines[i].startswith(("fatal:", "error:"))),
+                   len(lines) - 1)
+    lead = lines[lead_at] if lines else str(exc)
+    msg = (f"git clone failed (rc {exc.returncode}): {lead} — cloning "
+           f"{repo_root} into {clone_path}")
+    rest = lines[:lead_at] + lines[lead_at + 1:]
+    if rest:
+        msg += "; git also said: " + " | ".join(rest)
+    return msg
+
+
 def create_scenario_workdir(qa_workdir: Path, scenario_index: int,
                             repo_root: Path | None = None,
                             pr_id: str = "",
@@ -468,10 +494,8 @@ def create_scenario_workdir(qa_workdir: Path, scenario_index: int,
     try:
         git_ops.run_git(*clone_args)
     except subprocess.CalledProcessError as exc:
-        detail = (exc.stderr or exc.stdout or "").strip()
-        raise RuntimeError(
-            f"git clone of {repo_root} into {clone_path} failed "
-            f"(rc {exc.returncode}): {detail or exc}") from exc
+        raise RuntimeError(_clone_failure_message(
+            exc, repo_root, clone_path)) from exc
 
     # The clone got `origin = <repo_root>` from the local clone.  Swap it
     # to the *real* upstream so push/fetch/pull from inside the scenario
@@ -668,19 +692,37 @@ def _planner_code_changes(workdir_path: str, before: str | None,
                   if p and not p.startswith("pm/"))
 
 
-def qa_outcome_detail(state: QALoopState) -> str:
+# Longest per-scenario reason a QA note carries (one line, "…" past it).
+_NOTE_REASON_MAX = 300
+
+
+def qa_outcome_detail(state: QALoopState, reasons: bool = False) -> str:
     """Per-scenario verdict summary, or why no scenario ran.
 
     When no scenario ran (an incomplete plan that was not consumed, or a
     failed handoff after a parsed plan) the reason lives in
     ``state._error``; without it the completion line and the QA note would
     end in an empty or all-"?" summary.
+
+    With *reasons* (the QA note) each scenario that did not PASS carries its
+    verdict reason, on one line and bounded: a scenario that never started
+    (e.g. its clone failed) otherwise left a note saying only
+    "INPUT_REQUIRED", and the next session could not tell why.
     """
     if state._error and not any(s.index in state.scenario_verdicts
                                 for s in state.scenarios):
         return " ".join(state._error.split())
-    parts = [f"{s.title}: {state.scenario_verdicts.get(s.index, '?')}"
-             for s in state.scenarios]
+    parts = []
+    for s in state.scenarios:
+        verdict = state.scenario_verdicts.get(s.index, "?")
+        part = f"{s.title}: {verdict}"
+        reason = " ".join(
+            (state.scenario_verdict_reasons.get(s.index) or "").split())
+        if reasons and reason and verdict not in (VERDICT_PASS, "?"):
+            if len(reason) > _NOTE_REASON_MAX:
+                reason = reason[:_NOTE_REASON_MAX - 1] + "…"
+            part += f" ({reason})"
+        parts.append(part)
     return "; ".join(parts)
 
 

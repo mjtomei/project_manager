@@ -1732,7 +1732,8 @@ def _record_qa_note(app, state: QALoopState,
         return True
     try:
         from datetime import datetime, timezone
-        note_text = f"QA {state.latest_verdict}: " + qa_outcome_detail(state)
+        note_text = (f"QA {state.latest_verdict}: "
+                     + qa_outcome_detail(state, reasons=True))
         # A run that failed on infrastructure (e.g. a container-mode launch
         # that could not create its container) records the cause+remedy in
         # the run's error.  ``qa_outcome_detail`` only surfaces that error
