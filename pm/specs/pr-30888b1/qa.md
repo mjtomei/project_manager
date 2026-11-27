@@ -87,6 +87,11 @@
 - When the user opens the plans view (`p`).
 - Then the footer shows `a=add c=review l=load e=edit D=deps p=back`, with no `w=breakdown`.
 - `?` in the plans view lists Plan Actions a / e / c / l, with no "Break plan into PRs" row.
+- The footer stays fully visible as the plan list grows (via `a`, or via a
+  `pm plan add` from another shell that triggers a TUI refresh) and as PR
+  counts change after `l`. QA S3 found it clipped once a second plan was added;
+  fixed in 2261f26a (`update_plans` now refreshes with `layout=True`). With more
+  plans than fit, the footer is reached by moving to the last plan.
 
 **R9: `w` in the plans view.**
 - Given the plans view with a plan selected.
@@ -96,6 +101,11 @@
   - the log line shows the watcher prefix hint `w … (w=list f=focus s=start/stop r=review)`;
   - Escape, a non-matching key, or 2 s of inactivity cancels it;
   - the plans view stays usable.
+- The chords work from the plans view as they do from the tree view:
+  `w w` lists watchers (or says none are registered), and `w r` opens the
+  watcher review session. Its prompt's "Forbidden" list names
+  `pm pr start`, `pm pr done`, `pm plan add` and `pm plan review`, but not breakdown.
+- See E8 for `w` followed by a plans-view action key.
 
 **R10: TUI add.**
 - Given the plans view.
@@ -158,9 +168,24 @@
 - **Claude stand-ins** (real Claude is not available to QA):
   - **Plain-shell stories that need to see the prompt:** put an executable `claude` early on PATH that records its last argv entry to a file (and copies that file if the argument is a path), then exits 0. Run pm as `env PATH=<standbin>:$PATH pm …`.
   - **"Claude not installed" stories:** run with a PATH that has no `claude`. The printed copy-paste prompt is then the visible surface.
-  - **TUI / pane flows:** tmux panes do **not** inherit a custom PATH. Use the bundled fake instead:
+  - **TUI / pane flows that need to see the prompt:** export the recording stand-in's
+    directory at the front of PATH *before* `pm session`. The session forwards
+    that PATH to its panes (verified in QA S6). Do not use the fake-claude config
+    for this: it is tag-keyed, hijacks shell `plan add` too, and never sees the
+    prompt.
+  - **TUI / pane flows that only need a live session:** use
     `pm fake-claude config set --tag <session-tag> '{"_all": {}}'`.
     Plan / guide sessions are no-verdict, so the fake prints output and stays open.
+  - **Container traps** (from QA S1/S3 refiners):
+    - the QA container has a real `claude` in `/usr/local/bin` next to `pm`.
+      For "no Claude", make a directory holding only a `pm` symlink and use
+      `PATH=<that dir>:/usr/bin:/bin`; check that `command -v claude` is empty.
+    - a recording stand-in must be first on PATH and exit 0. A non-zero exit
+      makes `launch_claude` retry with a fresh session.
+    - `less` and `vi` are missing: `sudo apt-get install -y less vim-tiny` and
+      `export EDITOR=vi` before `pm session`, or the Enter / `e` panes die at once.
+    - building a 300-PR fixture takes about 8 minutes of `pm pr add`; run it in
+      the background.
 - **Standing in for the plan session's output:** the fake does not write files.
   To get "the session wrote the plan and its PRs", write the plan file in the
   format the prompt asks for: a body, then `## PRs`, then `### PR:` entries
@@ -205,6 +230,27 @@
 - After R11/R12, the user writes PRs through the review session (stand-in: write the `## PRs` section), then presses `l`.
 - Then the PRs load into the **same** plan id, and no second plan entry is created.
 
+**E8: `w` followed by a plans-view action key.**
+- Given the plans view, with a plan selected.
+- When the user presses `w`, then within 2 s presses `c`, `l` or `e`, and then
+  presses `r` or `s` shortly after.
+- Then the key after `w` is resolved as part of the `w` chord. `c` / `l` / `e`
+  are not watcher keys, so the prefix cancels ("w cancelled") and the plan action
+  does not also fire. The following `r` / `s` is not swallowed as a watcher command.
+- Why this can go wrong: the plans pane sees keys before the app-level prefix
+  handler, so its action keys can fire while the prefix stays armed. That
+  ordering is pre-existing: tree-view `w` then `j` / `k` leaves the prefix armed.
+  This PR is what exposes the plans view to it, because `w` used to be consumed
+  as breakdown there. Record what happens and compare with tree-view `w` then `j`.
+
+**E9: Other Claude-facing TUI prompts.**
+- The TUI's interactive Claude session (tree view) and the watcher review session
+  (`w r`) carry the TUI-usage section.
+- That section lists the session-launching commands not to run (`pm pr start`,
+  `pm pr done`, `pm plan add`, `pm plan review`) and the plan keys `a`/`c`/`l`.
+  Neither prompt mentions breakdown or `w` as a plan key.
+- Seen through the recording stand-in on PATH before `pm session`.
+
 **E7: Malformed PR fields (pre-existing; tracked by pr-5cee3d5).**
 - Given a hand-edited `depends_on: 7`.
 - Then `plan add` crashes with `TypeError: can only join an iterable` while building the existing-PR listing, after the plan entry is registered. `pm pr list` / `pm pr graph` crash the same way on master.
@@ -213,7 +259,7 @@
 ## 4. Pass/Fail Criteria
 
 **Pass:**
-- Every Then in R1–R16 and E1, E2, E4, E5, E6 is observed on the user surface: command output, the recorded or printed prompt, `pm plan list` / `pm pr list` / `pm pr graph`, TUI renders, tmux windows and panes, and the TUI log line.
+- Every Then in R1–R16 and E1, E2, E4, E5, E6, E8, E9 is observed on the user surface: command output, the recorded or printed prompt, `pm plan list` / `pm pr list` / `pm pr graph`, TUI renders, tmux windows and panes, and the TUI log line.
 - No live user surface mentions `pm plan breakdown`, `w=breakdown` or "Break plan into PRs".
 
 **Fail:**
@@ -229,7 +275,13 @@
 **Not failures for this PR:**
 - E3 (pr-2b9d002) and E7 (pr-5cee3d5);
 - the background check never reporting (A2, pr-e2cd753);
-- `v=view` in `pm getting-started` with no `v` key (pre-existing; pr-fa9f172 rewords it).
+- `v=view` in `pm getting-started` with no `v` key (pre-existing; pr-fa9f172 rewords it);
+- tech tree keeps only its first row after a refresh while the plans view is open (pr-29690d8);
+- plan review prompt renders "(plan: None)" for PRs with no plan (pr-95286f9);
+- plans-view Enter runs bare `less` with no fallback (pr-2ea2797);
+- doubled "Error: Error:" prefix on TUI command-bar errors (pr-6dcca52);
+- status bar omits WCH right after `w s` (pr-edc256b);
+- the `_MANUAL_TESTING_GUIDANCE` INPUT_REQUIRED wording (pr-a7d4dae).
 
 ## 5. Ambiguities (all resolved)
 
@@ -247,5 +299,11 @@ It was dropped and was not moved to `plan add`. A file-path NAME together with t
 
 **A5: Cross-PR conflicts** (pr-6c0ee2d, pr-5cee3d5, pr-3526677, pr-fa9f172, pr-fe4ca5d).
 These are handled by notes on those PRs and do not affect what is tested on this branch.
+
+**A6: `w` then a plans-view action key (E8).**
+R9 already says a non-matching key cancels the prefix. A plan action that fires
+while the prefix stays armed therefore fails R9, because this PR is what exposes
+the plans view to it. Tree-view `w` then `j` / `k` behaving the same way is a
+pre-existing sibling. Note it, but it does not excuse the plans-view case.
 
 No **[UNRESOLVED]** items.
