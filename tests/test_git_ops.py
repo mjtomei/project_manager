@@ -110,6 +110,39 @@ class TestClone:
         second_args = mock_rg.call_args_list[1][0]
         assert "--branch" not in second_args
 
+    @patch("pm_core.git_ops.run_git")
+    def test_clone_onto_network_storage_copies_objects(self, mock_rg,
+                                                       tmp_path, monkeypatch):
+        """A PR workdir cloned onto a NAS (``workdirs-dir``) from a source
+        on that same NAS must not hard-link: sshfs makes inode numbers up
+        per path and git then dies with "hardlink different from source".
+        The fallback clone copies too."""
+        from pm_core import paths
+        nas = tmp_path / "nas"
+        nas.mkdir()
+        mountinfo = tmp_path / "mountinfo"
+        mountinfo.write_text(
+            "1 0 0:1 / / rw - ext4 /dev/sda1 rw\n"
+            f"2 1 0:2 / {nas} rw - fuse.sshfs nas:/export rw\n")
+        monkeypatch.setattr(paths, "_MOUNTINFO", str(mountinfo))
+        mock_rg.side_effect = [MagicMock(returncode=128),
+                               MagicMock(returncode=0)]
+        clone(str(nas / "src"), nas / "workdirs" / "wd", branch="main")
+        first, second = (c[0] for c in mock_rg.call_args_list)
+        assert "--no-hardlinks" in first
+        assert "--no-hardlinks" in second
+
+    @patch("pm_core.git_ops.run_git")
+    def test_clone_on_local_disk_keeps_hardlinks(self, mock_rg, tmp_path,
+                                                 monkeypatch):
+        from pm_core import paths
+        mountinfo = tmp_path / "mountinfo"
+        mountinfo.write_text("1 0 0:1 / / rw - ext4 /dev/sda1 rw\n")
+        monkeypatch.setattr(paths, "_MOUNTINFO", str(mountinfo))
+        mock_rg.return_value = MagicMock(returncode=0)
+        clone("/src", tmp_path / "wd")
+        assert "--no-hardlinks" not in mock_rg.call_args_list[0][0]
+
 
 # ---------------------------------------------------------------------------
 # configure_dual_remote

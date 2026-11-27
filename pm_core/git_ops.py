@@ -103,13 +103,30 @@ def git_detail(result: subprocess.CompletedProcess) -> str:
             + (result.stderr or "").strip()).strip()
 
 
+def no_hardlink_args(dest: str | Path) -> list[str]:
+    """``git clone`` options for a clone into *dest*: ``--no-hardlinks``
+    on network storage, none on local disk.
+
+    A clone from a local path hard-links the source's objects, then checks
+    that each link kept the file's identity (inode, device, owner) and dies
+    with "hardlink different from source" when it did not.  sshfs and other
+    FUSE network filesystems make inode numbers up per path, so a NAS that
+    holds both a PR workdir and a QA checkout of it (``workdirs-dir``) fails
+    every scenario clone.  There the objects are copied instead; local
+    clones keep the hard links.  No effect on a clone from a URL.
+    """
+    from pm_core.paths import is_network_filesystem
+    return ["--no-hardlinks"] if is_network_filesystem(dest) else []
+
+
 def clone(repo_url: str, dest: Path, branch: Optional[str] = None) -> None:
     """Clone a repo to dest.
 
     Falls back to cloning without --branch if the branch doesn't exist
     (e.g. empty repos or repos where the default branch differs).
     """
-    args = ["clone", repo_url, str(dest)]
+    link_args = no_hardlink_args(dest)
+    args = ["clone", repo_url, str(dest), *link_args]
     if branch:
         args.extend(["--branch", branch])
     result = run_git(*args, check=False)
@@ -121,7 +138,7 @@ def clone(repo_url: str, dest: Path, branch: Optional[str] = None) -> None:
         if dest.exists():
             shutil.rmtree(dest)
         # Retry without --branch (handles empty repos, wrong default branch)
-        run_git("clone", repo_url, str(dest))
+        run_git("clone", repo_url, str(dest), *link_args)
 
 
 def configure_dual_remote(workdir: str | Path, local_source: str,

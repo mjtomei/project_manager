@@ -459,11 +459,19 @@ def create_scenario_workdir(qa_workdir: Path, scenario_index: int,
     # out would make a failed hardlink fatal ("Invalid cross-device
     # link") when the source repo (a regression/debug run's project
     # checkout) is on another filesystem than ~/.pm, instead of falling
-    # back to copying the objects.
+    # back to copying the objects.  On network storage (``workdirs-dir`` on
+    # a NAS) the objects are always copied: see git_ops.no_hardlink_args.
     clone_args = ["clone", str(repo_root), str(clone_path)]
     if branch:
         clone_args.extend(["--branch", branch])
-    git_ops.run_git(*clone_args)
+    clone_args.extend(git_ops.no_hardlink_args(clone_path))
+    try:
+        git_ops.run_git(*clone_args)
+    except subprocess.CalledProcessError as exc:
+        detail = (exc.stderr or exc.stdout or "").strip()
+        raise RuntimeError(
+            f"git clone of {repo_root} into {clone_path} failed "
+            f"(rc {exc.returncode}): {detail or exc}") from exc
 
     # The clone got `origin = <repo_root>` from the local clone.  Swap it
     # to the *real* upstream so push/fetch/pull from inside the scenario
@@ -2793,8 +2801,9 @@ def _launch_scenario_0(
             loop_id=state.loop_id,
             branch=branch,
         )
-    except Exception:
-        _log.warning("Failed to create workdir for Scenario 0, skipping")
+    except Exception as exc:
+        _log.warning("Failed to create workdir for Scenario 0, skipping: %s",
+                     exc)
         return None
 
     scenario.worktree_path = str(clone_path)

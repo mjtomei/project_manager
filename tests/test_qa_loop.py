@@ -540,6 +540,74 @@ class TestQAWorkdirs:
                           str(qa_workdir / "s-0" / "repo"),
                           "--branch", "master")]
 
+    @staticmethod
+    def _git_repo(path):
+        import subprocess as _sp
+        path.mkdir(parents=True)
+        import os as _os
+        env = {**_os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+               "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
+        _sp.run(["git", "init", "-q", "-b", "master", str(path)], check=True)
+        (path / "f.txt").write_text("x\n")
+        _sp.run(["git", "-C", str(path), "add", "f.txt"], check=True, env=env)
+        _sp.run(["git", "-C", str(path), "commit", "-q", "-m", "c"],
+                check=True, env=env)
+
+    @staticmethod
+    def _object_link_counts(repo):
+        objs = repo / ".git" / "objects"
+        return {p.stat().st_nlink for p in objs.glob("??/*")}
+
+    def test_clone_on_network_storage_copies_objects(self, tmp_path,
+                                                     monkeypatch):
+        """With ``workdirs-dir`` on a NAS the PR workdir and the run's
+        checkouts share that filesystem, so git hard-links the objects —
+        and on sshfs (inode numbers made up per path) dies with "hardlink
+        different from source" for every scenario (QA S6 of pr-abc1124).
+        On network storage the objects are copied; locally they stay
+        hard-linked."""
+        from pm_core import paths
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path / "home")
+        nas = tmp_path / "nas"
+        self._git_repo(nas / "pr-workdir")
+        mountinfo = tmp_path / "mountinfo"
+        mountinfo.write_text(
+            "1 0 0:1 / / rw - ext4 /dev/sda1 rw\n"
+            f"2 1 0:2 / {nas} rw - fuse.sshfs nas:/export rw\n")
+        monkeypatch.setattr(paths, "_MOUNTINFO", str(mountinfo))
+        with patch("pm_core.push_proxy.resolve_real_origin",
+                   return_value=None):
+            clone, _ = create_scenario_workdir(
+                nas / "qa" / "run", 1, repo_root=nas / "pr-workdir",
+                branch="master")
+            assert (clone / "f.txt").read_text() == "x\n"
+            assert self._object_link_counts(clone) == {1}
+
+            # Control: the same clone on local disk keeps the hard links.
+            mountinfo.write_text("1 0 0:1 / / rw - ext4 /dev/sda1 rw\n")
+            local, _ = create_scenario_workdir(
+                nas / "qa" / "run", 2, repo_root=nas / "pr-workdir",
+                branch="master")
+            assert self._object_link_counts(local) == {2}
+
+    def test_clone_failure_names_git_error(self, tmp_path, monkeypatch):
+        """A failed clone says why: the scenario's verdict reason and the
+        log line used to carry only "returned non-zero exit status 128"."""
+        import subprocess as _sp
+        import pytest as _pytest
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path / "home")
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        err = _sp.CalledProcessError(
+            128, ["git", "clone"],
+            stderr="fatal: hardlink different from source at 'x'\n")
+        with patch("pm_core.git_ops.run_git", side_effect=err):
+            with _pytest.raises(RuntimeError) as exc:
+                create_scenario_workdir(tmp_path / "qa", 1,
+                                        repo_root=repo_root, branch="b")
+        assert "hardlink different from source" in str(exc.value)
+        assert "rc 128" in str(exc.value)
+
 
 class TestQALoopState:
     def test_defaults(self):
