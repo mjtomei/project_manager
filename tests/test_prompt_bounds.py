@@ -1990,13 +1990,16 @@ class TestPlanPromptBounding:
         assert result.exit_code == 0, result.output
         assert prompt_bytes(result.output) <= PROMPT_ARG_LIMIT + 300
 
-    def test_plan_breakdown_many_existing_prs_bounded(self, tmp_path):
+    def test_plan_add_many_existing_prs_bounded(self, tmp_path):
+        """plan add lists the project's existing PRs for its PR breakdown;
+        that listing is capped and points at `pm pr list`."""
         root = _make_plan_state(tmp_path, plan_prs=0, other_prs=300)
         with patch("pm_core.cli.plan.find_claude", return_value=None):
             result = CliRunner().invoke(
-                cli, ["-C", str(root), "plan", "breakdown", "pl-001"])
+                cli, ["-C", str(root), "plan", "add", "New plan"])
         assert result.exit_code == 0, result.output
         assert prompt_bytes(result.output) <= PROMPT_ARG_LIMIT + 300
+        assert "more; run `pm pr list` to see all PRs)" in result.output
 
     def test_plan_lists_bound_long_titles_too(self, tmp_path):
         """The plan *listings* are count-capped, but their lines carry
@@ -2008,7 +2011,7 @@ class TestPlanPromptBounding:
         """
         root = _make_plan_state(tmp_path, plan_prs=40, other_prs=300,
                                 title_size=4_000)
-        for argv in (["plan", "breakdown", "pl-001"], ["plan", "deps"]):
+        for argv in (["plan", "add", "New plan"], ["plan", "deps"]):
             with patch("pm_core.cli.plan.find_claude", return_value=None):
                 result = CliRunner().invoke(cli, ["-C", str(root)] + argv)
             assert result.exit_code == 0, (argv, result.output)

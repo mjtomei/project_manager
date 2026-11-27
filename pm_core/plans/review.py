@@ -14,14 +14,10 @@ from pm_core.shell import shell_quote
 
 REVIEW_PROMPTS = {
     "plan-add": (
-        'Read the plan file at {path}. Does it contain a substantive plan description '
-        '(not just the template placeholder "<!-- Describe the plan here -->" or similar)? '
-        'Output PASS if yes, NEEDS_FIX if no, followed by a brief explanation.'
-    ),
-    "plan-breakdown": (
-        'Read the plan file at {path}. Does it have a "## PRs" section with at least one '
-        '"### PR:" entry that has description, tests, files fields? '
-        'Output PASS if yes, NEEDS_FIX if no, followed by what\'s missing.'
+        'Read the plan file at {path}. Does it have a substantive plan description '
+        '(not just the template placeholder "<!-- Describe the plan here -->" or similar) '
+        'AND a "## PRs" section with at least one "### PR:" entry that has description, '
+        'tests, files fields? Output PASS if yes, NEEDS_FIX if no, followed by what\'s missing.'
     ),
     "plan-deps": (
         'Run `pm pr list` and `pm pr graph`. Check for: circular dependencies, '

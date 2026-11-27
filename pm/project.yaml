@@ -2139,9 +2139,25 @@ prs:
       5 pre-existing test failures unrelated to this PR.'
     created_at: '2026-03-02T00:32:58Z'
     last_edited: '2026-03-02T00:32:58Z'
+  - id: note-ee7d3f4
+    text: 'From pr-30888b1 (review ea03 i3): pr-30888b1 removes `pm plan breakdown`,
+      the plans-pane `w`=breakdown key, the `breakdown` branch of `pane_ops.handle_plan_action`
+      and REVIEW_PROMPTS["plan-breakdown"]. `pm plan add` now writes the ## PRs section,
+      and `pm plan review` (key c) proposes one when it is missing. When you bring
+      this branch up to master (3,878 commits behind) after pr-30888b1 merges: keep
+      `w`=work, since that key is then free in the plans pane. Drop the `d`=breakdown
+      remap and its `pm plan breakdown` launch in handle_plan_action, and the `d`/breakdown
+      parts of the plans footer, help screen and getting-started key line. Also drop
+      the guide.py "Break down" lifecycle step (pr-30888b1 renumbers the steps to
+      Init, Plan, Review, Load, Work, Review, Merge), the tui_tests.py edits (master
+      deleted that file in favour of pm/qa), and test_work_and_breakdown_keys plus
+      the "d": "breakdown" entry in the tests/test_plans_pane.py key map. tests/test_plan_add_breakdown.py::test_no_source_references_to_breakdown_step
+      fails on any `plan breakdown`, `plan-breakdown` or `=breakdown  ` left in pm_core.'
+    created_at: '2026-11-26T18:48:54Z'
+    last_edited: '2026-11-26T18:49:23Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-b764a0c-add-plan-worker-pane-generic-claude--ab512a43
   created_at: '2026-02-27T10:12:26.609316+00:00'
-  updated_at: '2026-03-23T13:16:19.520063+00:00'
+  updated_at: '2026-11-26T18:49:23.135824+00:00'
 - id: pr-0a7d9ee
   plan: null
   title: Add companion workdir pane for implementation and merge windows
@@ -2311,9 +2327,158 @@ prs:
   started_at: '2026-03-01T17:51:46.490716+00:00'
   reviewed_at: '2026-03-02T00:28:13.443852+00:00'
   merged_at: null
-  notes: []
+  notes:
+  - id: note-e78ccd7
+    text: 'Resumed 2026-11-26: merged origin/master@ac719072 (6517d7d5; conflicts
+      plan.py, pane_ops.py, tui_tests.py kept deleted) and re-applied the fold on
+      current master (85e28f45): plan add existing-PR listing now bounded (bounded_join
+      40/20KB), seed-from-source-PR-list sentence replaces breakdown --prs, pre-load
+      plan review proposes a breakdown when the plan has no ## PRs (recovery path
+      now that w is gone), guide flow a->c->l. Spec + rendered prompts: pm/specs/pr-30888b1/impl.md,
+      prompts/{before,after,diff.txt}. Full suite 5698 passed/1 skipped (/pm-captures/pr-30888b1-impl/).
+      Handoff for pr-6c0ee2d (not in this workdir registry, so not noted there — owner
+      please relay): plan breakdown is removed; wire architecture awareness into plan
+      add, plan review and plan import only (append next to notes_block at the end
+      of the plan add prompt), and put greenfield pm/architecture.md seeding in plan
+      add.'
+    created_at: '2026-11-26T15:52:14Z'
+    last_edited: '2026-11-26T15:52:14Z'
+  - id: note-d7f05c7
+    text: 'Review 4efb i1 (79a5a5b2): plan load "No PRs found" now points at `pm plan
+      review <id>` (key c) instead of re-running plan add, which would orphan the
+      draft; test added. pr-6c0ee2d relay, update to note-e78ccd7: its impl ee67fb0b
+      adds arch_block to plan_breakdown AND a `_PLAN_COMMANDS["breakdown"]` case in
+      tests/test_prompt_gen.py. Trial merge: plan.py conflicts only on the breakdown
+      block (drop it; plan add picks up arch_block cleanly); test_prompt_gen.py merges
+      cleanly but TestPlanPrompts::test_includes_architecture_when_present[breakdown]
+      and test_clean_when_absent[breakdown] fail with "No such command". Whichever
+      PR merges second must drop that case. Suite 5699/1s: /pm-captures/pr-30888b1-review-4efb-i1/.'
+    created_at: '2026-11-26T16:08:29Z'
+    last_edited: '2026-11-26T16:08:29Z'
+  - id: note-76a72be
+    text: 'Review 4efb i2: tests/test_plan_add_breakdown.py now resets helpers._project_override
+      per test (autouse monkeypatch); its `cli -C` calls leaked a deleted tmp root
+      into later tests (same class as pr-5dfc63b). Re-ran the pr-6c0ee2d trial merge
+      at its new head 57fb8168: same single conflict (drop plan_breakdown) and same
+      2 [breakdown] test_prompt_gen failures; spec Ambiguity 5 updated. Cross-PR note
+      left on pr-fe4ca5d (popup `b`=breakdown becomes a dead key). Suite 5699 passed/1
+      skipped: /pm-captures/pr-30888b1-review-4efb-i2/.'
+    created_at: '2026-11-26T16:28:52Z'
+    last_edited: '2026-11-26T16:28:52Z'
+  - id: note-9a98769
+    text: 'Review 4efb i3: no code changes. Scanned every origin/pm/* branch for added
+      breakdown references and trial-merged the live ones. pr-5cee3d5: its graph.deps_of
+      fix sits in the dropped plan_breakdown block and must move to plan_add._existing_line;
+      its malformed-fields test invokes `plan breakdown` (note-8d8d63a). pr-3526677:
+      test_completion asserts `plan breakdown ` completion (note-bd1376d). pr-fa9f172:
+      7 textual hunks in 4 files. pr-6c0ee2d at b81ba118: unchanged (1 hunk, 2 [breakdown]
+      failures). Spec Edge Cases updated; Appendix A re-render shows no drift.'
+    created_at: '2026-11-26T16:36:24Z'
+    last_edited: '2026-11-26T16:36:24Z'
+  - id: note-5fda37a
+    text: 'QA planning 2026-11-26 (spec pm/specs/pr-30888b1/qa.md @68fec4e3): the
+      impl spec lists the background plan-add check (NEEDS_FIX -> pm plan fix) as
+      a recovery path, but it never fires. review_step runs claude -p in a daemon
+      thread that dies when pm plan add exits, so no pm/reviews file is written. This
+      is the same on master and filed as pr-e2cd753, so plan review (key c) is the
+      only working recovery path. Also filed pr-2b9d002: concurrent same-name plan
+      add duplicates plan entries (pre-existing).'
+    created_at: '2026-11-26T16:50:43Z'
+    last_edited: '2026-11-26T16:50:43Z'
+  - id: note-cb0ffc8
+    text: 'QA S1 refiner 2026-11-26: verified live at 92d4732f (plan add prompt with/without
+      existing PRs, path-seeded plan, no-claude fallback, plan load + reload skip).
+      Trap for any no-Claude-fallback check: the container has a real claude in /usr/local/bin
+      next to pm, so PATH=/usr/local/bin:/usr/bin:/bin still launches real Claude.
+      Use a dir holding only a pm symlink (ln -s /usr/local/bin/pm $D/pm; PATH=$D:/usr/bin:/bin)
+      and confirm `command -v claude` is empty. A recording stand-in claude must come
+      first on PATH and exit 0 (non-zero makes launch_claude retry with a fresh session).'
+    created_at: '2026-11-26T16:56:15Z'
+    last_edited: '2026-11-26T16:56:15Z'
+  - id: note-62c6dbf
+    text: 'QA S3 refiner (plans view w/o breakdown, TUI): all 7 stories held live
+      at 92d4732f. Container lacks less and vi, so the plans-view Enter (less) and
+      e ($EDITOR, default vi) panes die at once with ''tmux: can''t find pane: %N''.
+      Fix: sudo apt-get update && sudo apt-get install -y less vim-tiny, and export
+      EDITOR=vi before pm session. ''plan breakdown'' in the command bar logs ''Error:
+      Error: No such command ...'': the double prefix is the TUI''s generic stderr
+      echo, not this PR.'
+    created_at: '2026-11-26T17:15:24Z'
+    last_edited: '2026-11-26T17:15:24Z'
+  - id: note-d41ec36
+    text: 'QA S3 run: all 7 plans-view stories passed live at 1d6bc594 (/pm-captures/scenarios/3).
+      Incidental fix 2261f26a: the plans-view footer was clipped once ''a'' added
+      a second plan. PlansPane is height:auto and update_plans used refresh() without
+      layout=True; this predates the PR and is also on master. Fix: refresh(layout=True)
+      plus tests/test_plans_pane.py::TestPlansPaneHeightTracksContent. Pre/post captures
+      are in scenarios/3/pre-fix and post-fix. Full suite 5701 passed/1 skipped.'
+    created_at: '2026-11-26T17:41:35Z'
+    last_edited: '2026-11-26T17:41:35Z'
+  - id: note-e3cab91
+    text: 'QA S6 refiner (2026-11-26, f51e6fcf): all 3 stories held live, 300-PR fixture
+      (~8 min of pm pr add; run it in background). CLI count cap: 40 lines then "...
+      (+260 more; run `pm pr list` to see all PRs)", prompt 6.4 KB. Byte cap: after
+      `pm pr edit --title` gives 6 of the first 40 PRs ~6.1 KB titles, the listing
+      stops at 17 lines (~19.5 KB) then +283 more; prompt 23 KB, still one argv entry,
+      so the file fallback is not reachable from plan add. TUI: use the recording
+      stand-in exported on PATH before `pm session` (forwarded to panes), not fake-claude
+      config (tag-keyed, hijacks shell plan add and never sees the prompt). Pre-existing
+      on master c9805cdd, not this PR: any refresh while the plans view is open (r,
+      or the one a TUI plan add triggers) leaves the tech tree missing every row below
+      the first and no selected node after `p` back; `r` in tree view repaints in
+      ~3 s. No PR tracks it; file one. 300-PR tree j/k latency 50-340 ms.'
+    created_at: '2026-11-26T18:01:12Z'
+    last_edited: '2026-11-26T18:01:12Z'
+  - id: note-2a2b67c
+    text: 'QA S6 run (2026-11-26, f51e6fcf): PASS 3/3 live, no code change. Story
+      1 (300 PRs): shell plan add → 6324-byte single argv (argc=3, no prompt file),
+      40 listing lines then "... (+260 more; run `pm pr list` to see all PRs)". Story
+      2 (6 x 6.1 KB titles): 17 lines / 19,492 B then +283 more, prompt 22,983 B,
+      sections unchanged. Story 3 (TUI p,a): plan-c43cefd window holds the stand-in,
+      prompt 22,977 B with the same 17-line listing, Launched plan-add pane, 3 plans;
+      nav 37-145 ms, 40-key bursts settle ~0.7 s. Pre-existing tree row loss after
+      a refresh in the plans view, replayed on master c9805cdd: filed pr-29690d8.
+      Captures: /pm-captures/scenarios/6/.'
+    created_at: '2026-11-26T18:21:35Z'
+    last_edited: '2026-11-26T18:21:35Z'
+  - id: note-e241d4c
+    text: 'Review ea03 i1: no code changes. Code diff, tests and the QA S3 footer
+      fix (refresh(layout=True)) reviewed clean; 255 PR-affected tests pass. Spec
+      impl.md corrected: Implicit Requirements + Edge Cases no longer claim the background
+      plan-add check as a working recovery path (it never reports, pr-e2cd753), so
+      plan review (key c) is the only one; R3/R6 now list the footer fix and TestPlansPaneHeightTracksContent.
+      pr-6c0ee2d trial merge re-run at its new head 5c4914f5: same single plan.py
+      hunk (drop plan_breakdown) and same 2 [breakdown] test_prompt_gen failures (2
+      failed, 200 passed). No origin/pm/* branch updated since i3 adds new breakdown
+      references.'
+    created_at: '2026-11-26T18:36:38Z'
+    last_edited: '2026-11-26T18:36:38Z'
+  - id: note-3c9be20
+    text: 'Review ea03 i2: no code changes; 327 PR-affected tests pass. Earlier branch
+      scans only grepped for added breakdown lines, so pending PRs whose descriptions
+      target `plan breakdown` were missed. Cross-PR notes added: pr-a7d4dae (bug 1
+      already fixed, only the _MANUAL_TESTING_GUIDANCE INPUT_REQUIRED wording is left),
+      pr-df6cd9f and pr-86c2188 (put the breakdown-prompt work in plan add / plan
+      review), pr-fcaa434 (its plan_breakdown hunk becomes modify/delete, keep the
+      deletion; merge-tree marker counts match master per file, so no new conflict).
+      Still not addressed: pm/plans prose (plan-mind, refactor-migration-map, refactor-new-files,
+      plan-sensorium) still describes a future PlanBreakdownStream. No loaded PR implements
+      it, so it is left to those plans.'
+    created_at: '2026-11-26T18:42:21Z'
+    last_edited: '2026-11-26T18:42:21Z'
+  - id: note-d26732d
+    text: 'Review ea03 i3: no code changes. 923 PR-affected tests pass and the Appendix
+      A re-render shows no drift. master is still ac719072, and no origin/pm/* branch
+      pushed since i2 adds breakdown lines (pr-6c0ee2d is still at 5c4914f5). Cross-PR
+      notes added for open PRs that earlier scans missed: pr-b764a0c (in_review: its
+      branch adds w=work plus a d=breakdown remap, so keep w and drop the d/breakdown
+      parts, note-ee7d3f4), pr-a6ef6be (its w=breakdown ... r=lit-review key line
+      conflicts, note-2fc7bb0) and pr-93b9aa9 (its description quotes the old forbidden
+      list, note-f2c9066).'
+    created_at: '2026-11-26T18:49:54Z'
+    last_edited: '2026-11-26T18:49:54Z'
   created_at: '2026-03-01T17:51:46.490716+00:00'
-  updated_at: '2026-03-23T13:13:51.902620+00:00'
+  updated_at: '2026-11-26T18:49:55.120237+00:00'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-30888b1-fold-plan-breakdown-into-plan-add-st-ab512a43
 - id: pr-3116896
   plan: tui-ux
@@ -8247,11 +8412,19 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-13T17:53:46.060213+00:00'
-  updated_at: '2026-03-13T17:53:46.060213+00:00'
+  updated_at: '2026-11-26T18:40:56.510945+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-c87748e
+    text: 'From pr-30888b1 (review ea03 i2): `pm plan breakdown` is removed. Its PR-breakdown
+      step now runs inside `pm plan add` (pm_core/cli/plan.py::plan_add), and the
+      pre-load `pm plan review` proposes a breakdown when a plan has no ## PRs. Put
+      the planning-prompt decision-point guidance in plan add and plan review, not
+      "plan breakdown".'
+    created_at: '2026-11-26T18:40:56Z'
+    last_edited: '2026-11-26T18:40:56Z'
 - id: pr-ebc8615
   plan: watchers
   title: 'Decision point watcher: monitor and surface parallel explorations'
@@ -12017,9 +12190,21 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-11T21:35:26.923277+00:00'
-  updated_at: '2026-04-12T00:58:16.384705+00:00'
+  updated_at: '2026-11-26T18:40:51.133807+00:00'
   started_at: null
   reviewed_at: null
+  notes:
+  - id: note-6ab9e8f
+    text: 'From pr-30888b1 (review ea03 i2): pr-30888b1 removes `pm plan breakdown`
+      and its prompt, and folds the breakdown guidance into `pm plan add`. Bug 1 here
+      is already fixed on master: the plan add prompt ends with `pm plan load <id>`
+      (key l) and lists `pm plan review` only as optional, and the pre-load plan review
+      also ends with load. Only bug 2 is left: `_MANUAL_TESTING_GUIDANCE` in pm_core/cli/plan.py
+      still says "so the review loop can use INPUT_REQUIRED appropriately". After
+      pr-30888b1 that constant is used by plan add, both plan review variants and
+      plan import. There is no breakdown prompt to fix.'
+    created_at: '2026-11-26T18:40:50Z'
+    last_edited: '2026-11-26T18:40:50Z'
 - id: pr-a353c3d
   plan: improvements
   title: Launch plan pane actions in a dedicated plans window instead of the main
@@ -22353,11 +22538,22 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/202
   gh_pr_number: 202
   created_at: '2026-05-04T16:49:56.497186+00:00'
-  updated_at: '2026-05-05T17:34:57.749578+00:00'
+  updated_at: '2026-11-26T18:41:05.826235+00:00'
   started_at: '2026-05-05T12:17:16.474249+00:00'
   reviewed_at: '2026-05-05T17:34:57.749578+00:00'
   merged_at: null
-  notes: []
+  notes:
+  - id: note-1956650
+    text: 'From pr-30888b1 (review ea03 i2): `pm plan breakdown` (plan_breakdown in
+      pm_core/cli/plan.py) is removed, so drop it from the affected-commands list.
+      When this branch next merges master after pr-30888b1, its launch_claude_in_window
+      hunk inside plan_breakdown becomes a modify/delete conflict; resolve it by keeping
+      the deletion. A merge-tree against master and against pr-30888b1 both show 13
+      conflict markers, so this adds no new conflict. The plan_add, plan_review and
+      other hunks are unaffected, and tests/test_window_launch.py has no breakdown
+      case.'
+    created_at: '2026-11-26T18:41:05Z'
+    last_edited: '2026-11-26T18:41:05Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-fcaa434-bug-plan-subcommands-launch-claude-i-e2eb17b8
 - id: pr-3526677
   plan: improvements
@@ -22527,11 +22723,19 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/198
   gh_pr_number: 198
   created_at: '2026-05-04T16:52:29.746985+00:00'
-  updated_at: '2026-05-04T19:01:37.495672+00:00'
+  updated_at: '2026-11-26T16:36:14.558874+00:00'
   started_at: '2026-05-04T17:52:29.154111+00:00'
   reviewed_at: '2026-05-04T19:01:37.495672+00:00'
   merged_at: null
-  notes: []
+  notes:
+  - id: note-bd1376d
+    text: 'From pr-30888b1 review 4efb i3: pr-30888b1 removes the `pm plan breakdown`
+      command. tests/test_completion.py::test_real_cli_tree asserts `_words(c, "plan
+      breakdown ") == ["plan-001", "plan-abc"]`, which merges cleanly but fails once
+      both PRs are in. Use "plan review " instead: verified on a trial merge, 15 passed.
+      Whichever PR merges second makes the change.'
+    created_at: '2026-11-26T16:36:14Z'
+    last_edited: '2026-11-26T16:36:14Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-3526677-improvement-prefix-m-command-popup-b-1d7ca7a5
 - id: pr-438028c
   plan: improvements
@@ -22796,11 +23000,22 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/196
   gh_pr_number: 196
   created_at: '2026-05-04T17:20:58.908941+00:00'
-  updated_at: '2026-05-04T19:01:38.024215+00:00'
+  updated_at: '2026-11-26T16:28:47.918932+00:00'
   started_at: '2026-05-04T17:52:14.172608+00:00'
   reviewed_at: '2026-05-04T19:01:38.024215+00:00'
   merged_at: null
-  notes: []
+  notes:
+  - id: note-dcd3305
+    text: 'From pr-30888b1 review 4efb i2: pr-30888b1 removes `pm plan breakdown`,
+      the plans-pane `w` key and the `breakdown` branch of `pane_ops.handle_plan_action`
+      (plan add now writes the ## PRs section; pre-load plan review proposes one when
+      it is missing). This PR maps popup key `b` -> "breakdown" (`_PLAN_SHORTCUT_KEYS`,
+      `_PLAN_PER_PLAN_ACTIONS` in cli/session.py) and accepts `plan breakdown` in
+      pr_view.handle_command_submitted; after pr-30888b1 lands that key silently does
+      nothing. Whichever merges second: drop `b`/"breakdown" from those sets, the
+      command-bar tuple and their tests.'
+    created_at: '2026-11-26T16:28:47Z'
+    last_edited: '2026-11-26T16:28:47Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-fe4ca5d-improvement-prefix-key-plan-picker-p-1d7ca7a5
 - id: pr-f74988c
   plan: improvements
@@ -30746,11 +30961,20 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-17T21:49:17.795998+00:00'
-  updated_at: '2026-05-17T21:49:17.795998+00:00'
+  updated_at: '2026-11-26T18:49:04.956199+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-f2c9066
+    text: 'From pr-30888b1 (review ea03 i3): pr-30888b1 removes `pm plan breakdown`,
+      so the "do not run commands that spawn Claude sessions" lists in prompt_gen.tui_section,
+      the watcher-review prompt and the tui/pane_ops.py assistant prompt now name
+      only `pm pr start`, `pm pr done`, `pm plan add` and `pm plan review`. Your description
+      quotes the old list. Do not reintroduce `pm plan breakdown`: tests/test_plan_add_breakdown.py::test_no_source_references_to_breakdown_step
+      fails on it.'
+    created_at: '2026-11-26T18:49:04Z'
+    last_edited: '2026-11-26T18:49:04Z'
 - id: pr-a6ef6be
   plan: plan-3119574
   title: Session-launching CLI commands + project.yaml review registry
@@ -30784,7 +31008,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/211
   gh_pr_number: 211
   created_at: '2026-05-20T22:53:20.224284+00:00'
-  updated_at: '2026-05-30T21:40:59.458044+00:00'
+  updated_at: '2026-11-26T18:49:00.091740+00:00'
   started_at: '2026-05-21T04:08:35.118589+00:00'
   reviewed_at: '2026-05-21T04:43:53.080388+00:00'
   merged_at: null
@@ -30807,6 +31031,15 @@ prs:
       \ in the methodology docs."
     created_at: '2026-05-30T21:40:59Z'
     last_edited: '2026-05-30T21:40:59Z'
+  - id: note-2fc7bb0
+    text: 'From pr-30888b1 (review ea03 i3): pr-30888b1 removes `pm plan breakdown`
+      and the plans-pane `w`=breakdown key. Your cli/__init__.py getting-started key
+      line (`a=add  w=breakdown  c=review  r=lit-review ...`) will conflict with its
+      `a=add  c=review  l=load  e=edit  v=view`. Resolve it as `a=add  c=review  r=lit-review  l=load  e=edit  v=view`.
+      If you add `r` to the plans pane, tests/test_plan_add_breakdown.py::test_no_source_references_to_breakdown_step
+      rejects any `w=breakdown` or `=breakdown  ` left in pm_core.'
+    created_at: '2026-11-26T18:48:59Z'
+    last_edited: '2026-11-26T18:48:59Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-a6ef6be-session-launching-cli-commands-proje-a17683d9
 - id: pr-1160366
   plan: plan-3119574
@@ -40164,11 +40397,20 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T00:15:38.677768+00:00'
-  updated_at: '2026-10-23T22:00:24.118139+00:00'
+  updated_at: '2026-11-26T18:41:01.078645+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-97e2b6f
+    text: 'From pr-30888b1 (review ea03 i2): `pm plan breakdown` and REVIEW_PROMPTS["plan-breakdown"]
+      are removed. The PR-breakdown prompt family is now the second half of the `pm
+      plan add` prompt (pm_core/cli/plan.py::plan_add), so the plan-development and
+      PR-breakdown families render from one builder and one session. The fresh-generation
+      check "plan add and breakdown" becomes a single `pm plan add` run, with `pm
+      plan review` as the recovery path when a plan ends without ## PRs.'
+    created_at: '2026-11-26T18:41:00Z'
+    last_edited: '2026-11-26T18:41:00Z'
 - id: pr-3ae2fc3
   plan: improvements
   title: Add spec-review pauses to autostart
@@ -47099,11 +47341,22 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-25T20:35:32.509320+00:00'
+  updated_at: '2026-11-26T16:36:10.044735+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-8d8d63a
+    text: 'From pr-30888b1 review 4efb i3: pr-30888b1 removes `pm plan breakdown`
+      and moves its existing-PR listing (`_existing_line`) into `plan add`. Trial
+      merge of this branch with pr-30888b1: cli/plan.py conflicts only on the plan_breakdown
+      block. Drop the block, but port your `graph.deps_of(pr)` fix onto `plan_add`''s
+      `_existing_line`, or `plan add` crashes with TypeError on `depends_on: 7`. tests/test_prompt_bounds.py::test_plan_deps_tolerates_malformed_pr_fields
+      merges cleanly but invokes `plan breakdown` (exit 2, No such command): change
+      that argv to ["plan", "add", "New plan"]. Both changes together: the test passes.
+      Whichever PR merges second does this.'
+    created_at: '2026-11-26T16:36:09Z'
+    last_edited: '2026-11-26T16:36:09Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
@@ -56359,6 +56612,120 @@ prs:
   gh_pr_number: null
   created_at: '2026-11-02T08:57:36.104793+00:00'
   updated_at: '2026-11-02T08:57:36.104793+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-e2cd753
+  plan: bugs
+  title: 'Bug: plan post-step background review (review_step) is killed at CLI exit,
+    so no review file or fix pane ever appears'
+  branch: pm/pr-e2cd753-bug-plan-post-step-background-review-review-step-i
+  status: pending
+  depends_on: []
+  description: 'pm_core/plans/review.py::review_step runs the check via claude_launcher.launch_claude_print_background,
+    which starts a daemon=True thread. The CLI commands that call it (pm plan add/review/deps/load/import)
+    return right after, so the interpreter exits and kills the thread before `claude
+    -p` returns. Result: no pm/reviews/<step>-<ts>.txt is written, no PASS/NEEDS_FIX
+    background pane appears, and `pm plan fixes` stays empty. Repro (2026-11-26, observed
+    on the pr-30888b1 branch; master has the same daemon thread in launch_claude_print_background):
+    throwaway project, pm init --backend local --no-import; put a stand-in `claude`
+    on PATH that exits 0 immediately for interactive runs and prints "NEEDS_FIX: missing"
+    for `-p`; run `pm plan add X` -> prints "Reviewing results... (background)" then
+    exits; pm/reviews never exists. Fix options: run the check as a detached subprocess
+    (e.g. a `pm plan _check` child started with start_new_session) instead of an in-process
+    daemon thread, or join the thread before exit. Choosing between them is a UX call:
+    joining would keep the plan pane open until the check finishes.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-26T16:46:49.642436+00:00'
+  updated_at: '2026-11-26T16:47:05.685746+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-2b9d002
+  plan: bugs
+  title: 'Bug: concurrent pm plan add with the same name registers duplicate plan
+    entries sharing one id and plan file'
+  branch: pm/pr-2b9d002-bug-concurrent-pm-plan-add-with-the-same-name-regi
+  status: pending
+  depends_on: []
+  description: 'pm_core/cli/plan.py::plan_add generates the plan id from a project.yaml
+    snapshot taken outside the lock (store.generate_plan_id(name, existing_ids)),
+    writes plans/<id>.md, then appends the entry under store.locked_update without
+    re-checking the id. Repro (2026-11-26, pr-30888b1 branch; master has the same
+    id/lock ordering): throwaway project, pm init --backend local --no-import; run
+    three `pm plan add "Same"` in parallel with no claude on PATH -> all three print
+    "Created plan plan-2a98b1d: Same" and `pm plan list` shows plan-2a98b1d three
+    times, all pointing at one plan file. Later per-plan actions (load/review/edit)
+    then resolve an ambiguous id. Fix sketch: pick the id inside the locked_update
+    apply (re-derive against the locked data, extend on collision), then write the
+    plan file, and echo or launch with the final id. The TUI precomputes the id for
+    its per-plan window name, so a collision-extended id must still be reachable from
+    that window.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-26T16:49:27.176356+00:00'
+  updated_at: '2026-11-26T16:49:27.176356+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-95286f9
+  plan: bugs
+  title: 'Bug: plan review prompts render "(plan: None)" for cross-plan PRs with no
+    plan, and run the block into the next heading'
+  branch: pm/pr-95286f9-bug-plan-review-prompts-render-plan-none-for-cross
+  status: pending
+  depends_on: []
+  description: 'pm_core/cli/plan.py plan_review (_other_plan_line): pr.get("plan",
+    "?") prints the Python None when the key exists with a null value, so the "PRs
+    from other plans (for cross-plan reference):" block shows e.g. "pr-c896077: Existing
+    login PR [pending] (plan: None)". The block also ends with a single newline, so
+    it runs straight into "Check the following:" (pre-load) or "First, assess progress:"
+    (post-load) with no blank line. Repro: pm init --backend local --no-import; pm
+    pr add "X"; pm plan add "Y" (stand-in claude); write a plan body; pm plan review
+    <id>; inspect the recorded prompt. Same code on origin/master (pre-existing; seen
+    in QA S2 for pr-30888b1, /pm-captures/scenarios/2/story4-preload-review/preload-review-prompt.txt).
+    Fix: render a missing plan as "(no plan)" or omit it, and end the block with a
+    blank line.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-26T17:04:29.182095+00:00'
+  updated_at: '2026-11-26T17:04:29.182095+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-29690d8
+  plan: bugs
+  title: 'Bug: TUI tech tree keeps only its first node row after a refresh while the
+    plans view is open'
+  branch: pm/pr-29690d8-bug-tui-tech-tree-keeps-only-its-first-node-row-af
+  status: pending
+  depends_on: []
+  description: 'Pre-existing on master c9805cdd (not caused by pr-30888b1). Repro:
+    project with PRs in more than one tree row (24 independent PRs at 200x50 give
+    4 rows), start pm session, press p (plans view), trigger any refresh while the
+    plans view is shown (press r, or add a plan with `a`, which triggers one), then
+    press p to return to the tree. The tech tree now paints only the first row of
+    nodes; every row below it is blank and, when the selected node is not in row 1,
+    no double-bordered selection is visible. Pressing r in the tree view repaints
+    all rows in ~2-3 s. Likely location: pm_core/tui/app.py _show_plans_view/action_toggle_plans
+    hides the tree container (styles.display = none) and the refresh recomputes the
+    tree while it has no size, then showing it again does not re-layout (compare the
+    PlansPane refresh(layout=True) fix 2261f26a). Evidence: /pm-captures/scenarios/6/pre-existing-master/
+    (master, 4 rows -> 1 after p,r,p; r restores 4) and /pm-captures/scenarios/6/story3/
+    (pr-30888b1, 300 PRs, TUI plan add then p). Found in pr-30888b1 QA S6 (note-e3cab91).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-26T18:18:26.293811+00:00'
+  updated_at: '2026-11-26T18:18:41.014155+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null

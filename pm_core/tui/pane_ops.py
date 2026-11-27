@@ -375,12 +375,12 @@ These are safe to run directly — they only read state:
 ## Important: Use the TUI for actions that launch sessions
 
 Do NOT run commands that launch new Claude sessions yourself (e.g. `pm pr start`, \
-`pm pr done`, `pm plan add`, `pm plan breakdown`, `pm plan review`). These must be \
+`pm pr done`, `pm plan add`, `pm plan review`). These must be \
 triggered through the TUI so that panes are managed correctly. Instead, tell the \
 user which key to press in the TUI:
 - `s` on a PR — start working on it
 - `d` on a PR — mark it as done and start review
-- `p` — toggle plans view, then `a`/`w`/`c`/`l` for plan actions
+- `p` — toggle plans view, then `a`/`c`/`l` for plan actions
 
 For plan management, recommend the user switch to the plans pane (`p` key) where \
 they can use dedicated shortcuts rather than typing commands.
@@ -745,9 +745,6 @@ def handle_plan_action(app, action: str, plan_id: str | None) -> None:
                 if plan_path.exists():
                     editor = find_editor()
                     _launch_in_plans_window(app, plan_id, f"{editor} {plan_path}", "plan-edit")
-    elif action == "breakdown":
-        if plan_id:
-            _launch_in_plans_window(app, plan_id, f"pm plan breakdown {plan_id}", "plan-breakdown")
     elif action == "deps":
         # Cross-plan action: use a dedicated 'plans-deps' window.
         _launch_in_plans_window(app, _DEPS_PSEUDO_PLAN_ID, "pm plan deps", "plan-deps")
@@ -772,8 +769,8 @@ def handle_plan_add(app, result: tuple[str, str] | None) -> None:
     cmd = f"pm plan add {shlex.quote(name)}"
     # generate_plan_id is sha256(name + description) so the TUI and the
     # spawned `pm plan add` process produce the same id — the window we open
-    # here will be the same one the plan's later actions (edit, breakdown,
-    # review) target, instead of a one-shot 'plan-add-<uuid>' window.
+    # here will be the same one the plan's later actions (edit, review)
+    # target, instead of a one-shot 'plan-add-<uuid>' window.
     existing_ids = {p["id"] for p in (app._data.get("plans") or [])}
     plan_id = store.generate_plan_id(name, existing_ids)
     _launch_in_plans_window(app, plan_id, cmd, "plan-add")

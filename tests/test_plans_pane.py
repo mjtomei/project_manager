@@ -133,7 +133,6 @@ class TestPlansPane:
         result = pane.render()
         text = result.plain
         assert "add" in text
-        assert "breakdown" in text
         assert "review" in text
         assert "load" in text
         assert "edit" in text
@@ -144,7 +143,6 @@ class TestPlansPane:
         pane = PlansPane()
         expected = {
             "a": "add",
-            "w": "breakdown",
             "D": "deps",
             "l": "load",
             "e": "edit",
@@ -152,24 +150,13 @@ class TestPlansPane:
         }
         assert pane._KEY_ACTIONS == expected
 
-    def test_breakdown_key_is_not_review(self):
-        """Regression: pressing 'w' must route to 'breakdown', not 'review'."""
-        pane = PlansPane()
-        assert pane._KEY_ACTIONS["w"] == "breakdown"
-        assert pane._KEY_ACTIONS["c"] == "review"
-
     def test_handler_routes_match_key_actions(self):
-        """Verify handle_plan_action routes each action to the matching pm command.
-
-        This catches swapped conditions like:
-            elif action == "breakdown":
-                launch_pane(app, "pm plan review ...", "plan-review")  # WRONG
-        """
+        """Verify handle_plan_action routes each action to the matching pm command."""
         from pm_core.tui.pane_ops import handle_plan_action
         src = inspect.getsource(handle_plan_action)
         # For pane-launching actions, verify the action check and the
         # command string use the SAME action word.
-        for action in ("breakdown", "review"):
+        for action in ("review",):
             # Find: action == "<action>" ... pm plan <action>
             pattern = rf'action\s*==\s*"{action}".*?_launch_in_plans_window\(.*?pm plan {action}'
             assert re.search(pattern, src, re.DOTALL), (
@@ -190,3 +177,62 @@ class TestPlansPane:
         assert "1 PR" in result.plain
         # Should NOT have "1 PRs"
         assert "1 PRs" not in result.plain
+
+
+class TestPlansPaneHeightTracksContent:
+    """The pane is ``height: auto``; adding a plan while the plans view is
+    open must grow it, or the footer (a=add c=review ...) is clipped.
+    Before the fix update_plans() called refresh() without layout=True, so
+    the pane kept its one-plan height and the footer vanished after ``a``
+    added a second plan, even across p/p toggles (QA S3, pr-30888b1)."""
+
+    @staticmethod
+    def _plan(i, intro="Body line."):
+        return {"id": f"plan-00{i}", "name": f"Plan {i}", "file": f"p{i}.md",
+                "status": "draft", "intro": intro, "pr_count": 0}
+
+    def _visible_lines(self, plan_lists):
+        import asyncio
+
+        from textual.app import App, ComposeResult
+        from textual.containers import Vertical
+
+        from pm_core.tui.app import ProjectManagerApp
+
+        class _PlansApp(App):
+            CSS = ProjectManagerApp.CSS + "\n#plans-container { display: block; }"
+
+            def compose(self) -> ComposeResult:
+                with Vertical(id="plans-container"):
+                    yield PlansPane(id="plans-pane")
+
+        async def run():
+            app = _PlansApp()
+            snapshots = []
+            async with app.run_test(size=(100, 40)) as pilot:
+                pane = app.query_one("#plans-pane", PlansPane)
+                for plans in plan_lists:
+                    pane.update_plans(plans)
+                    await pilot.pause()
+                    snapshots.append([
+                        pane.render_line(y).text
+                        for y in range(pane.size.height)])
+            return snapshots
+        return asyncio.run(run())
+
+    def test_footer_visible_after_plan_added(self):
+        one, two = self._visible_lines([
+            [self._plan(1)],
+            [self._plan(1), self._plan(2)],
+        ])
+        assert any("a=add" in line for line in one)
+        assert any("Plan 2" in line for line in two)
+        assert any("a=add" in line and "p=back" in line for line in two)
+
+    def test_footer_visible_after_intro_grows(self):
+        _, grown = self._visible_lines([
+            [self._plan(1)],
+            [self._plan(1, intro="Line one.\nLine two.\nLine three.")],
+        ])
+        assert any("Line three." in line for line in grown)
+        assert any("a=add" in line for line in grown)

@@ -75,7 +75,7 @@ def test_per_plan_review_actions_use_distinct_windows():
 
 
 def test_different_actions_same_plan_share_one_window():
-    """edit/breakdown/review on the same plan all land in one window
+    """edit/view/review on the same plan all land in one window
     (as separate panes by role) — they're steps of one workflow."""
     import tempfile, pathlib
     app = _make_app()
@@ -89,7 +89,7 @@ def test_different_actions_same_plan_share_one_window():
         _install(stack, fake)
         stack.enter_context(patch.object(pane_ops, "find_editor", return_value="vi"))
         pane_ops.handle_plan_action(app, "edit", "plan-AAA")
-        pane_ops.handle_plan_action(app, "breakdown", "plan-AAA")
+        pane_ops.launch_plan_activated(app, "plan-AAA")
         pane_ops.handle_plan_action(app, "review", "plan-AAA")
 
     assert list(fake.windows.keys()) == ["plan-AAA"]

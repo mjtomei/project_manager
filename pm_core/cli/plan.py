@@ -50,7 +50,7 @@ from pm_core.cli.helpers import (
 
 
 # Shared guidance about manual testing / INPUT_REQUIRED for plan prompts.
-# Used in plan add, breakdown, review, and import prompts.
+# Used in plan add, review, and import prompts.
 _MANUAL_TESTING_GUIDANCE = """\
 For each PR, identify if human-guided testing will be needed during review \
 (UI interactions, TUI keybindings, environment-specific behavior, hardware \
@@ -70,7 +70,7 @@ def plan():
 @click.option("--description", default="", help="(Deprecated) Description — ignored, kept for backward compat")
 @click.option("--fresh", is_flag=True, default=False, help="Start a fresh session (don't resume)")
 def plan_add(name: str, description: str, fresh: bool):
-    """Create a new plan and launch Claude to develop it.
+    """Create a new plan and launch Claude to develop it and break it into PRs.
 
     NAME can be a short title (e.g. "auth-refactor") or a path to an
     existing file that describes the plan (e.g. "plans/auth.md" or
@@ -103,9 +103,25 @@ def plan_add(name: str, description: str, fresh: bool):
     click.echo(f"  Plan file: {plan_path}")
     trigger_tui_refresh()
 
+    existing_prs = data.get("prs") or []
+    existing_context = ""
+    if existing_prs:
+        def _existing_line(pr: dict) -> str:
+            deps = pr.get("depends_on") or []
+            dep_str = f" (depends on: {', '.join(deps)})" if deps else ""
+            return (f"  {pr['id']}: {pr.get('title', '???')} "
+                    f"[{pr.get('status', '?')}]{dep_str}")
+        existing_context = "\nExisting PRs in this project:\n" + bounded_join(
+            existing_prs, _existing_line, max_items=_PLAN_LIST_MAX,
+            max_bytes=_PLAN_LIST_BUDGET,
+            omitted_note=lambda n: (
+                f"  ... (+{n} more; run `pm pr list` to see all PRs)"),
+        ) + "\n"
+
     notes_block = notes.notes_section(root)
     prompt = f"""\
-Your goal: Help me develop a plan called "{name}" and write it to {plan_path}.
+Your goal: Help me develop a plan called "{name}", break it down into PRs, and
+write everything to {plan_path}.
 
 This session is managed by `pm` (project manager for Claude Code). You have access
 to the `pm` CLI tool — run `pm help` to see available commands.
@@ -127,8 +143,11 @@ and complete. Then write the final plan to the file above as structured markdown
 
 The plan needs to include scope, goals, key design decisions, and any constraints.
 
-Once the plan is solid, break it down into a "## PRs" section with individual PRs
-in this format:
+Once the plan is solid, break it down into a "## PRs" section with individual PRs.
+If the source document already proposes PRs, start from that list.
+Discuss the breakdown with the user — ask about anything ambiguous (scope of
+individual PRs, ordering preferences, what can be parallelized). Iterate until the
+user is comfortable with the list, then write the PRs to the plan file in this format:
 
 ### PR: <title>
 - **description**: What this PR does
@@ -136,11 +155,14 @@ in this format:
 - **files**: Expected file modifications
 - **depends_on**: <comma-separated titles of dependency PRs, or empty>
 
-Separate PR entries with --- lines. Prefer more small PRs over fewer large ones.
-Order them so independent PRs can be worked on in parallel. Only add depends_on
-when there's a real ordering constraint.
-
-{_MANUAL_TESTING_GUIDANCE}
+Separate PR entries with --- lines.
+{existing_context}
+Guidelines:
+- Prefer more small PRs over fewer large ones
+- Order them so independent PRs can be worked on in parallel
+- Only add depends_on when there's a real ordering constraint
+- Write the ## PRs section directly into the plan file at {plan_path}
+- {_MANUAL_TESTING_GUIDANCE}
 
 After writing the PRs section, tell the user to run `pm plan load {plan_id}`
 (key: l in the plans pane) to load the PRs into project.yaml. They can
@@ -157,7 +179,8 @@ Let them know it is safe to close this pane — load and review will run in new 
         click.echo("Launching Claude...")
         launch_claude(prompt, session_key=session_key, pm_root=root, resume=not fresh,
                       session_type="plan")
-        # Background review
+        # Background review — plan add now includes the PR breakdown, so the
+        # check requires a ## PRs section as well as the plan body.
         check_prompt = review_mod.REVIEW_PROMPTS["plan-add"].format(path=plan_path)
         click.echo("Reviewing results... (background)")
         review_mod.review_step("plan add", f'Develop plan "{name}"', check_prompt, root)
@@ -178,103 +201,6 @@ def plan_list():
         click.echo("No plans.")
         return
     emit_paged([f"  {p['id']}: {p['name']} [{p.get('status', 'draft')}]" for p in plans])
-
-
-@plan.command("breakdown")
-@click.argument("plan_id", default=None, required=False)
-@click.option("--prs", "initial_prs", default=None, help="Seed the conversation with an initial PR list")
-@click.option("--fresh", is_flag=True, default=False, help="Start a fresh session (don't resume)")
-def plan_breakdown(plan_id: str | None, initial_prs: str | None, fresh: bool):
-    """Launch Claude to break a plan into PRs (written to plan file).
-
-    If PLAN_ID is omitted, auto-selects when there's exactly one plan.
-    """
-    root = state_root()
-    data = store.load(root)
-
-    plan_id = _auto_select_plan(data, plan_id)
-    plan_entry = _require_plan(data, plan_id)
-
-    plan_path = root / plan_entry["file"]
-    if not plan_path.exists():
-        click.echo(f"Plan file {plan_path} not found.", err=True)
-        raise SystemExit(1)
-
-    existing_prs = data.get("prs") or []
-    existing_context = ""
-    if existing_prs:
-        def _existing_line(pr: dict) -> str:
-            deps = pr.get("depends_on") or []
-            dep_str = f" (depends on: {', '.join(deps)})" if deps else ""
-            return (f"  {pr['id']}: {pr.get('title', '???')} "
-                    f"[{pr.get('status', '?')}]{dep_str}")
-        existing_context = "\nExisting PRs in this project:\n" + bounded_join(
-            existing_prs, _existing_line, max_items=_PLAN_LIST_MAX,
-            max_bytes=_PLAN_LIST_BUDGET,
-            omitted_note=lambda n: (
-                f"  ... (+{n} more; run `pm pr list` to see all PRs)"),
-        )
-
-    initial_context = ""
-    if initial_prs:
-        initial_context = f"\nInitial PR ideas from the user:\n{initial_prs}\n"
-
-    notes_block = notes.notes_section(root)
-
-    prompt = f"""\
-Your goal: Break the plan into a list of PRs that the user is happy with, then
-write them to the plan file so they can be reviewed with `pm plan review`.
-
-This session is managed by `pm` (project manager for Claude Code). You have access
-to the `pm` CLI tool — run `pm help` to see available commands.
-
-Read the plan file at: {plan_path}
-
-Propose a set of PRs that implement this plan. Discuss the breakdown with the
-user — ask about anything ambiguous (scope of individual PRs, ordering
-preferences, what can be parallelized). Iterate until the user is comfortable
-with the list.
-
-Once agreed, write a "## PRs" section to the plan file with this format:
-
-### PR: <title>
-- **description**: What this PR does
-- **tests**: Expected unit tests
-- **files**: Expected file modifications
-- **depends_on**: <comma-separated titles of dependency PRs, or empty>
-
-Separate PR entries with --- lines.
-{existing_context}{initial_context}
-Guidelines:
-- Prefer more small PRs over fewer large ones
-- Order them so independent PRs can be worked on in parallel
-- Only add depends_on when there's a real ordering constraint
-- Write the ## PRs section directly into the plan file at {plan_path}
-- {_MANUAL_TESTING_GUIDANCE}
-
-After writing, tell the user to run `pm plan load {plan_id}` (key: l in the
-plans pane) to load the PRs into project.yaml. They can optionally run
-`pm plan review {plan_id}` (key: c) afterward to check consistency and coverage.
-Let them know it is safe to close this pane — load and review will run in new sessions.
-{tui_section(_pm_sess) if (_pm_sess := _get_pm_session()) else ""}{notes_block}"""
-
-    claude = find_claude()
-    if claude:
-        session_key = f"plan:breakdown:{plan_id}"
-        if fresh:
-            clear_session(root, session_key)
-        click.echo(f"Launching Claude to break down plan {plan_id}...")
-        launch_claude(prompt, session_key=session_key, pm_root=root, resume=not fresh,
-                      session_type="plan")
-        # Background review
-        check_prompt = review_mod.REVIEW_PROMPTS["plan-breakdown"].format(path=plan_path)
-        click.echo("Reviewing results... (background)")
-        review_mod.review_step("plan breakdown", f"Break plan {plan_id} into PRs", check_prompt, root)
-    else:
-        click.echo()
-        click.echo("Claude CLI not found. Copy-paste this prompt into Claude Code:")
-        click.echo()
-        click.echo(f"---\n{prompt}\n---")
 
 
 @plan.command("review")
@@ -418,6 +344,11 @@ Read the plan file at: {plan_path}
 
 The plan file should contain a "## PRs" section with proposed PRs. No PRs
 have been loaded into the project yet.
+
+If the plan file has no "## PRs" section yet (for example, the plan add
+session ended before writing one), start by proposing a PR breakdown for the
+plan. Discuss it with the user, and once they agree, write it to the plan file
+in the format shown under FORMAT below. Then run the checks.
 
 {other_prs_context}\
 Check the following:
@@ -631,7 +562,13 @@ def plan_load(plan_id: str | None):
     prs = parse_plan_prs(plan_content)
 
     if not prs:
-        click.echo("No PRs found in plan file. Run 'pm plan breakdown' first to add a ## PRs section.", err=True)
+        # Re-running `pm plan add` would mint a new plan id and orphan this
+        # draft, so point at the review session, which proposes the missing
+        # breakdown for this same plan.
+        click.echo(
+            f"No PRs found in plan file. Run 'pm plan review {plan_id}' "
+            "(key c in the plans view) to propose a ## PRs section, or add "
+            "one to the plan file directly.", err=True)
         raise SystemExit(1)
 
     click.echo(f"Found {len(prs)} PRs in plan file:")
@@ -766,7 +703,7 @@ def plan_fix(review_path: str):
     """Fix issues found by a review.
 
     Reads the step name from the review file, so a single command
-    works for any review (plan add, breakdown, deps, load, import).
+    works for any review (plan add, deps, load, import).
     """
     parsed = review_mod.parse_review_file(Path(review_path))
     step_name = parsed.get("step", "")

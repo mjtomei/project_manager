@@ -170,7 +170,7 @@ class TestParseReviewFile:
 
 class TestReviewPrompts:
     def test_all_keys_present(self):
-        expected_keys = {"plan-add", "plan-breakdown", "plan-deps",
+        expected_keys = {"plan-add", "plan-deps",
                          "plan-load", "plan-import", "plan-review"}
         assert set(REVIEW_PROMPTS.keys()) == expected_keys
 

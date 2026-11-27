@@ -1,0 +1,225 @@
+--- master/check_plan-add
++++ branch/check_plan-add
+@@ -1 +1 @@
+-Read the plan file at ⟦plan_path⟧. Does it contain a substantive plan description (not just the template placeholder "<!-- Describe the plan here -->" or similar)? Output PASS if yes, NEEDS_FIX if no, followed by a brief explanation.
++Read the plan file at ⟦plan_path⟧. Does it have a substantive plan description (not just the template placeholder "<!-- Describe the plan here -->" or similar) AND a "## PRs" section with at least one "### PR:" entry that has description, tests, files fields? Output PASS if yes, NEEDS_FIX if no, followed by what's missing.
+--- master/check_plan-breakdown
++++ branch/check_plan-breakdown
+@@ -1 +0,0 @@
+-Read the plan file at ⟦plan_path⟧. Does it have a "## PRs" section with at least one "### PR:" entry that has description, tests, files fields? Output PASS if yes, NEEDS_FIX if no, followed by what's missing.
+--- master/guide_setup_has_plan_draft
++++ branch/guide_setup_has_plan_draft
+@@ -40,7 +40,7 @@
+ 
+ **IMPORTANT:** You are guiding the user, not doing everything yourself. After
+ init, direct the user to interact with the TUI to create plans and load PRs.
+-Do NOT run `pm plan add`, `pm plan breakdown`, or `pm plan load` yourself —
++Do NOT run `pm plan add` or `pm plan load` yourself —
+ instead tell the user which keys to press in the TUI and what to expect.
+ 
+ ### Initializing the project
+@@ -81,16 +81,16 @@
+ to add a new plan. A dialog will ask for a title or file path — if you wrote
+ a notes file, tell them to enter that path; otherwise help them choose a good
+ title based on what you learned about the codebase and their goals. The `a`
+-action launches a session in a new pane. Once the plan session finishes,
+-walk the user through the remaining steps below (repeat for each plan if
+-creating multiple).
++action launches a session in a new pane that develops the plan with the user
++and breaks it into PRs, writing both the plan content and a `## PRs` section
++with individual PR entries. Once the plan session finishes, walk the user
++through the remaining steps below (repeat for each plan if creating multiple).
+ 
+-### Breaking the plan into PRs
++### If the plan has no PRs yet
+ 
+-Tell the user to press `w` in the plans view to break the plan into PRs. This
+-launches a session that explores the codebase, writes the plan content,
+-and adds a `## PRs` section with individual PR entries. Wait for it to finish,
+-then continue to the next step.
++If the plan session ended before it wrote a `## PRs` section, tell the user to
++press `c` in the plans view. The review session proposes a PR breakdown for a
++plan that has none, settles it with the user, and writes it to the plan file.
+ 
+ ### Reviewing the plan
+ 
+@@ -106,9 +106,8 @@
+ 
+ ### TUI plans view reference
+ 
+-In the TUI, `p` toggles the plans view. The setup flow is `a` → `w` → `c` → `l`:
+-- `a` — add a new plan (prompts for a title or file path)
+-- `w` — break plan into PRs (launches a Claude session)
++In the TUI, `p` toggles the plans view. The setup flow is `a` → `c` → `l`:
++- `a` — add a new plan and break it into PRs (prompts for a title or file path)
+ - `c` — review plan (launches a Claude session)
+ - `l` — load PRs from plan into the project
+ - `e` — edit plan file
+--- master/guide_step_description_has_plan_draft
++++ branch/guide_step_description_has_plan_draft
+@@ -1 +1 @@
+-Break plan into PRs
++Finish plan with PR breakdown
+--- master/plan_add
++++ branch/plan_add
+@@ -1,4 +1,5 @@
+-Your goal: Help me develop a plan called "⟦name⟧" and write it to ⟦pm_root⟧/plans/⟦plan_id⟧.md.
++Your goal: Help me develop a plan called "⟦name⟧", break it down into PRs, and
++write everything to ⟦pm_root⟧/plans/⟦plan_id⟧.md.
+ 
+ This session is managed by `pm` (project manager for Claude Code). You have access
+ to the `pm` CLI tool — run `pm help` to see available commands.
+@@ -20,8 +21,11 @@
+ 
+ The plan needs to include scope, goals, key design decisions, and any constraints.
+ 
+-Once the plan is solid, break it down into a "## PRs" section with individual PRs
+-in this format:
++Once the plan is solid, break it down into a "## PRs" section with individual PRs.
++If the source document already proposes PRs, start from that list.
++Discuss the breakdown with the user — ask about anything ambiguous (scope of
++individual PRs, ordering preferences, what can be parallelized). Iterate until the
++user is comfortable with the list, then write the PRs to the plan file in this format:
+ 
+ ### PR: <title>
+ - **description**: What this PR does
+@@ -29,11 +33,17 @@
+ - **files**: Expected file modifications
+ - **depends_on**: <comma-separated titles of dependency PRs, or empty>
+ 
+-Separate PR entries with --- lines. Prefer more small PRs over fewer large ones.
+-Order them so independent PRs can be worked on in parallel. Only add depends_on
+-when there's a real ordering constraint.
++Separate PR entries with --- lines.
+ 
+-For each PR, identify if human-guided testing will be needed during review (UI interactions, TUI keybindings, environment-specific behavior, hardware dependencies). Call this out explicitly in the PR description so the review loop can use INPUT_REQUIRED appropriately.
++Existing PRs in this project:
++⟦bounded listing — one line per PR: `  <pr-id>: <title> [<status>]…`; capped at 40 lines / 20 KB, then `  ... (+N more; run `pm pr list` to see all PRs)`⟧
++
++Guidelines:
++- Prefer more small PRs over fewer large ones
++- Order them so independent PRs can be worked on in parallel
++- Only add depends_on when there's a real ordering constraint
++- Write the ## PRs section directly into the plan file at ⟦pm_root⟧/plans/⟦plan_id⟧.md
++- For each PR, identify if human-guided testing will be needed during review (UI interactions, TUI keybindings, environment-specific behavior, hardware dependencies). Call this out explicitly in the PR description so the review loop can use INPUT_REQUIRED appropriately.
+ 
+ After writing the PRs section, tell the user to run `pm plan load ⟦plan_id⟧`
+ (key: l in the plans pane) to load the PRs into project.yaml. They can
+--- master/plan_add_no_existing_prs
++++ branch/plan_add_no_existing_prs
+@@ -1,4 +1,5 @@
+-Your goal: Help me develop a plan called "⟦name⟧" and write it to ⟦pm_root⟧/plans/⟦plan_id⟧.md.
++Your goal: Help me develop a plan called "⟦name⟧", break it down into PRs, and
++write everything to ⟦pm_root⟧/plans/⟦plan_id⟧.md.
+ 
+ This session is managed by `pm` (project manager for Claude Code). You have access
+ to the `pm` CLI tool — run `pm help` to see available commands.
+@@ -20,8 +21,11 @@
+ 
+ The plan needs to include scope, goals, key design decisions, and any constraints.
+ 
+-Once the plan is solid, break it down into a "## PRs" section with individual PRs
+-in this format:
++Once the plan is solid, break it down into a "## PRs" section with individual PRs.
++If the source document already proposes PRs, start from that list.
++Discuss the breakdown with the user — ask about anything ambiguous (scope of
++individual PRs, ordering preferences, what can be parallelized). Iterate until the
++user is comfortable with the list, then write the PRs to the plan file in this format:
+ 
+ ### PR: <title>
+ - **description**: What this PR does
+@@ -29,11 +33,14 @@
+ - **files**: Expected file modifications
+ - **depends_on**: <comma-separated titles of dependency PRs, or empty>
+ 
+-Separate PR entries with --- lines. Prefer more small PRs over fewer large ones.
+-Order them so independent PRs can be worked on in parallel. Only add depends_on
+-when there's a real ordering constraint.
++Separate PR entries with --- lines.
+ 
+-For each PR, identify if human-guided testing will be needed during review (UI interactions, TUI keybindings, environment-specific behavior, hardware dependencies). Call this out explicitly in the PR description so the review loop can use INPUT_REQUIRED appropriately.
++Guidelines:
++- Prefer more small PRs over fewer large ones
++- Order them so independent PRs can be worked on in parallel
++- Only add depends_on when there's a real ordering constraint
++- Write the ## PRs section directly into the plan file at ⟦pm_root⟧/plans/⟦plan_id⟧.md
++- For each PR, identify if human-guided testing will be needed during review (UI interactions, TUI keybindings, environment-specific behavior, hardware dependencies). Call this out explicitly in the PR description so the review loop can use INPUT_REQUIRED appropriately.
+ 
+ After writing the PRs section, tell the user to run `pm plan load ⟦plan_id⟧`
+ (key: l in the plans pane) to load the PRs into project.yaml. They can
+--- master/plan_breakdown
++++ branch/plan_breakdown
+@@ -1,38 +0,0 @@
+-Your goal: Break the plan into a list of PRs that the user is happy with, then
+-write them to the plan file so they can be reviewed with `pm plan review`.
+-
+-This session is managed by `pm` (project manager for Claude Code). You have access
+-to the `pm` CLI tool — run `pm help` to see available commands.
+-
+-Read the plan file at: ⟦pm_root⟧/plans/⟦plan_id⟧.md
+-
+-Propose a set of PRs that implement this plan. Discuss the breakdown with the
+-user — ask about anything ambiguous (scope of individual PRs, ordering
+-preferences, what can be parallelized). Iterate until the user is comfortable
+-with the list.
+-
+-Once agreed, write a "## PRs" section to the plan file with this format:
+-
+-### PR: <title>
+-- **description**: What this PR does
+-- **tests**: Expected unit tests
+-- **files**: Expected file modifications
+-- **depends_on**: <comma-separated titles of dependency PRs, or empty>
+-
+-Separate PR entries with --- lines.
+-
+-Existing PRs in this project:
+-⟦bounded listing — one line per PR: `  <pr-id>: <title> [<status>]…`; capped at 40 lines / 20 KB, then `  ... (+N more; run `pm pr list` to see all PRs)`⟧
+-Guidelines:
+-- Prefer more small PRs over fewer large ones
+-- Order them so independent PRs can be worked on in parallel
+-- Only add depends_on when there's a real ordering constraint
+-- Write the ## PRs section directly into the plan file at ⟦pm_root⟧/plans/⟦plan_id⟧.md
+-- For each PR, identify if human-guided testing will be needed during review (UI interactions, TUI keybindings, environment-specific behavior, hardware dependencies). Call this out explicitly in the PR description so the review loop can use INPUT_REQUIRED appropriately.
+-
+-After writing, tell the user to run `pm plan load ⟦plan_id⟧` (key: l in the
+-plans pane) to load the PRs into project.yaml. They can optionally run
+-`pm plan review ⟦plan_id⟧` (key: c) afterward to check consistency and coverage.
+-Let them know it is safe to close this pane — load and review will run in new sessions.
+-⟦tui_section — the 'Interacting with the TUI' block, rendered in tui_section.txt; empty when no pm tmux session⟧
+-⟦notes_block — notes.notes_section(root): the project's pm/notes.txt sections; empty when none⟧
+--- master/plan_review_preload
++++ branch/plan_review_preload
+@@ -8,6 +8,11 @@
+ 
+ The plan file should contain a "## PRs" section with proposed PRs. No PRs
+ have been loaded into the project yet.
++
++If the plan file has no "## PRs" section yet (for example, the plan add
++session ended before writing one), start by proposing a PR breakdown for the
++plan. Discuss it with the user, and once they agree, write it to the plan file
++in the format shown under FORMAT below. Then run the checks.
+ 
+ 
+ PRs from other plans (for cross-plan reference):
+--- master/tui_section
++++ branch/tui_section
+@@ -5,4 +5,4 @@
+ - `pm tui view -s ⟦session⟧` — capture and view the current TUI screen
+ - `pm tui send <keys> -s ⟦session⟧` — send keystrokes to the TUI (e.g. `pm tui send j` to move down)
+ 
+-**Do not** run commands that spawn new Claude sessions yourself (e.g. `pm pr start`, `pm pr done`, `pm plan add`, `pm plan breakdown`, `pm plan review`). These must be triggered through the TUI so panes are managed correctly. Use `pm tui send` to press the appropriate key in the TUI instead.
++**Do not** run commands that spawn new Claude sessions yourself (e.g. `pm pr start`, `pm pr done`, `pm plan add`, `pm plan review`). These must be triggered through the TUI so panes are managed correctly. Use `pm tui send` to press the appropriate key in the TUI instead.
+--- master/watcher_review
++++ branch/watcher_review
+@@ -81,8 +81,8 @@
+ silently.
+ 
+ Forbidden (must always be done via the TUI by the human):
+-`pm pr start`, `pm pr done`, `pm plan add`, `pm plan breakdown`,
+-`pm plan review` — anything that spawns a new Claude session.
++`pm pr start`, `pm pr done`, `pm plan add`, `pm plan review` —
++anything that spawns a new Claude session.
+ 
+ ## Tone
+ 

@@ -103,7 +103,7 @@ SESSION_TYPE_VERDICTS: dict[str, tuple[str, ...]] = {
     "watcher":         ("READY", "INPUT_REQUIRED"),
     "merge":           (),   # post-merge repo update: no verdict, interactive
     # --- non-loop interactive sessions: no verdict, fake-claude routing only ---
-    "plan":            (),   # pm plan: add / breakdown / review / deps / import
+    "plan":            (),   # pm plan: add / review / deps / import
     "meta":            (),   # pm meta: work on pm itself
     "guide":           (),   # pm guide: onboarding / getting-started
     "cluster":         (),   # pm cluster: cross-repo exploration

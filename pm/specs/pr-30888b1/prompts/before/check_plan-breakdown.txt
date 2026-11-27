@@ -1,0 +1,1 @@
+Read the plan file at ⟦plan_path⟧. Does it have a "## PRs" section with at least one "### PR:" entry that has description, tests, files fields? Output PASS if yes, NEEDS_FIX if no, followed by what's missing.
