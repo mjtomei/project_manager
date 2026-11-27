@@ -323,18 +323,23 @@ def bounded_flock(path: Path, timeout: float):
     Yields True while the lock is held, or False when another holder still
     has it at the deadline — the caller decides whether to skip or proceed.
     """
-    deadline = time.monotonic() + timeout
     with open(path, "a") as f:
-        while True:
-            try:
-                fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                break
-            except BlockingIOError:
-                if time.monotonic() >= deadline:
-                    yield False
-                    return
-                time.sleep(0.05)
-        yield True
+        yield flock_wait(f.fileno(), timeout)
+
+
+def flock_wait(fd: int, timeout: float) -> bool:
+    """Take an exclusive ``flock`` on the open *fd*, polling for at most
+    *timeout* seconds; False when another holder still has it at the
+    deadline.  Any other ``OSError`` (no flock support) propagates."""
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return True
+        except BlockingIOError:
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(0.05)
 
 
 def merge_3way(base, ours, theirs):

@@ -494,21 +494,13 @@ def _scratch_lock(scratch: Path, timeout: float | None = None):
     except OSError:
         yield True
         return
+    from pm_core.store import flock_wait
     try:
-        deadline = time.monotonic() + (
-            _LOCK_GRACE if timeout is None else timeout)
-        while True:
-            try:
-                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                break
-            except BlockingIOError:
-                if time.monotonic() >= deadline:
-                    yield False
-                    return
-                time.sleep(0.05)
-            except OSError:
-                break       # no flock support: reclaim unlocked, as before
-        yield True
+        try:
+            got = flock_wait(fd, _LOCK_GRACE if timeout is None else timeout)
+        except OSError:
+            got = True      # no flock support: reclaim unlocked, as before
+        yield got
     finally:
         os.close(fd)        # releases the lock
 

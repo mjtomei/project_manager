@@ -133,4 +133,6 @@ def format_summary(summary: dict) -> str:
         parts.append(f"{len(summary['registry_windows'])} registry entry(s)")
     if isinstance(summary.get("reclaimed"), list) and summary["reclaimed"]:
         parts.append(f"{len(summary['reclaimed'])} scenario store(s)/export(s)")
+    if summary.get("reclaim_failed"):
+        parts.append(f"{len(summary['reclaim_failed'])} reclaim failure(s)")
     return ", ".join(parts) if parts else "nothing to clean"

@@ -293,7 +293,8 @@ _LIST_ALIASES = {"list", "ls", "l"}
 
 def _list_settings():
     """Print all settings and their current values."""
-    from pm_core.paths import get_global_setting, get_global_setting_value
+    from pm_core.paths import (IMAGE_CACHE_DIR_SETTING, earlier_dirs,
+                               get_global_setting, get_global_setting_value)
     all_settings = sorted(_BOOLEAN_SETTINGS | _INT_SETTINGS
                           | set(_ENUM_SETTINGS) | _PATH_SETTINGS)
     width = max(map(len, all_settings))
@@ -306,6 +307,14 @@ def _list_settings():
         default = _SETTING_DEFAULTS.get(name, "")
         marker = " (default)" if val == default else ""
         click.echo(f"  {name:<{width}} {val}{marker}")
+        if name in _PATH_SETTINGS and name != IMAGE_CACHE_DIR_SETTING:
+            # What pm still searches besides the current value (and the
+            # default); it stops once the directory is gone.  An earlier
+            # image cache is only emptied ('pm container cache gc').
+            for d in earlier_dirs(name):
+                if d.is_dir():
+                    click.echo(f"  {'':<{width}}   earlier, still searched: "
+                               f"{d}")
 
 
 @cli.command("set")
@@ -356,7 +365,9 @@ def set_cmd(setting, value):
     Changing one affects paths created afterwards; nothing is migrated, and
     pm keeps finding what began in an earlier location while it exists:
 
-      workdirs-dir     PR, meta and QA source workdirs (may be network storage)
+      workdirs-dir     PR, meta and QA source workdirs (may be network storage).
+                       pm trusts everything under it, so it may not be your
+                       home directory or a parent of it
 
       captures-dir     Retained QA/review evidence, as <dir>/<session-tag>/<pr>
                        (may be network storage). A PR whose evidence already
@@ -366,7 +377,9 @@ def set_cmd(setting, value):
       scratch-dir      QA scenario scratch and private container engines
                        (must be local disk)
 
-      image-cache-dir  Shared image cache (must be local disk)
+      image-cache-dir  Shared image cache (must be local disk). Entries left
+                       in an earlier location are evicted once no container
+                       uses them ('pm container cache gc')
     """
     if setting in _LIST_ALIASES:
         _list_settings()
@@ -411,6 +424,17 @@ def set_cmd(setting, value):
             except NonLocalPathError as exc:
                 click.echo(f"Error: {exc}", err=True)
                 raise SystemExit(1)
+        from pm_core.paths import WORKDIRS_DIR_SETTING
+        from pm_core.workspace_trust import covers_home
+        if setting == WORKDIRS_DIR_SETTING and covers_home(path):
+            # pm trusts everything under its workdirs root automatically
+            # (and keeps trusting an earlier one while it exists).
+            click.echo(f"Error: refusing {setting} = {path}: pm "
+                       f"automatically trusts everything under its workdirs "
+                       f"root, and that would include your whole home "
+                       f"directory. Pick a dedicated directory, e.g. "
+                       f"{path / 'pm-workdirs'}", err=True)
+            raise SystemExit(1)
         set_path_setting(setting, path)
         value = str(path)
     elif setting in _INT_SETTINGS:

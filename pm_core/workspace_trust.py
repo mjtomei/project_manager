@@ -156,9 +156,21 @@ def approved_roots() -> list[str]:
     test project there would otherwise stall at the prompt.
     """
     from pm_core.paths import qa_scratch_roots, workdirs_roots
-    return ([_real(r) for r in workdirs_roots()]
-            + [_real(r) for r in qa_scratch_roots()]
+    pm_roots = [_real(r) for r in workdirs_roots() + qa_scratch_roots()]
+    # A pm location set to the home dir or above it (hand-written, or
+    # remembered as an earlier location) would approve every workspace;
+    # 'pm set workdirs-dir' refuses such a value.
+    return ([r for r in pm_roots if not covers_home(r)]
             + [_real(r) for r in authorized_roots()])
+
+
+def covers_home(path: str | Path) -> bool:
+    """True when *path* is the home directory or one of its ancestors
+    (``/``, ``/home``): approving it would trust every workspace the user
+    has — the blanket trust pm deliberately avoids."""
+    home = str(Path.home())
+    p = os.path.abspath(os.path.expanduser(str(path)))
+    return is_within(home, p) or is_within(_real(home), _real(p))
 
 
 def approved_path(path: str | Path) -> bool:

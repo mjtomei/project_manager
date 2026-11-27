@@ -568,6 +568,30 @@ class TestGc:
         image_cache.gc()
         assert not old.exists() and fresh.exists()
 
+    def test_entries_left_in_an_earlier_cache_dir(self, fake, home, tmp_path):
+        """After 'pm set image-cache-dir' moves the cache, no launch uses
+        the old root again: its unreferenced entries go whatever their
+        image's state (sub-UID owned, so hard to delete by hand); a
+        referenced one, and one published within the hour (a preparer that
+        resolved the old root just before the move), stay."""
+        from pm_core import paths
+        old_root = image_cache.cache_root()            # the default
+        named = _publish(old_root, KEY, IMAGE_ID)      # configured image
+        used = _publish(old_root, "1" * 20, "sha256:" + "1" * 64)
+        fresh = _publish(old_root, "2" * 20, "sha256:" + "2" * 64)
+        past = time.time() - 2 * image_cache._ABANDONED_PREP_AGE
+        for d in (named, used):
+            os.utime(d, (past, past))
+        paths.set_path_setting("image-cache-dir", tmp_path / "ssd")
+        assert image_cache.cache_root() == tmp_path / "ssd"
+        fake.present = True
+        fake.refs = {"1" * 20}
+        out = image_cache.gc()
+        assert not named.exists()
+        assert used.exists() and fresh.exists()
+        assert [r for _, r in out["removed"]] == [
+            "left in an earlier image-cache-dir, no consumers"]
+
 
 # ---------------------------------------------------------------------------
 # Consumer side
@@ -652,6 +676,12 @@ class TestWriteEngineConfig:
         cfg.write_text(base.replace(
             '[storage]\n', '[storage]\nrunroot = "/tmp/pm-eng-x/run"\n'))
         assert image_cache.engine_config_problem(str(eng)) is None
+        assert image_cache._configured_runroot(str(eng)) == "/tmp/pm-eng-x/run"
+        # A TOML literal string is a runroot too (else its stale database
+        # would go unnoticed).
+        cfg.write_text(base.replace(
+            '[storage]\n', "[storage]\nrunroot = '/tmp/pm-eng-y/run'\n"))
+        assert image_cache._configured_runroot(str(eng)) == "/tmp/pm-eng-y/run"
         # The default engine (container user's HOME) needs no runroot.
         cfg.write_text(base)
         from pm_core import container

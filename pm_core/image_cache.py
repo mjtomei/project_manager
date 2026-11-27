@@ -669,9 +669,12 @@ def plan_gc(all_unreferenced: bool = False,
 
     Selects unreferenced entries whose image is gone from the host or
     superseded (untagged: its tag was rebuilt), all unreferenced ones with
-    *all_unreferenced*, and abandoned preparations.  Never selects an entry
-    a container (any state) references, the configured image's entry, or
-    anything when the runtime cannot be listed (*problem* then says why).
+    *all_unreferenced*, and abandoned preparations; in cache roots an
+    earlier ``image-cache-dir`` named (:func:`_earlier_cache_roots`), every
+    unreferenced entry older than an hour.  Never selects an entry a
+    container (any state) references, the configured image's entry in the
+    current root, or anything when the runtime cannot be listed (*problem*
+    then says why).
     """
     root = cache_root()
     refs = referenced_keys()
@@ -686,35 +689,70 @@ def plan_gc(all_unreferenced: bool = False,
         pass
     out: list[tuple[Path, str]] = []
     now = time.time()
-    for d in sorted((root / "entries").iterdir()):
-        if d.name.startswith(".prep-"):
-            key = d.name.split("-")[1] if d.name.count("-") >= 2 else ""
-            try:
-                age = now - d.stat().st_mtime
-            except OSError:
-                continue
-            if key not in refs and age > _ABANDONED_PREP_AGE:
-                out.append((d, "abandoned preparation"))
+    for r in [root] + _earlier_cache_roots(root):
+        try:
+            dirs = sorted((r / "entries").iterdir())
+        except OSError:
             continue
-        if d.name in refs or d.name in protect:
-            continue
-        entry = load_entry(d.name, root)
-        if entry is None:
-            out.append((d, "incomplete entry"))
-            continue
-        state = _image_state(entry.image_id)
-        if state == "absent":
-            out.append((d, "image no longer on the host, no consumers"))
-        elif state == "untagged":
-            # Superseded: its tag now names a rebuilt image, so no launch
-            # by tag can select it again.  The host keeps the old image
-            # until its images are pruned, which pm never does; without
-            # this, every rebuild of pm-dev left a full entry behind.
-            out.append((d, "image superseded (untagged on the host), "
-                           "no consumers"))
-        elif state == "named" and all_unreferenced:
-            out.append((d, "no consumers (--all-unreferenced)"))
+        for d in dirs:
+            reason = _gc_reason(d, r == root, refs, protect, now,
+                                all_unreferenced)
+            if reason:
+                out.append((d, reason))
     return out, ""
+
+
+def _earlier_cache_roots(current: Path) -> list[Path]:
+    """Cache roots ``image-cache-dir`` named before, and the default, that
+    still hold entries.  No launch prepares or mounts from them any more,
+    so their unreferenced entries are evicted whatever their image's state
+    (their files are sub-UID owned: hard to delete by hand)."""
+    from pm_core.paths import IMAGE_CACHE_DIR_SETTING, earlier_dirs, pm_home
+    out: list[Path] = []
+    for d in earlier_dirs(IMAGE_CACHE_DIR_SETTING) + [pm_home() / "image-cache"]:
+        if d != current and d not in out and (d / "entries").is_dir():
+            out.append(d)
+    return out
+
+
+def _gc_reason(d: Path, current: bool, refs: set[str], protect: set[str],
+               now: float, all_unreferenced: bool) -> str | None:
+    """Why :func:`plan_gc` evicts the entry or prep dir *d*, or None."""
+    try:
+        age = now - d.stat().st_mtime
+    except OSError:
+        return None
+    if d.name.startswith(".prep-"):
+        key = d.name.split("-")[1] if d.name.count("-") >= 2 else ""
+        if key not in refs and age > _ABANDONED_PREP_AGE:
+            return "abandoned preparation"
+        return None
+    if d.name in refs:
+        return None
+    if not current:
+        # Not within the hour: a preparer that resolved the cache root
+        # before the setting changed may have just published it there and
+        # not yet launched the container that mounts it.
+        if age > _ABANDONED_PREP_AGE:
+            return "left in an earlier image-cache-dir, no consumers"
+        return None
+    if d.name in protect:
+        return None
+    entry = load_entry(d.name, d.parent.parent)
+    if entry is None:
+        return "incomplete entry"
+    state = _image_state(entry.image_id)
+    if state == "absent":
+        return "image no longer on the host, no consumers"
+    if state == "untagged":
+        # Superseded: its tag now names a rebuilt image, so no launch by
+        # tag can select it again.  The host keeps the old image until its
+        # images are pruned, which pm never does; without this, every
+        # rebuild of pm-dev left a full entry behind.
+        return "image superseded (untagged on the host), no consumers"
+    if state == "named" and all_unreferenced:
+        return "no consumers (--all-unreferenced)"
+    return None
 
 
 def gc(dry_run: bool = False, all_unreferenced: bool = False,
@@ -979,8 +1017,10 @@ def _configured_runroot(home: str) -> str | None:
         text = (_config_dir(home) / "storage.conf").read_text()
     except OSError:
         return None
-    m = re.search(r'^\s*runroot\s*=\s*"([^"]+)"', text, re.M)
-    return m.group(1) if m else None
+    # A TOML basic ("...") or literal ('...') string.
+    m = re.search(r"""^\s*runroot\s*=\s*(?:"([^"]+)"|'([^']+)')""", text,
+                  re.M)
+    return (m.group(1) or m.group(2)) if m else None
 
 
 def _podman_out(home: str, *args: str) -> str | None:

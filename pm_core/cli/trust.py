@@ -46,10 +46,13 @@ def trust_list():
     """List roots pm may trust automatically."""
     from pm_core import workspace_trust as wt
     from pm_core.paths import qa_scratch_roots, workdirs_roots
+    refused = "; NOT trusted: it contains your home directory"
     for root in workdirs_roots():
-        click.echo(f"{root}  (pm-created workdirs)")
+        click.echo(f"{root}  (pm-created workdirs"
+                   f"{refused if wt.covers_home(root) else ''})")
     for root in qa_scratch_roots():
-        click.echo(f"{root}  (pm-created QA scenario scratch)")
+        click.echo(f"{root}  (pm-created QA scenario scratch"
+                   f"{refused if wt.covers_home(root) else ''})")
     for root in wt.authorized_roots():
         click.echo(f"{root}  (authorized)")
 
@@ -60,11 +63,7 @@ def trust_add(path):
     """Authorize PATH (and everything under it) and trust it now."""
     from pm_core import workspace_trust as wt
     p = _abs(path)
-    # Home or any directory containing it (/, /home) would authorize every
-    # workspace the user has — the blanket trust pm deliberately avoids.
-    home = _abs("~")
-    if wt.is_within(home, p) or wt.is_within(os.path.realpath(home),
-                                             os.path.realpath(p)):
+    if wt.covers_home(p):
         raise click.ClickException(
             f"refusing to authorize {p}: pick a specific project directory")
     added = wt.add_authorized_root(p)

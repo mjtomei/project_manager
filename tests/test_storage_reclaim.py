@@ -542,6 +542,8 @@ def test_pr_cleanup_cli_reports_reclaim_failures(monkeypatch):
     monkeypatch.setattr(sr, "reclaim", lambda pr_id, **kw: out)
     r = CliRunner().invoke(pr_mod.pr, ["cleanup", "--resources", "pr-9"])
     assert r.exit_code == 1, r.output
+    # The summary line no longer says "nothing to clean" above the failure.
+    assert "Cleaned pr-9: 1 reclaim failure(s)" in r.output
     assert "could not reclaim /s/x.tar: Permission denied" in r.output
     assert "pm container reclaim --pr pr-9" in r.output
     out.failed.clear()

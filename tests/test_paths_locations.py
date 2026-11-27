@@ -486,6 +486,46 @@ class TestPmSet:
         line = next(ln for ln in listing if ln.split()[0] == "scratch-dir")
         assert line.split()[1:] == [str(tmp_path / "fast")]
 
+    def test_listing_shows_earlier_locations_still_searched(self, home,
+                                                            tmp_path):
+        a, b = tmp_path / "a", tmp_path / "b"
+        a.mkdir()
+        assert self._set("captures-dir", str(a)).exit_code == 0
+        assert self._set("captures-dir", str(b)).exit_code == 0
+        lines = self._set("list").output.splitlines()
+        i = next(i for i, ln in enumerate(lines)
+                 if ln.split()[0] == "captures-dir")
+        assert lines[i].split()[1:] == [str(b)]
+        assert lines[i + 1].split() == ["earlier,", "still", "searched:",
+                                        str(a)]
+        # Gone once the directory is.
+        a.rmdir()
+        assert "still searched" not in self._set("list").output
+
+    def test_workdirs_dir_may_not_cover_home(self, home, tmp_path):
+        """pm trusts everything under its workdirs root; home or a parent
+        of it would trust every workspace (what 'pm trust add' refuses)."""
+        from pm_core import workspace_trust as wt
+        for bad in (home, home.parent):
+            r = self._set("workdirs-dir", str(bad))
+            assert r.exit_code == 1
+            assert "home directory" in r.output
+            assert paths.configured_dir("workdirs-dir") is None
+        r = self._set("workdirs-dir", str(home / "pm-workdirs"))
+        assert r.exit_code == 0, r.output
+        (home / "pm-workdirs").mkdir()
+        # A value set some other way (or remembered as an earlier one) is
+        # not trusted either; the earlier, dedicated root still is.
+        paths.set_path_setting("workdirs-dir", home)
+        assert paths.workdirs_roots()[:2] == [home, home / "pm-workdirs"]
+        assert str(home) not in wt.approved_roots()
+        assert not wt.approved_path(home / "some-project")
+        assert wt.approved_path(home / "pm-workdirs" / "p" / "pr-1")
+        from pm_core.cli import cli
+        listed = CliRunner().invoke(cli, ["trust", "list"]).output
+        assert f"{home}  (pm-created workdirs; NOT trusted" in listed
+        assert f"{home / 'pm-workdirs'}  (pm-created workdirs)" in listed
+
     def test_relative_path_refused(self, home):
         r = self._set("workdirs-dir", "relative/path")
         assert r.exit_code == 1

@@ -364,12 +364,22 @@ the task and on the measurements above.
   scenario started under `scratch-dir` A was relaunched after a move to B
   onto a missing `B/qa/<run>/s-N` (`podman run` "statfs … no such file or
   directory", QA ERROR "could not be recreated"; QA S6, 2026-11-27).
+  `pm set list` shows each existing earlier location of a searched
+  setting under its current value (`earlier, still searched: <dir>`), so
+  the extra roots are visible (review 5875 i1).
 * Workspace trust follows the move: `workspace_trust.approved_roots()`
   includes `paths.qa_scratch_roots()` (`<scratch>/qa`).  The legacy scratch
   sat inside the trusted QA workdir, so a host-mode scenario's throwaway
   test project there was auto-trusted; without this it would stall at the
   trust prompt.  Nothing else under the scratch root is trusted (review
   62b4 i6).
+* A pm root that is the home directory or one of its ancestors is never
+  approved (`workspace_trust.covers_home`, the rule `pm trust add` already
+  applied), and `pm set workdirs-dir` refuses such a value: everything
+  under the workdirs root is auto-trusted, so `workdirs-dir ~` trusted
+  every workspace, and the earlier-locations list kept trusting it after
+  the user corrected the setting.  `pm trust list` marks such a root
+  `NOT trusted` (review 5875 i1).
 * No migration of existing workdirs/captures; changing a setting affects
   new paths only (documented in `pm set` help).  So that existing
   workdirs keep working after `workdirs-dir` moves:
@@ -440,6 +450,13 @@ the task and on the measurements above.
   configured image's; and abandoned `.prep-*` dirs with no live prep
   container.  An image pulled by digest keeps its RepoDigest and its
   entry.  Removal uses `podman unshare rm -rf`.
+* Entries in a cache root an earlier `image-cache-dir` named (or the
+  default, once the setting moved away from it) are never used by a launch
+  again, so gc removes each unreferenced one whatever its image's state,
+  once it is over an hour old (a preparer that resolved the old root just
+  before the move may have published there and not yet launched its
+  consumer).  Their files are sub-UID owned, so a user cannot simply
+  delete them by hand (review 5875 i1).
 
 ## 3. Implicit requirements
 
