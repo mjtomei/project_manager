@@ -2477,6 +2477,17 @@ prs:
       list, note-f2c9066).'
     created_at: '2026-11-26T18:49:54Z'
     last_edited: '2026-11-26T18:49:54Z'
+  - id: note-59d9757
+    text: 'QA planning round 2 (2026-11-26, spec a49a7c57): qa.md now records the
+      S1/S3/S6 refiner traps (PATH stand-in forwarded when exported before pm session;
+      real claude in /usr/local/bin; install less + vim-tiny), the footer re-measure
+      fix (R8), the w r watcher-review prompt check (R9/E9), and new E8: after w in
+      the plans view, the plans pane sees c/l/e before the app-level w handler, so
+      a plan action can fire while the w prefix stays armed and swallows the next
+      r/s. Tree-view w then j/k is the same pre-existing ordering. Scenarios 7-12
+      re-cover the earlier surfaces plus E8/E9.'
+    created_at: '2026-11-27T04:04:09Z'
+    last_edited: '2026-11-27T04:04:09Z'
   - id: note-5caeffd
     text: 'QA S10 refiner (7c1c504b, live): E8/R9 FAILS in the plans view. w then
       c/l/e (each ~0.3 s apart) fires the plan action (plan-review / "Loading PRs"
@@ -2548,8 +2559,18 @@ prs:
       clean. 1060 tests in 23 PR-affected files pass twice in one HOME: /pm-captures/pr-30888b1-review-bb8a-i1/.'
     created_at: '2026-11-27T06:10:42Z'
     last_edited: '2026-11-27T06:10:42Z'
+  - id: note-f00ba68
+    text: 'Review bb8a i2 (608af19c): no behaviour change. impl.md R3/R6 now record
+      the QA S9 scroll-to-footer fix (7688eb64, _scroll_selected_into_view) and TestPlansPaneScrollReachesFooter,
+      which the spec never listed. tests/test_plans_pane.py: the duplicated _PlansApp
+      host is now _plans_view_app(). on_key comment says why chord_prefix_armed uses
+      getattr (plain-App test hosts). Code diff re-read clean: no live breakdown references
+      outside pm/specs and pm/plans; master still ac719072. 269 tests in 8 PR-affected
+      files pass twice in one HOME: /pm-captures/pr-30888b1-review-bb8a-i2/.'
+    created_at: '2026-11-27T06:16:37Z'
+    last_edited: '2026-11-27T06:16:37Z'
   created_at: '2026-03-01T17:51:46.490716+00:00'
-  updated_at: '2026-11-27T06:10:42.814927+00:00'
+  updated_at: '2026-11-27T06:16:38.209601+00:00'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-30888b1-fold-plan-breakdown-into-plan-add-st-ab512a43
 - id: pr-3116896
   plan: tui-ux
