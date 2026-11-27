@@ -4817,7 +4817,9 @@ def pr_dashboard(port: int | None, bind: str | None, do_open: bool):
     ``project.yaml`` + the captures dir on every ``/`` request, so a new
     sign-off report shows up on the next page load with no regeneration
     step. Per-PR ``report.html`` and its evidence siblings are served
-    straight from ``~/.pm/sessions/<tag>/captures/<pr_id>/``.
+    straight from the PR's captures dir (``pm qa captures-path <pr_id>``:
+    under ``captures-dir`` when set, else ``~/.pm/sessions/<tag>/captures``,
+    or wherever the PR's evidence began before that setting changed).
 
     Foreground / blocking. Ctrl-C shuts the server down.
     """

@@ -511,7 +511,7 @@ class TestQAWorkdirs:
         assert scratch == (tmp_path / "home" / ".pm" / "scratch" / "qa"
                            / "qa" / "s-1")
 
-    def test_clone_does_not_force_hardlinks(self, tmp_path):
+    def test_clone_does_not_force_hardlinks(self, tmp_path, monkeypatch):
         """The clone must not spell out ``--local``.
 
         With an explicit ``--local`` git dies with "failed to create link
@@ -520,6 +520,9 @@ class TestQAWorkdirs:
         user's project checkout); a plain path clone hardlinks when it
         can and copies otherwise.
         """
+        # The scenario scratch is created under the scratch root: keep it
+        # out of the real ~/.pm (or the user's configured scratch-dir).
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path / "home")
         qa_workdir = tmp_path / "qa"
         repo_root = tmp_path / "repo"
         repo_root.mkdir()

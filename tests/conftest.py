@@ -54,6 +54,39 @@ def _no_shared_image_cache(monkeypatch):
                         lambda *a, **k: None)
 
 
+# The real pm home, before any test redirects HOME.
+_REAL_PM_HOME = __import__("pathlib").Path.home() / ".pm"
+
+
+@pytest.fixture(autouse=True)
+def _no_user_location_settings(monkeypatch):
+    """Ignore the user's own ``pm set workdirs-dir/captures-dir/scratch-dir/
+    image-cache-dir`` (and their earlier locations) in the real ``~/.pm``.
+
+    Most tests do not redirect HOME and expect the default locations; with
+    a configured ``captures-dir`` (e.g. on a NAS) they resolved captures
+    there and failed, and scratch-creating tests wrote into the user's real
+    scratch root.  Tests that point HOME at a temp dir set and read these
+    settings normally.
+    """
+    from pm_core import paths
+    real_get = paths.get_global_setting_value
+    real_earlier = paths.earlier_dirs
+
+    def _get(name, default=""):
+        if name in paths.PATH_SETTINGS and paths.pm_home() == _REAL_PM_HOME:
+            return default
+        return real_get(name, default)
+
+    def _earlier(setting):
+        if paths.pm_home() == _REAL_PM_HOME:
+            return []
+        return real_earlier(setting)
+
+    monkeypatch.setattr(paths, "get_global_setting_value", _get)
+    monkeypatch.setattr(paths, "earlier_dirs", _earlier)
+
+
 @pytest.fixture(autouse=True)
 def _isolated_claude_config(tmp_path_factory, monkeypatch):
     """Point Claude's global config at a temp dir.
