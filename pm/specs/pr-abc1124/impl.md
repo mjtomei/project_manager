@@ -315,7 +315,14 @@ the task and on the measurements above.
   loser's `mv`/`unlink` printed `FAILED` for every item and exited 1).  A
   dry run reports a held dir the same way without waiting.  `pm pr cleanup
   --resources` prints reclaim failures (`could not reclaim <path>: …`) and
-  exits 1; they used to reach only the debug log.
+  exits 1; they used to reach only the debug log.  A runtime that cannot
+  list containers is reported the same way (`Cleaned <pr>: nothing removed,
+  skipped containers and scenario stores/exports (the container runtime
+  could not list containers)`, exit 1) — it read `nothing to clean`, exit 0,
+  exactly like a healthy no-op (QA S11), while `pm container reclaim` and
+  `cache gc` already said `Nothing removed: …` and exited 1.  A background
+  pass (QA start, merge cleanup) logs `reclaim(<pr>, <reason>): nothing
+  removed: <problem>`.
 * Hooks (existing lifecycle owners only — no new scheduler):
   * `pr_cleanup.cleanup_pr_resources`, after containers are removed:
     reclaim every run of that PR.  Its TUI callers (merge detection in

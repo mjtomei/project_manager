@@ -375,7 +375,7 @@ def test_pr_cleanup_reclaims(monkeypatch):
     seen = {}
     monkeypatch.setattr(pr_cleanup, "kill_pr_windows", lambda s, p: [])
     monkeypatch.setattr(pr_cleanup.container_mod, "cleanup_pr_containers",
-                        lambda pr_id, session_tag=None: [])
+                        lambda pr_id, session_tag=None, problems=None: [])
     monkeypatch.setattr(sr, "reclaim",
                         lambda pr_id, **kw: seen.setdefault("sync", pr_id)
                         and sr.Outcome())
@@ -536,7 +536,7 @@ def test_pr_cleanup_cli_reports_reclaim_failures(monkeypatch):
     monkeypatch.setattr(pr_mod, "trigger_tui_refresh", lambda: None)
     monkeypatch.setattr(loop_shared, "get_pm_session", lambda: None)
     monkeypatch.setattr(pr_cleanup.container_mod, "cleanup_pr_containers",
-                        lambda pr_id, session_tag=None: [])
+                        lambda pr_id, session_tag=None, problems=None: [])
     out = sr.Outcome(failed=[(sr.Disposable(Path("/s/x.tar"), "archive"),
                               "Permission denied")])
     monkeypatch.setattr(sr, "reclaim", lambda pr_id, **kw: out)
@@ -554,3 +554,31 @@ def test_pr_cleanup_cli_reports_reclaim_failures(monkeypatch):
     assert "could not reclaim" not in r.output
     assert ("left /s/qa/pr-9-l/s-1 to another reclaim removing its stores"
             in r.output)
+
+
+def test_pr_cleanup_cli_reports_unlistable_runtime(monkeypatch):
+    """With a runtime that cannot list containers, ``pm pr cleanup
+    --resources`` printed "Cleaned <pr>: nothing to clean" and exited 0 —
+    exactly like a healthy no-op — while ``pm container reclaim`` said the
+    runtime could not be listed and exited 1 (QA S11 story 3)."""
+    from click.testing import CliRunner
+    from pm_core import pr_cleanup
+    from pm_core import loop_shared
+    from pm_core.cli import pr as pr_mod
+    pr = {"id": "pr-9", "title": "t"}
+    monkeypatch.setattr(pr_mod, "state_root", lambda: Path("/nonexistent"))
+    monkeypatch.setattr(pr_mod.store, "load", lambda root: {"prs": [pr]})
+    monkeypatch.setattr(pr_mod, "trigger_tui_refresh", lambda: None)
+    monkeypatch.setattr(loop_shared, "get_pm_session", lambda: None)
+    monkeypatch.setattr(sr, "_rt", lambda *a, **kw: SimpleNamespace(
+        returncode=125, stdout="", stderr="Error: cannot connect"))
+    monkeypatch.setattr(pr_cleanup.container_mod, "_run_runtime",
+                        lambda *a, **kw: SimpleNamespace(
+                            returncode=125, stdout="",
+                            stderr="Error: cannot connect"))
+    r = CliRunner().invoke(pr_mod.pr, ["cleanup", "--resources", "pr-9"])
+    assert r.exit_code == 1, r.output
+    assert "nothing to clean" not in r.output
+    assert ("Cleaned pr-9: nothing removed, skipped containers and scenario "
+            "stores/exports (the container runtime could not list "
+            "containers)") in r.output

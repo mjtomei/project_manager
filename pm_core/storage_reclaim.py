@@ -569,6 +569,10 @@ def reclaim(pr_id: str | None = None, exclude_run: str | None = None,
                 _append_record(p.scratch, done, reason)
     if out.removed or out.failed:
         _log.info("reclaim(%s, %s): %s", pr_id or "*", reason, out.summary())
+    elif out.problem:
+        # A background pass (QA start, merge cleanup) has no other output.
+        _log.warning("reclaim(%s, %s): nothing removed: %s", pr_id or "*",
+                     reason, out.problem)
     return out
 
 

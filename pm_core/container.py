@@ -1570,12 +1570,15 @@ def cleanup_qa_containers(pr_id: str, loop_id: str,
 
 
 def cleanup_pr_containers(pr_id: str,
-                          session_tag: str | None = None) -> list[str]:
+                          session_tag: str | None = None,
+                          problems: list[str] | None = None) -> list[str]:
     """Remove every QA container for a PR across all loop ids.
 
     Matches both legacy (``pm-qa-{pr_id}-``) and session-tagged
     (``pm-{session_tag}-qa-{pr_id}-``) name prefixes. Returns the list of
-    container names removed.
+    container names removed.  A listing the runtime refused is appended to
+    *problems* (when given), so a caller can tell "no containers" from
+    "could not look".
     """
     prefixes = []
     if session_tag:
@@ -1591,6 +1594,9 @@ def cleanup_pr_containers(pr_id: str,
             check=False, timeout=30,
         )
         if result.returncode != 0:
+            if problems is not None and not problems:
+                problems.append("the container runtime could not list "
+                                "containers")
             continue
         for line in result.stdout.strip().splitlines():
             cname = line.strip()

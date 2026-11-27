@@ -43,6 +43,17 @@ class TestCleanupPrContainers:
         assert removed == []
         mock_remove.assert_not_called()
 
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._run_runtime")
+    def test_listing_failure_is_reported(self, mock_runtime, mock_remove):
+        """A refused listing is not "no containers" (QA S11)."""
+        mock_runtime.return_value = MagicMock(returncode=125, stdout="")
+        problems = []
+        assert container_mod.cleanup_pr_containers(
+            "pr-001", session_tag="s", problems=problems) == []
+        assert problems == ["the container runtime could not list containers"]
+        mock_remove.assert_not_called()
+
     @patch("pm_core.container._run_runtime")
     def test_parallel_removal(self, mock_runtime):
         # Simulate four containers each taking 0.5s to remove. Sequential
@@ -99,7 +110,7 @@ class TestCleanupPrResources:
         assert summary["registry_windows"] == ["pr-001"]
         # Session tag should strip the pm- prefix
         mock_container.cleanup_pr_containers.assert_called_once_with(
-            "pr-001", session_tag="mysess")
+            "pr-001", session_tag="mysess", problems=[])
 
     def test_clears_runtime_state_file(self, tmp_path, monkeypatch):
         # Reproducer for the stale-state bug: after cleanup, a fresh

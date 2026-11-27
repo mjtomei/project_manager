@@ -3354,11 +3354,15 @@ def pr_cleanup(pr_id: str | None, force: bool, cleanup_all: bool, prune: bool,
         failed = summary.get("reclaim_failed") or []
         for path, err in failed:
             click.echo(f"  could not reclaim {path}: {err}", err=True)
+        skipped = summary.get("skipped") or {}
         if failed:
             click.echo(f"Retry with 'pm container reclaim --pr {target['id']}' "
                        "once the cause is fixed.", err=True)
+        elif skipped:
+            click.echo(f"Retry with 'pm pr cleanup --resources {target['id']}' "
+                       "once the container runtime works.", err=True)
         trigger_tui_refresh()
-        if failed:
+        if failed or skipped:
             raise SystemExit(1)
         return
 
