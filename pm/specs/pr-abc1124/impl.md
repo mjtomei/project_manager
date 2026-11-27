@@ -147,7 +147,13 @@ fuse-overlayfs 1.7.1, kernel 7.0, rootless, keep-id):
    images and layers are not in it.  `cache check`'s own `podman unshare`
    and `image inspect` create the database too (QA scenario 8), so a
    check of a hand-written config that does not yet set a runroot pinned
-   the default one.
+   the default one.  The tmp dir is pinned the same way on its own (QA
+   scenario 15): a hand-completed `storage.conf` (with its runroot) and
+   any podman command before `engine-setup` writes `containers.conf`
+   record podman's default tmp dir (`/tmp/podman-run-1000/libpod/tmp`, the
+   default engine's), while the runroot matches; that engine's events and
+   pause process then land in the default engine's tmp dir.  `podman info`
+   does not report the tmp dir; its debug log does (`Using tmp dir …`).
 
 The audit evidence paths named in the task
 (`/home/matt/.local/state/pm-pr-shepherd/disk-audit-20261105T040137Z`,
@@ -246,7 +252,10 @@ the task and on the measurements above.
   container never share runtime state.
 * Those dirs apply only once podman's database agrees (runtime fact 9).
   A nested pm launch (`ensure_consumer_engine`) and `engine-setup` compare
-  `podman info`'s runroot with the configured one; on a mismatch they
+  `podman info`'s runroot with the configured one, and the tmp dir its
+  debug log names ("Using tmp dir …") with the configured `tmp_dir` (QA
+  S15: a tmp dir pinned while the runroot matched went unnoticed); on a
+  mismatch they
   remove the engine's database while it holds no containers, pods or
   volumes (`image_cache.reset_stale_engine_db`, under a per-engine lock),
   and otherwise refuse, naming what to remove.  `cache check` reports the

@@ -1103,31 +1103,60 @@ def _podman_out(home: str, *args: str) -> str | None:
     return r.stdout if r.returncode == 0 else None
 
 
+def _engine_runtime_dirs(home: str) -> tuple[str, str | None] | None:
+    """``(runroot, tmp dir)`` podman with HOME=*home* uses, or None when
+    podman fails.  ``podman info`` reports only the runroot; the tmp dir
+    comes from its debug log ("Using tmp dir ..."), None if absent."""
+    try:
+        r = subprocess.run(
+            ["podman", "info", "--format", "{{.Store.RunRoot}}",
+             "--log-level=debug"],
+            capture_output=True, text=True, timeout=60,
+            env={**os.environ, "HOME": home})
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if r.returncode != 0:
+        return None
+    tmp = re.findall(r'msg="Using tmp dir ([^"]+)"', r.stderr or "")
+    return (r.stdout or "").strip(), (tmp[-1] if tmp else None)
+
+
 def runroot_problem(home: str) -> str | None:
-    """Why the engine at *home* does not use the runroot its config sets.
+    """Why the engine at *home* does not use the runtime dirs (runroot and
+    tmp dir) its config sets.
 
     Podman records an engine's runtime dirs (runroot and tmp dir) in its
     database when the first podman command with that HOME creates it, and
     later commands keep those over storage.conf and containers.conf (podman
-    3.4 logs "Overriding run root ... from database" only at debug level).
-    An engine that ran before pm wrote its config — 'pm container enable'
-    and 'pm container status' run 'podman info' — therefore keeps podman's
-    default runtime dirs, shared with the other engines in this container.
-    None when they match, when the config sets no runroot (the default
-    engine), or when podman cannot tell (the mapping probes report that).
+    3.4 logs "Overriding run root/tmp dir ... from database" only at debug
+    level).  An engine that ran before pm wrote its config — 'pm container
+    enable' and 'pm container status' run 'podman info', and so does any
+    podman command run between completing a hand-written storage.conf and
+    'pm container engine-setup' writing containers.conf — therefore keeps
+    podman's default runtime dirs, shared with the other engines in this
+    container.  None when they match, when the config sets no runroot (the
+    default engine), or when podman cannot tell (the mapping probes report
+    that).
     """
     want = _configured_runroot(home)
     if not want:
         return None
-    got = (_podman_out(home, "info", "--format", "{{.Store.RunRoot}}")
-           or "").strip()
-    if not got or got == want:
+    dirs = _engine_runtime_dirs(home)
+    if dirs is None:
         return None
-    return (f"podman with HOME={home} uses runroot {got}, not the {want} its "
-            f"storage.conf sets: the engine's database {_db_path(home)} "
-            f"predates that config and podman keeps the runtime dirs "
-            f"recorded there, so this engine shares runtime state with the "
-            f"other engines in this container")
+    got, got_tmp = dirs
+    want_tmp = _configured_tmp_dir(home)
+    if got and got != want:
+        what = f"runroot {got}, not the {want} its storage.conf sets"
+    elif want_tmp and got_tmp and got_tmp != want_tmp:
+        what = (f"tmp dir {got_tmp}, not the {want_tmp} its containers.conf "
+                f"sets")
+    else:
+        return None
+    return (f"podman with HOME={home} uses {what}: the engine's database "
+            f"{_db_path(home)} predates that config and podman keeps the "
+            f"runtime dirs recorded there, so this engine shares runtime "
+            f"state with the other engines in this container")
 
 
 _ENGINE_OBJECTS = (

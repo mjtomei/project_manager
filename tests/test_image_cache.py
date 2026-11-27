@@ -940,16 +940,18 @@ class _StaleEngine:
     """
 
     DEFAULT = "/tmp/podman-run-1000/containers"
+    DEFAULT_TMP = "/tmp/podman-run-1000/libpod/tmp"
 
     def __init__(self, home, objects=None, stale=True):
         self.home = str(home)
         self.objects = objects or {}
         self.calls = []
         db = image_cache._db_path(self.home)
-        db.parent.mkdir(parents=True)
+        db.parent.mkdir(parents=True, exist_ok=True)
         if stale:
             db.write_text("db")   # 'pm container enable' ran 'podman info'
         self.recorded = self.DEFAULT
+        self.recorded_tmp = self.DEFAULT_TMP
 
     def __call__(self, argv, **kw):
         assert kw["env"]["HOME"] == self.home
@@ -959,8 +961,16 @@ class _StaleEngine:
             db.write_text("db")
             self.recorded = (image_cache._configured_runroot(self.home)
                              or self.DEFAULT)
+            self.recorded_tmp = (image_cache._configured_tmp_dir(self.home)
+                                 or self.DEFAULT_TMP)
         if argv[1] == "info":
-            return _cp(out=self.recorded + "\n")
+            # Like podman 3.4: 'info' reports the runroot; the tmp dir is
+            # only in the debug log.
+            err = ""
+            if "--log-level=debug" in argv:
+                err = (f'time="2026-11-27T12:00:00Z" level=debug '
+                       f'msg="Using tmp dir {self.recorded_tmp}"\n')
+            return _cp(out=self.recorded + "\n", err=err)
         if argv[1] == "unshare":
             return _cp(out="".join(f"{p} {ids}\n" for p, ids in
                                    zip(argv[5:], ["0:0", "1:1"])))
@@ -1057,6 +1067,36 @@ class TestStaleEngineDatabase:
             t for ok, t in res.lines if ok], res.lines
         assert image_cache.runroot_problem(str(eng)) is None
         assert fake.recorded == want
+
+    def test_a_podman_command_before_containers_conf_pins_no_tmp_dir(
+            self, consumer, tmp_path, monkeypatch):
+        """QA S15: a storage.conf completed by hand (store, mount_program and
+        runroot), then any podman command before containers.conf exists —
+        'podman info' to see the runroot — creates the database with
+        podman's default tmp dir.  The runroot matches, so the tmp dir alone
+        must make the check fail and the database be reset."""
+        eng = tmp_path / "hand"
+        fake = _StaleEngine(eng, stale=False)
+        monkeypatch.setattr(image_cache.subprocess, "run", fake)
+        want = image_cache._isolated_runroot(str(eng))
+        cfg = self._hand_written(eng, runroot=want)
+        fake(["podman", "info", "--format", "{{.Store.RunRoot}}"],
+             env={"HOME": str(eng)})          # the user's own podman info
+        assert (fake.recorded, fake.recorded_tmp) == (
+            want, _StaleEngine.DEFAULT_TMP)
+        assert image_cache.write_engine_config(str(eng)) == {
+            "containers.conf": cfg.parent / "containers.conf"}
+        want_tmp = image_cache._configured_tmp_dir(str(eng))
+        problem = image_cache.runroot_problem(str(eng))
+        assert problem and (f"uses tmp dir {_StaleEngine.DEFAULT_TMP}, not "
+                            f"the {want_tmp} its containers.conf sets"
+                            in problem), problem
+        res = image_cache.consumer_check(home=str(eng))
+        assert any("uses tmp dir" in t for t in res.problems()), res.lines
+        assert image_cache.reset_stale_engine_db(str(eng)) == \
+            image_cache._db_path(str(eng))
+        assert (fake.recorded, fake.recorded_tmp) == (want, want_tmp)
+        assert image_cache.runroot_problem(str(eng)) is None
 
     def test_check_keeps_a_database_it_found_or_that_is_in_use(
             self, consumer, tmp_path, monkeypatch):
@@ -1273,6 +1313,28 @@ class TestCli:
             in r.output
         assert cfg.read_text() == text
         assert fake.recorded == image_cache._configured_runroot(str(eng))
+
+    def test_engine_setup_resets_a_tmp_dir_pinned_before_containers_conf(
+            self, consumer, tmp_path, monkeypatch):
+        """QA S15: storage.conf completed by hand with its runroot, then
+        'podman info' before engine-setup wrote containers.conf — the
+        runroot matches but the database holds podman's default tmp dir.
+        engine-setup keeps the user's file and resets the database."""
+        eng = tmp_path / "hand"
+        fake = _StaleEngine(eng, stale=False)
+        monkeypatch.setattr(image_cache.subprocess, "run", fake)
+        cfg = TestStaleEngineDatabase._hand_written(
+            eng, runroot=image_cache._isolated_runroot(str(eng)))
+        text = cfg.read_text()
+        fake(["podman", "info", "--format", "{{.Store.RunRoot}}"],
+             env={"HOME": str(eng)})
+        r = self._invoke("engine-setup", "--home", str(eng))
+        db = image_cache._db_path(str(eng))
+        assert f"kept {cfg} (not written by pm" in r.output, r.output
+        assert f"wrote {cfg.parent / 'containers.conf'}" in r.output
+        assert f"reset {db} (it predated this config)" in r.output
+        assert cfg.read_text() == text
+        assert fake.recorded_tmp == image_cache._configured_tmp_dir(str(eng))
 
     def test_engine_setup_outside_a_consumer_fails(self, home):
         r = self._invoke("engine-setup")
