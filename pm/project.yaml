@@ -2537,8 +2537,19 @@ prs:
       8d7026fd. Captures /pm-captures/scenarios/9/ (index manifest.md).'
     created_at: '2026-11-27T05:19:09Z'
     last_edited: '2026-11-27T05:21:30Z'
+  - id: note-802e141
+    text: 'Review bb8a i1 (c04c6bd5): incidental fix. The guide plans-view reference
+      and the getting-started key line (both rewritten here to drop w) still named
+      a v key the plans pane lost in 81b19294; both now say Enter (getting-started
+      line = pr-fa9f172 text `D=deps  Enter=view file`), pinned by TestPlansKeyReferencesAreLive.
+      This fixes pr-c428279. Appendix A re-rendered, only that line changed. pr-6c0ee2d
+      trial merge at d5d780b8: still the single plan.py plan_breakdown hunk; prompt_gen.py
+      merges cleanly. Code from QA (chord_prefix_armed, scroll-to-footer) reviewed
+      clean. 1060 tests in 23 PR-affected files pass twice in one HOME: /pm-captures/pr-30888b1-review-bb8a-i1/.'
+    created_at: '2026-11-27T06:10:42Z'
+    last_edited: '2026-11-27T06:10:42Z'
   created_at: '2026-03-01T17:51:46.490716+00:00'
-  updated_at: '2026-11-27T05:21:30.291603+00:00'
+  updated_at: '2026-11-27T06:10:42.814927+00:00'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-30888b1-fold-plan-breakdown-into-plan-add-st-ab512a43
 - id: pr-3116896
   plan: tui-ux
@@ -56880,8 +56891,15 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-11-27T05:08:01.154123+00:00'
-  updated_at: '2026-11-27T05:08:01.154123+00:00'
+  updated_at: '2026-11-27T06:10:47.400249+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-f6774a0
+    text: 'Fixed on pr-30888b1 in c04c6bd5 (review bb8a i1): guide.py plans-view reference
+      line is now "- `Enter` — view plan file", the cli getting-started key line also
+      drops v=view, and tests/test_plan_add_breakdown.py::TestPlansKeyReferencesAreLive
+      pins both lists to live plans-pane keys. Close this PR once pr-30888b1 merges.'
+    created_at: '2026-11-27T06:10:47Z'
+    last_edited: '2026-11-27T06:10:47Z'
