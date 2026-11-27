@@ -2590,8 +2590,20 @@ prs:
       HOME: /pm-captures/pr-30888b1-review-bb8a-i4/.'
     created_at: '2026-11-27T06:33:30Z'
     last_edited: '2026-11-27T06:33:30Z'
+  - id: note-a1f1c07
+    text: 'QA planning round 3 (2026-11-27, spec 9844ac3c): qa.md synced with post-round-2
+      commits. E8 is now a pass criterion (fixed e5573ed0; y prefix and j/k/Enter
+      after w included). R8 overflow footer scroll (7688eb64). Key references must
+      say Enter, not v (c04c6bd5, fixes pr-c428279). org-demo steps 4-5 (b1cbdd99).
+      Not-failures add pr-c2bcb0a (tree-view prefix then j/k) and pr-25d4825 (command-bar
+      focus handback scrolls to top). Setup adds the S9/S10 traps: the stand-in must
+      hold the per-plan window open, and the first w r clone takes ~16 s. Scenarios
+      13-18 re-cover every surface after the plans_pane on_key change, plus two clients
+      sharing the chord state.'
+    created_at: '2026-11-27T06:47:02Z'
+    last_edited: '2026-11-27T06:47:02Z'
   created_at: '2026-03-01T17:51:46.490716+00:00'
-  updated_at: '2026-11-27T06:33:31.247377+00:00'
+  updated_at: '2026-11-27T06:47:02.840325+00:00'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-30888b1-fold-plan-breakdown-into-plan-add-st-ab512a43
 - id: pr-3116896
   plan: tui-ux
