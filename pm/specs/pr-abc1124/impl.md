@@ -144,7 +144,10 @@ fuse-overlayfs 1.7.1, kernel 7.0, rootless, keep-id):
    auto-configured engine kept podman's default runtime dirs (its tmp dir
    is the consumer default engine's).  Removing the database while it holds
    no containers, pods or volumes makes the configured dirs take effect;
-   images and layers are not in it.
+   images and layers are not in it.  `cache check`'s own `podman unshare`
+   and `image inspect` create the database too (QA scenario 8), so a
+   check of a hand-written config that does not yet set a runroot pinned
+   the default one.
 
 The audit evidence paths named in the task
 (`/home/matt/.local/state/pm-pr-shepherd/disk-audit-20261105T040137Z`,
@@ -250,13 +253,19 @@ the task and on the measurements above.
 * `pm container engine-setup [--home DIR]` (in-container) writes the config
   for `DIR` (default `$HOME`), refuses an existing config that it did not
   write unless `--force` — naming what that file needs (`storage.conf`:
-  the store and mount_program; `containers.conf`: the engine's own
-  `tmp_dir`, review 62b4 i8) — refuses a graphroot on a network
+  the store and mount_program, plus an isolated engine's own runroot;
+  `containers.conf`: the engine's own `tmp_dir`, review 62b4 i8) — and
+  keeps such a file once it has all of that (QA S8: a hand-fixed file was
+  refused with advice to add what it already had, so the stale-database
+  remedy the check names never ran), refuses a graphroot on a network
   filesystem, and runs the consumer check.
 * `pm container cache check` (in-container) verifies: entry present,
   engine config references the store, graphroot local, mapping probes read
   `0:0` / `1:1` through `podman unshare stat`, configured image visible
-  (`R/O`).  Non-zero exit with the fix on any failure.
+  (`R/O`).  Non-zero exit with the fix on any failure.  A database its
+  own podman calls created (the engine had none) is removed again while
+  the engine holds nothing, so checking a config still being written by
+  hand does not pin podman's default runtime dirs (runtime fact 9; QA S8).
 
 ### R4 — Lifecycle reclaim (`pm_core/storage_reclaim.py`, new)
 
@@ -572,7 +581,8 @@ the task and on the measurements above.
   the system config, no shared image) — the recipe says to run
   `engine-setup`; pm's own nested launches do it automatically.
 * An existing user `storage.conf` written by the scenario: `engine-setup`
-  refuses to overwrite it without `--force` and says why.
+  refuses to overwrite it without `--force` and says why; once the file
+  has what that refusal names, `engine-setup` keeps it.
 * In-flight QA runs across the upgrade: legacy scratch dirs keep being used
   (R5), their containers keep their mounts.
 * Stopped (not removed) scenario containers hold their scratch → no
@@ -657,10 +667,11 @@ the same shared layers:
 
 `engine-setup` refuses a network filesystem, an incompatible cache, and an
 existing `storage.conf` or `containers.conf` it did not write; the error
-says what to add to that file, and `--force` replaces it instead. After
-editing such a file yourself, verify it with `HOME=<engine home> pm
-container cache check` (`engine-setup` keeps refusing a file it did not
-write).
+says what to add to that file, and `--force` replaces it instead. Once
+you have added it yourself, `engine-setup` keeps your file (`kept …`),
+resets the engine's database if an earlier podman command recorded other
+runtime dirs, and runs the check; `HOME=<engine home> pm container cache
+check` verifies the engine at any time.
 
 ## Container-mode pm inside the container (nested pm launch)
 

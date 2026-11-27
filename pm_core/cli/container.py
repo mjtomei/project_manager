@@ -442,14 +442,21 @@ def engine_setup(home: str | None, force: bool):
     private graphroot under HOME, the shared store as an additional image
     store) and, for any HOME but the default user's, a containers.conf
     giving the engine its own runroot and tmp dir — so several isolated
-    engines can run side by side on the same shared layers.  An engine
-    that already ran keeps the runtime dirs recorded in its database, so
-    pm resets that database while it holds no containers.  Then runs
-    'pm container cache check' for that HOME.
+    engines can run side by side on the same shared layers.  A file pm did
+    not write is kept when it already has what that file needs, else
+    refused (naming it) unless --force.  An engine that already ran keeps
+    the runtime dirs recorded in its database, so pm resets that database
+    while it holds no containers.  Then runs 'pm container cache check'
+    for that HOME.
     """
     from pm_core import image_cache
     try:
-        written = image_cache.write_engine_config(home, force=force)
+        kept: list = []
+        written = image_cache.write_engine_config(home, force=force,
+                                                  kept=kept)
+        for path in kept:
+            click.echo(f"kept {path} (not written by pm; it already has "
+                       f"what this engine needs)")
         for path in written.values():
             click.echo(f"wrote {path}")
         # An engine that already ran keeps the runtime dirs recorded in its

@@ -55,10 +55,11 @@ the same shared layers:
 
 `engine-setup` refuses a network filesystem, an incompatible cache, and an
 existing `storage.conf` or `containers.conf` it did not write; the error
-says what to add to that file, and `--force` replaces it instead. After
-editing such a file yourself, verify it with `HOME=<engine home> pm
-container cache check` (`engine-setup` keeps refusing a file it did not
-write).
+says what to add to that file, and `--force` replaces it instead. Once
+you have added it yourself, `engine-setup` keeps your file (`kept …`),
+resets the engine's database if an earlier podman command recorded other
+runtime dirs, and runs the check; `HOME=<engine home> pm container cache
+check` verifies the engine at any time.
 
 ## Container-mode pm inside the container (nested pm launch)
 

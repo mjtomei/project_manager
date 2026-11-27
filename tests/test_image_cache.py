@@ -717,6 +717,39 @@ class TestWriteEngineConfig:
         image_cache.write_engine_config(str(eng), force=True)
         assert "vfs" not in cfg.read_text()
 
+    def test_keeps_a_foreign_config_that_has_what_it_needs(
+            self, consumer, tmp_path):
+        """QA S8: once the user added what the refusal names, engine-setup
+        keeps their file instead of asking again for what it has."""
+        eng = tmp_path / "hand"
+        cdir = eng / ".config" / "containers"
+        cdir.mkdir(parents=True)
+        storage = (f'# mine\n[storage]\ndriver = "overlay"\n'
+                   f'runroot = "{image_cache._isolated_runroot(str(eng))}"\n'
+                   f'[storage.options]\nadditionalimagestores = '
+                   f'["{image_cache.CONSUMER_STORE}"]\n'
+                   f'[storage.options.overlay]\n'
+                   f'mount_program = "{image_cache.MOUNT_PROGRAM}"\n')
+        (cdir / "storage.conf").write_text(storage)
+        kept = []
+        written = image_cache.write_engine_config(str(eng), kept=kept)
+        assert kept == [cdir / "storage.conf"]
+        assert set(written) == {"containers.conf"}
+        assert (cdir / "storage.conf").read_text() == storage
+        # A foreign containers.conf is kept only once it sets a tmp_dir.
+        (cdir / "containers.conf").write_text('[engine]\nfoo = "x"\n')
+        with pytest.raises(ImageCacheError, match="tmp_dir"):
+            image_cache.write_engine_config(str(eng))
+        (cdir / "containers.conf").write_text(
+            "[engine]\ntmp_dir = '/tmp/mine'\n")
+        kept = []
+        assert image_cache.write_engine_config(str(eng), kept=kept) == {}
+        assert len(kept) == 2
+        # --force still replaces both.
+        assert set(image_cache.write_engine_config(str(eng), force=True)) \
+            == {"storage.conf", "containers.conf"}
+        assert "# mine" not in (cdir / "storage.conf").read_text()
+
     def test_foreign_containers_conf_names_the_tmp_dir_it_needs(
             self, consumer, tmp_path):
         # A scenario's own containers.conf (its network mode) has nothing
@@ -865,13 +898,14 @@ class _StaleEngine:
 
     DEFAULT = "/tmp/podman-run-1000/containers"
 
-    def __init__(self, home, objects=None):
+    def __init__(self, home, objects=None, stale=True):
         self.home = str(home)
         self.objects = objects or {}
         self.calls = []
         db = image_cache._db_path(self.home)
         db.parent.mkdir(parents=True)
-        db.write_text("db")       # 'pm container enable' ran 'podman info'
+        if stale:
+            db.write_text("db")   # 'pm container enable' ran 'podman info'
         self.recorded = self.DEFAULT
 
     def __call__(self, argv, **kw):
@@ -887,6 +921,8 @@ class _StaleEngine:
         if argv[1] == "unshare":
             return _cp(out="".join(f"{p} {ids}\n" for p, ids in
                                    zip(argv[5:], ["0:0", "1:1"])))
+        if argv[1:3] == ["image", "inspect"]:
+            return _cp(out=json.dumps([{"Id": IMAGE_ID}]))
         kind = {"ps": "container", "pod": "pod", "volume": "volume"}[argv[1]]
         return _cp(out="".join(n + "\n" for n in self.objects.get(kind, [])))
 
@@ -941,6 +977,57 @@ class TestStaleEngineDatabase:
         assert image_cache._db_path(str(eng)).exists()
         assert fake.recorded == _StaleEngine.DEFAULT
         assert str(eng) not in image_cache._checked_homes
+
+    @staticmethod
+    def _hand_written(eng, runroot=None):
+        """A storage.conf the user wrote, following engine-setup's refusal
+        (QA S8); *runroot* is the one setting they may leave out."""
+        cfg = eng / ".config" / "containers" / "storage.conf"
+        cfg.parent.mkdir(parents=True, exist_ok=True)
+        rr = f'runroot = "{runroot}"\n' if runroot else ""
+        cfg.write_text(
+            f'[storage]\ndriver = "overlay"\n{rr}\n[storage.options]\n'
+            f'additionalimagestores = ["{image_cache.CONSUMER_STORE}"]\n\n'
+            f'[storage.options.overlay]\n'
+            f'mount_program = "{image_cache.MOUNT_PROGRAM}"\n')
+        return cfg
+
+    def test_checking_an_unfinished_config_pins_no_runtime_dirs(
+            self, consumer, tmp_path, monkeypatch):
+        """QA S8: 'cache check' on a hand-written config without its runroot
+        created the engine's database with podman's default runroot, which
+        podman then kept after the user added theirs — the second check
+        failed, and its named remedy (engine-setup) refused the file."""
+        eng = tmp_path / "hand"
+        fake = _StaleEngine(eng, stale=False)
+        monkeypatch.setattr(image_cache.subprocess, "run", fake)
+        self._hand_written(eng)
+        res = image_cache.consumer_check(home=str(eng))
+        assert [t for t in res.problems() if "runroot" in t] and \
+            "sets no runroot" in " ".join(res.problems())
+        assert ["unshare", "stat"] in fake.calls   # the check ran podman
+        assert not image_cache._db_path(str(eng)).exists()
+        want = image_cache._isolated_runroot(str(eng))
+        self._hand_written(eng, runroot=want)
+        res = image_cache.consumer_check(home=str(eng))
+        assert f"engine config for HOME={eng} uses the shared store" in [
+            t for ok, t in res.lines if ok], res.lines
+        assert image_cache.runroot_problem(str(eng)) is None
+        assert fake.recorded == want
+
+    def test_check_keeps_a_database_it_found_or_that_is_in_use(
+            self, consumer, tmp_path, monkeypatch):
+        eng = tmp_path / "busy"
+        fake = _StaleEngine(eng, objects={"container": ["web"]}, stale=False)
+        monkeypatch.setattr(image_cache.subprocess, "run", fake)
+        self._hand_written(eng)
+        image_cache.consumer_check(home=str(eng))
+        assert image_cache._db_path(str(eng)).exists()
+        eng2 = tmp_path / "found"
+        monkeypatch.setattr(image_cache.subprocess, "run", _StaleEngine(eng2))
+        self._hand_written(eng2)
+        image_cache.consumer_check(home=str(eng2))
+        assert image_cache._db_path(str(eng2)).exists()
 
     def test_default_engine_is_not_checked(self, consumer, tmp_path,
                                           monkeypatch):
@@ -1095,6 +1182,26 @@ class TestCli:
         assert fake.recorded == image_cache._configured_runroot(str(home))
         assert f"[ok] engine config for HOME={home} uses the shared store" \
             in r.output
+
+    def test_engine_setup_keeps_a_hand_fixed_config_and_resets_it(
+            self, consumer, tmp_path, monkeypatch):
+        """QA S8: the stale-database remedy 'cache check' names works for a
+        config the user wrote — their file stays, the database is reset."""
+        eng = tmp_path / "hand"
+        fake = _StaleEngine(eng)
+        monkeypatch.setattr(image_cache.subprocess, "run", fake)
+        cfg = TestStaleEngineDatabase._hand_written(
+            eng, runroot=image_cache._isolated_runroot(str(eng)))
+        text = cfg.read_text()
+        r = self._invoke("engine-setup", "--home", str(eng))
+        db = image_cache._db_path(str(eng))
+        assert f"kept {cfg} (not written by pm" in r.output, r.output
+        assert f"wrote {cfg.parent / 'containers.conf'}" in r.output
+        assert f"reset {db} (it predated this config)" in r.output
+        assert f"[ok] engine config for HOME={eng} uses the shared store" \
+            in r.output
+        assert cfg.read_text() == text
+        assert fake.recorded == image_cache._configured_runroot(str(eng))
 
     def test_engine_setup_outside_a_consumer_fails(self, home):
         r = self._invoke("engine-setup")

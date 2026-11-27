@@ -37,6 +37,7 @@ back to building the image, VFS or host execution while the cache is on.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -861,12 +862,16 @@ def _config_dir(home: str) -> Path:
 
 
 def write_engine_config(home: str | None = None, *, force: bool = False,
-                        isolated: bool | None = None) -> dict[str, Path]:
+                        isolated: bool | None = None,
+                        kept: list[Path] | None = None) -> dict[str, Path]:
     """Write the engine config for *home* (default ``$HOME``) in a consumer.
 
     *isolated* defaults to True for any home but the container user's own.
     Refuses (``ImageCacheError``) outside a consumer, on a network or FUSE
-    filesystem, or over an existing file pm did not write unless *force*.
+    filesystem, or over an existing file pm did not write unless *force* —
+    except that such a file which already has everything this engine needs
+    (what the refusal asks to add) is kept as it is and appended to *kept*.
+    Returns the files written.
     """
     if not is_consumer():
         raise ImageCacheError(
@@ -881,6 +886,7 @@ def write_engine_config(home: str | None = None, *, force: bool = False,
         raise ImageCacheError(problem)
     cdir = _config_dir(home)
     files = engine_config_text(home, isolated=isolated)
+    keep: list[Path] = []
     for fname in files:
         p = cdir / fname
         if p.exists() and not force:
@@ -888,15 +894,34 @@ def write_engine_config(home: str | None = None, *, force: bool = False,
                 ours = p.read_text().startswith(ENGINE_CONFIG_MARK)
             except OSError:
                 ours = False
-            if not ours:
-                raise ImageCacheError(_foreign_config_message(
-                    p, fname, home, isolated=isolated))
+            if ours:
+                continue
+            # The user followed the refusal's advice by hand: keep their
+            # file (and its other settings) rather than ask again for what
+            # it already has.
+            if _foreign_config_complete(fname, home, isolated):
+                keep.append(p)
+                continue
+            raise ImageCacheError(_foreign_config_message(
+                p, fname, home, isolated=isolated))
     cdir.mkdir(parents=True, exist_ok=True)
     written = {}
     for fname, text in files.items():
+        if cdir / fname in keep:
+            continue
         (cdir / fname).write_text(text)
         written[fname] = cdir / fname
+    if kept is not None:
+        kept.extend(keep)
     return written
+
+
+def _foreign_config_complete(fname: str, home: str, isolated: bool) -> bool:
+    """Whether *home*'s *fname*, a file pm did not write, already has what
+    :func:`_foreign_config_message` asks it to add."""
+    if fname == "storage.conf":
+        return engine_config_problem(home) is None
+    return not isolated or _configured_tmp_dir(home) is not None
 
 
 def _is_isolated(home: str) -> bool:
@@ -1017,16 +1042,27 @@ def _db_path(home: str) -> Path:
     return _graphroot(home) / "libpod" / "bolt_state.db"
 
 
-def _configured_runroot(home: str) -> str | None:
-    """The runroot *home*'s storage.conf sets, or None."""
+def _configured_value(home: str, fname: str, key: str) -> str | None:
+    """The string *key* in *home*'s containers config file *fname*, or
+    None."""
     try:
-        text = (_config_dir(home) / "storage.conf").read_text()
+        text = (_config_dir(home) / fname).read_text()
     except OSError:
         return None
     # A TOML basic ("...") or literal ('...') string.
-    m = re.search(r"""^\s*runroot\s*=\s*(?:"([^"]+)"|'([^']+)')""", text,
+    m = re.search(rf"""^\s*{key}\s*=\s*(?:"([^"]+)"|'([^']+)')""", text,
                   re.M)
     return (m.group(1) or m.group(2)) if m else None
+
+
+def _configured_runroot(home: str) -> str | None:
+    """The runroot *home*'s storage.conf sets, or None."""
+    return _configured_value(home, "storage.conf", "runroot")
+
+
+def _configured_tmp_dir(home: str) -> str | None:
+    """The tmp_dir *home*'s containers.conf sets, or None."""
+    return _configured_value(home, "containers.conf", "tmp_dir")
 
 
 def _podman_out(home: str, *args: str) -> str | None:
@@ -1132,6 +1168,39 @@ def reset_stale_engine_db(home: str | None = None) -> Path | None:
     return db
 
 
+def _discard_check_db(home: str) -> None:
+    """Remove the database of the engine at *home* that a check's own podman
+    calls just created, while the engine holds no containers, pods or
+    volumes.
+
+    Podman keeps the runtime dirs recorded when a command first creates an
+    engine's database over later config edits (:func:`runroot_problem`).
+    Checking a config that is still being written by hand — the Nested
+    Containers recipe's "edit the file, then 'pm container cache check'" —
+    would otherwise pin podman's default runroot before the user adds the
+    engine's own.  The next podman command recreates the database from the
+    config as it then stands.
+    """
+    from pm_core.store import bounded_flock
+    db = _db_path(home)
+    if not db.exists():
+        return
+    lock = _config_dir(home) / ".pm-engine.lock"
+    try:
+        held = (bounded_flock(lock, 120) if lock.parent.is_dir()
+                else contextlib.nullcontext(True))
+        with held as got:
+            if not got:
+                return
+            for _kind, args, _fix in _ENGINE_OBJECTS:
+                out = _podman_out(home, *args)
+                if out is None or out.split():
+                    return      # cannot tell, or in use since: keep it
+            db.unlink()
+    except OSError:
+        pass                    # unlockable config dir, or already gone
+
+
 def _mount_options(mount_point: str) -> str | None:
     """Options of the topmost mount at *mount_point*, or None."""
     from pm_core.paths import read_mountinfo
@@ -1184,6 +1253,20 @@ def consumer_check(image_ref: str | None = None,
     overlay = overlay_support_problem()
     res.add(overlay is None, overlay or "fuse-overlayfs available")
     home = os.path.abspath(home or os.environ.get("HOME") or str(Path.home()))
+    # The podman calls below create the engine's database when it has none
+    # yet; a check must not leave one behind (see _discard_check_db).
+    fresh_engine = not _db_path(home).exists()
+    try:
+        _check_engine(res, image_ref, entry, home)
+    finally:
+        if fresh_engine:
+            _discard_check_db(home)
+    return res
+
+
+def _check_engine(res: CheckResult, image_ref: str | None, entry: dict,
+                  home: str) -> None:
+    """:func:`consumer_check`'s checks of the engine at *home*."""
     problem = engine_config_problem(home)
     if problem is None:
         problem = runroot_problem(home)
@@ -1227,7 +1310,6 @@ def consumer_check(image_ref: str | None = None,
                        f"private copy shadows the shared one"))
     except (OSError, subprocess.TimeoutExpired, ValueError, LookupError) as exc:
         res.add(False, f"could not inspect image '{want}': {exc}")
-    return res
 
 
 _checked_homes: set[str] = set()
