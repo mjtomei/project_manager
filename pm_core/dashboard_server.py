@@ -18,7 +18,7 @@ import re
 import sys
 import threading
 from pathlib import Path
-from typing import Sequence
+from typing import Callable, Sequence
 
 _log = logging.getLogger("pm.dashboard_server")
 
@@ -31,7 +31,8 @@ _COPY_CHUNK = 64 * 1024
 
 
 def _make_handler(pm_root: Path, captures_root_dir: Path,
-                  fallback_roots: Sequence[Path] = ()):
+                  fallback_roots: Sequence[Path] = (),
+                  roots_fn: Callable[[], Sequence[Path]] | None = None):
     """Return a request handler subclass bound to *pm_root* and *captures_root_dir*.
 
     The handler renders ``/`` (and ``/index.html``) dynamically from
@@ -42,9 +43,27 @@ def _make_handler(pm_root: Path, captures_root_dir: Path,
     *fallback_roots* in turn (the default captures root when
     ``captures-dir`` moved new evidence elsewhere; see
     :func:`pm_core.paths.captures_roots`).
+
+    *roots_fn*, when given, is called on every request for the current
+    roots (primary first) and replaces *captures_root_dir* +
+    *fallback_roots*: a ``captures-dir`` change made while the server runs
+    (new evidence under the new root, older evidence still under the
+    earlier ones) then shows up on the next page load, like a new report
+    does.  If it raises or returns nothing, the roots given here are used.
     """
     captures_str = str(captures_root_dir)
-    fallback_strs = [str(r) for r in fallback_roots]
+    static_roots = [str(captures_root_dir), *(str(r) for r in fallback_roots)]
+
+    def current_roots() -> list[str]:
+        if roots_fn is not None:
+            try:
+                roots = [str(r) for r in roots_fn()]
+            except Exception:  # noqa: BLE001
+                _log.exception("could not resolve the captures roots")
+                roots = []
+            if roots:
+                return roots
+        return static_roots
 
     class _Handler(http.server.SimpleHTTPRequestHandler):
         def __init__(self, *args, **kwargs):
@@ -52,23 +71,27 @@ def _make_handler(pm_root: Path, captures_root_dir: Path,
 
         def translate_path(self, path):
             fs_path = super().translate_path(path)
-            if not fallback_strs or os.path.exists(fs_path):
+            roots = current_roots()
+            if roots == [captures_str] or (
+                    roots[0] == captures_str and os.path.exists(fs_path)):
                 return fs_path
             # The base class has already dropped '..' segments, so the
-            # path is inside the primary root; map it into each fallback.
+            # path is inside captures_str; map it into each current root.
             rel = os.path.relpath(fs_path, captures_str)
-            for root in fallback_strs:
-                alt = os.path.join(root, rel)
+            candidates = [os.path.normpath(os.path.join(root, rel))
+                          for root in roots]
+            for alt in candidates:
                 if os.path.exists(alt):
                     return alt
-            return fs_path
+            return candidates[0]
 
         def _serve_dashboard(self) -> None:
             from pm_core import behavior_report, store
             try:
                 data = store.load(pm_root)
+                roots = [Path(r) for r in current_roots()]
                 rows = behavior_report.gather_dashboard_rows(
-                    data, captures_root_dir, fallback_roots)
+                    data, roots[0], roots[1:])
                 page_html = behavior_report.render_dashboard_html(rows)
             except Exception as exc:  # noqa: BLE001
                 _log.exception("failed to build dashboard")
@@ -188,6 +211,7 @@ class _QuietDisconnectServer(http.server.ThreadingHTTPServer):
 
 def serve(*, pm_root: Path, captures_root_dir: Path,
           fallback_roots: Sequence[Path] = (),
+          roots_fn: Callable[[], Sequence[Path]] | None = None,
           host: str = DEFAULT_BIND, port: int = DEFAULT_PORT,
           open_browser: bool = False) -> None:
     """Start the dashboard server and block until interrupted.
@@ -198,13 +222,17 @@ def serve(*, pm_root: Path, captures_root_dir: Path,
             (typically ``~/.pm/sessions/<tag>/captures/``).
         fallback_roots: Further captures roots, searched in order for
             files missing from *captures_root_dir*.
+        roots_fn: Called per request for the current captures roots
+            (primary first), so a ``captures-dir`` change is picked up
+            without a restart; see :func:`_make_handler`.
         host: Bind address. Defaults to loopback; pass an explicit value to
             expose on a non-loopback interface.
         port: TCP port. ``0`` lets the OS pick a free port.
         open_browser: When True, launch the user's browser at the served URL
             once the server is listening.
     """
-    handler_cls = _make_handler(pm_root, captures_root_dir, fallback_roots)
+    handler_cls = _make_handler(pm_root, captures_root_dir, fallback_roots,
+                                roots_fn)
     try:
         httpd = _QuietDisconnectServer((host, port), handler_cls)
     except OSError as exc:

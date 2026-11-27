@@ -387,6 +387,95 @@ class TestConfigured:
             httpd.shutdown()
             httpd.server_close()
 
+    def test_running_dashboard_follows_a_captures_dir_move(self, home,
+                                                          tmp_path):
+        """A dashboard started before 'captures-dir' moved lists and serves
+        a PR whose evidence began under the new root, without a restart,
+        and still serves every earlier root (QA S19: the roots were
+        resolved once at startup, so the new root's report was "no report
+        yet" and its files 404)."""
+        import http.server
+        import threading
+        import urllib.error
+        import urllib.request
+        from pm_core import dashboard_server, store
+        pm_root = tmp_path / "pm"
+        pm_root.mkdir()
+        store.save({"prs": [{"id": "pr-def", "title": "Default"},
+                            {"id": "pr-s1", "title": "Share one"},
+                            {"id": "pr-s2", "title": "Share two"}]}, pm_root)
+        default = home / ".pm" / "sessions" / "tag" / "captures"
+        (default / "pr-def").mkdir(parents=True)
+        (default / "pr-def" / "report.html").write_text("def")
+        paths.set_path_setting("captures-dir", tmp_path / "s1")
+        roots = paths.captures_roots("tag")
+        (roots[0] / "pr-s1").mkdir()
+        (roots[0] / "pr-s1" / "report.html").write_text("s1")
+
+        handler = dashboard_server._make_handler(
+            pm_root, roots[0], roots[1:],
+            roots_fn=lambda: paths.captures_roots("tag"))
+        httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        base = f"http://127.0.0.1:{httpd.server_address[1]}"
+
+        def get(path):
+            with urllib.request.urlopen(base + path, timeout=5) as r:
+                return r.read().decode()
+        try:
+            assert "Share two" in get("/")
+            with pytest.raises(urllib.error.HTTPError):
+                get("/pr-s2/report.html")
+
+            # Moved while the server runs; pr-s2's evidence begins there.
+            paths.set_path_setting("captures-dir", tmp_path / "s2")
+            s2_dir = paths.captures_dir("pr-s2", session_tag="tag")
+            assert s2_dir == tmp_path / "s2" / "tag" / "pr-s2"
+            (s2_dir / "clip.txt").write_text("s2 clip")
+            (s2_dir / "report.html").write_text(
+                '<meta name="pm-signoff-verdict" content="SIGNOFF_REVIEW">')
+
+            index = get("/")
+            assert 'href="pr-s2/report.html"' in index
+            assert 'href="pr-s1/report.html"' in index
+            assert 'href="pr-def/report.html"' in index
+            assert get("/pr-s2/clip.txt") == "s2 clip"
+            assert "SIGNOFF_REVIEW" in get("/pr-s2/report.html")
+            assert get("/pr-s1/report.html") == "s1"
+            assert get("/pr-def/report.html") == "def"
+            # '..' still cannot climb out of the roots.
+            with pytest.raises(urllib.error.HTTPError):
+                get("/../s1/tag/pr-s1/report.html")
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+
+    def test_dashboard_roots_fn_failure_keeps_the_startup_roots(
+            self, tmp_path):
+        """A roots_fn that raises or returns nothing falls back to the
+        roots the server started with."""
+        import http.server
+        import threading
+        import urllib.request
+        from pm_core import dashboard_server
+        root = tmp_path / "caps"
+        (root / "pr-a").mkdir(parents=True)
+        (root / "pr-a" / "report.html").write_text("a")
+        for bad in (lambda: [], lambda: 1 / 0):
+            handler = dashboard_server._make_handler(tmp_path, root,
+                                                     roots_fn=bad)
+            httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0),
+                                                    handler)
+            threading.Thread(target=httpd.serve_forever, daemon=True).start()
+            url = (f"http://127.0.0.1:{httpd.server_address[1]}"
+                   "/pr-a/report.html")
+            try:
+                with urllib.request.urlopen(url, timeout=5) as r:
+                    assert r.read().decode() == "a"
+            finally:
+                httpd.shutdown()
+                httpd.server_close()
+
     def test_legacy_scratch_kept_for_in_flight_runs(self, home, tmp_path):
         legacy = tmp_path / "run" / "s-1" / "scratch"
         legacy.mkdir(parents=True)

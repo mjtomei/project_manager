@@ -4827,14 +4827,17 @@ def pr_dashboard(port: int | None, bind: str | None, do_open: bool):
 
     Foreground / blocking. Ctrl-C shuts the server down.
     """
-    from pm_core import dashboard_server
-    from pm_core.paths import captures_roots
+    from pm_core import dashboard_server, paths
 
     root = state_root()
     # captures_roots() creates the first root when a tag resolves, so it
-    # exists by the time we get a non-empty list back.  A second root is
-    # the default one when 'captures-dir' moved new evidence elsewhere.
-    croots = captures_roots()
+    # exists by the time we get a non-empty list back.  Further roots hold
+    # evidence begun before 'captures-dir' moved (earlier locations, then
+    # the default).  The session tag is fixed for the server's life; the
+    # roots are not: they are re-resolved per request, so a 'captures-dir'
+    # change made while the dashboard runs is served on the next load.
+    tag = paths._resolve_session_tag()
+    croots = paths.captures_roots(tag) if tag else []
     if not croots:
         click.echo(
             "Could not resolve the captures root (not inside a git repo / no "
@@ -4843,6 +4846,7 @@ def pr_dashboard(port: int | None, bind: str | None, do_open: bool):
     dashboard_server.serve(
         pm_root=root, captures_root_dir=croots[0],
         fallback_roots=croots[1:],
+        roots_fn=lambda: paths.captures_roots(tag),
         host=bind or dashboard_server.DEFAULT_BIND,
         port=port if port is not None else dashboard_server.DEFAULT_PORT,
         open_browser=do_open)
