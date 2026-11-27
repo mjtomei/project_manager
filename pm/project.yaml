@@ -2658,8 +2658,28 @@ prs:
       never mints. Scenarios 19-24 re-cover every surface.'
     created_at: '2026-11-27T08:25:51Z'
     last_edited: '2026-11-27T08:25:51Z'
+  - id: note-19fd9b4
+    text: 'QA S24 refiner (2026-11-27, a2ed252d): all 4 stories held live, so refined
+      with no reject. For the next run:
+
+      (1) Stand-in: on a tty it waits in a read loop until `/exit`, then exits 0.
+      It does not `exec sleep`: killing a sleeper gives rc!=0, and launch_claude then
+      retries with a fresh session id.
+
+      (2) A 2nd TUI `c` while the review pane is alive only logs "Focused existing
+      plan-review pane". Type /exit in that pane first. The next `c` then records
+      `--resume <first uuid>`.
+
+      (3) Double load: more than one actor can print "Created" for the same PR (unlocked
+      pre-read), so assert on pm pr list, not on the Created count.
+
+      (4) E3: an actor that shares a duplicate id resumes the other actor''s session
+      (`--resume`, no prompt). This is pr-2b9d002 (see note-1ed7829); assert the breakdown
+      text only on --session-id prompts.'
+    created_at: '2026-11-27T09:23:29Z'
+    last_edited: '2026-11-27T09:23:29Z'
   created_at: '2026-03-01T17:51:46.490716+00:00'
-  updated_at: '2026-11-27T08:25:52.030736+00:00'
+  updated_at: '2026-11-27T09:23:30.032895+00:00'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-30888b1-fold-plan-breakdown-into-plan-add-st-ab512a43
 - id: pr-3116896
   plan: tui-ux
@@ -56869,11 +56889,20 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-11-26T16:49:27.176356+00:00'
-  updated_at: '2026-11-26T16:49:27.176356+00:00'
+  updated_at: '2026-11-27T09:23:20.013306+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-1ed7829
+    text: 'Also seen in pr-30888b1 QA S24 refiner (2026-11-27): when two same-name
+      adds share one id, they also share the session key plan:add:<id>. The later
+      actor then resumes the earlier actor''s Claude session: the stand-in argv was
+      `--resume <same uuid>`, with no prompt. That happened in 4 of 5 three-way rounds.
+      A fix that makes ids unique also gives each add its own session. Test for that
+      too: each add should launch with its own --session-id.'
+    created_at: '2026-11-27T09:23:19Z'
+    last_edited: '2026-11-27T09:23:19Z'
 - id: pr-95286f9
   plan: bugs
   title: 'Bug: plan review prompts render "(plan: None)" for cross-plan PRs with no
