@@ -505,6 +505,16 @@ the task and on the measurements above.
 * An entry is deleted by hand while containers mount it: their engines lose
   the image; the next launch re-prepares.  GC never deletes referenced
   entries.
+* An entry dir whose `entry.json` is damaged (missing, unreadable, another
+  format version) while containers still carry its key: the next
+  preparation of that key refuses — before starting a prep container —
+  with an `ImageCacheError` naming those containers (rm them once their
+  work is done, or turn the cache off) instead of deleting the dir.  Each
+  consumer bind-mounts the entry dir itself, so deleting it emptied the
+  store under its nested engine (`can't stat imageStore dir`, its images
+  and running containers gone) while the fresh entry never reached it
+  (QA S4 story 3).  It also refuses when the users cannot be listed.  An
+  unused damaged dir is replaced as before.
 * A scenario sets a private `HOME` and runs `podman` without
   `engine-setup`: rootless defaults apply (overlay via fuse-overlayfs from
   the system config, no shared image) — the recipe says to run

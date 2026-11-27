@@ -70,6 +70,21 @@ class TestProvider:
         assert not any(c.args[0] == "run"
                        for c in podman_nested.call_args_list)
 
+    @pytest.mark.parametrize("cause,shown", [
+        ("run 'pm set container-image-cache off'",
+         "run 'pm set container-image-cache off'.\n\nTo retry"),
+        ("load rc=125.", "load rc=125.\n\nTo retry"),
+    ])
+    def test_cause_ends_as_a_sentence(self, podman_nested, monkeypatch,
+                                      cause, shown):
+        monkeypatch.setenv(image_cache.MODE_ENV, "on")
+        monkeypatch.setattr(image_cache, "is_consumer", lambda: False)
+        with patch.object(image_cache, "ensure_prepared",
+                          side_effect=ImageCacheError(cause)):
+            with pytest.raises(ContainerError) as exc:
+                create_container("c2", ContainerConfig(), Path("/w"))
+        assert f"Cause: {shown}" in str(exc.value)
+
     def test_off_launches_without_cache(self, podman_nested, monkeypatch):
         monkeypatch.setenv(image_cache.MODE_ENV, "off")
         with patch.object(image_cache, "ensure_prepared") as prep:

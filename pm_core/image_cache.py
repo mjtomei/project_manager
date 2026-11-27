@@ -370,6 +370,11 @@ def _prepare(root: Path, image_ref: str, image_id: str, tags: list[str],
         raise ImageCacheError("the shared image cache requires podman")
     entries = root / "entries"
     _clear_stale_preps(entries, key)
+    final = entries / key
+    if final.exists():
+        # An unusable leftover (load_entry returned None) that this
+        # preparation would replace — never while a container mounts it.
+        _refuse_replacing_used_entry(final, key, image_ref)
     token = secrets.token_hex(3)
     prep_dir = entries / f".prep-{key}-{os.getpid()}-{token}"
     prep_dir.mkdir(parents=True)
@@ -460,10 +465,9 @@ def _prepare(root: Path, image_ref: str, image_id: str, tags: list[str],
         _remove_tree(prep_dir)
         raise
     _remove_quietly(name)
-    final = entries / key
     try:
         if final.exists():
-            # An incomplete/unreadable leftover (load_entry returned None).
+            # The unusable leftover checked above: no container uses it.
             _remove_tree(final)
         os.rename(prep_dir, final)
     except OSError:
@@ -472,6 +476,49 @@ def _prepare(root: Path, image_ref: str, image_id: str, tags: list[str],
     _log.info("image cache: prepared %s (%s) in %.1fs, %s bytes", image_ref,
               key, meta["prep_seconds"], meta["store_bytes"])
     return CacheEntry(key=key, path=final, meta=meta)
+
+
+def _entry_users(key: str) -> list[str] | None:
+    """Names of the containers (any state) launched from entry *key*;
+    None when the runtime cannot list them."""
+    r = _rt("ps", "-a", "--filter", f"label={CACHE_LABEL}={key}",
+            "--format", "{{.Names}}", timeout=30)
+    if r.returncode != 0:
+        return None
+    return (r.stdout or "").split()
+
+
+def _refuse_replacing_used_entry(final: Path, key: str,
+                                 image_ref: str) -> None:
+    """Raise unless no container uses the unusable entry dir *final*.
+
+    Every consumer bind-mounts its entry's directory itself, so deleting
+    it to publish a fresh one empties the store under each consumer's
+    nested engine — its images and running containers break, with no
+    message — while the fresh entry, a new directory, never reaches them.
+    """
+    users = _entry_users(key)
+    if users == []:
+        return
+    what = (f"the shared image cache entry {key} for '{image_ref}' at "
+            f"{final} is unusable (its {ENTRY_FILE} is missing, unreadable "
+            f"or from another pm version)")
+    if users is None:
+        raise ImageCacheError(
+            f"{what}, and the containers that may still use it could not "
+            f"be listed, so pm will not replace it: deleting a store a "
+            f"container has mounted breaks the images and containers "
+            f"inside it. Check '{_runtime()} ps -a --filter "
+            f"label={CACHE_LABEL}={key}', then retry; " + _off_remedy())
+    shown = ", ".join(users[:5]) + (f" and {len(users) - 5} more"
+                                    if len(users) > 5 else "")
+    raise ImageCacheError(
+        f"{what}, but {len(users)} container(s) launched from it still "
+        f"mount it: {shown}. pm will not replace it while they do: "
+        f"deleting it breaks the images and containers inside them. Once "
+        f"their work is done, remove them ('{_runtime()} rm -f <name>') "
+        f"and retry, and the next launch prepares a fresh entry; "
+        + _off_remedy())
 
 
 def _clear_stale_preps(entries: Path, key: str) -> None:

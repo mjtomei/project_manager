@@ -881,9 +881,12 @@ def create_container(
         try:
             cache_entry = image_cache.ensure_prepared(config.image)
         except image_cache.ImageCacheError as exc:
+            cause = str(exc).rstrip()
+            if cause and cause[-1] not in ".!?":
+                cause += "."   # causes end on a remedy or a podman error
             raise ContainerError(
                 f"Container '{name}' was not launched: the shared image "
-                f"cache for '{config.image}' is unavailable.\n\nCause: {exc}"
+                f"cache for '{config.image}' is unavailable.\n\nCause: {cause}"
                 f"\n\nTo retry: fix the cause and launch again, or prepare "
                 f"it explicitly with 'pm container cache prepare'. To launch "
                 f"without the shared cache, run "

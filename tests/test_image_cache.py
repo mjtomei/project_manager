@@ -57,6 +57,8 @@ class FakeRuntime:
         self.calls: list[tuple] = []
         self.volumes: dict[str, str] = {}   # container path -> host path
         self.stale: list[tuple[str, str]] = []  # (prep name, key)
+        self.users: list[tuple[str, str]] = []  # (consumer name, key)
+        self.fail_users = False   # `ps` of an entry's consumers fails
         self.lock = threading.Lock()
 
     def __call__(self, *args, timeout=None, check=False):
@@ -97,9 +99,15 @@ class FakeRuntime:
             return _cp(out="3.4.4\n")
         if head == "ps":
             flt = args[args.index("--filter") + 1].split("=", 1)[1]
-            if "=" in flt:  # label=<name>=<key>: names of matching preps
+            if "=" in flt:  # label=<name>=<key>: names of matching ones
                 label, key = flt.split("=", 1)
-                return _cp(out="".join(f"{n}\n" for n, k in self.stale
+                if label == image_cache.CACHE_LABEL:
+                    if self.fail_users:
+                        return _cp(125, err="cannot list containers")
+                    pool = self.users
+                else:
+                    pool = self.stale
+                return _cp(out="".join(f"{n}\n" for n, k in pool
                                        if k == key))
             rows = [{"Labels": {flt: k}} for k in sorted(self.refs)]
             return _cp(out=json.dumps(rows))
@@ -404,6 +412,46 @@ class TestEnsurePrepared:
         assert f"pm-image-cache-prep-{KEY[:12]}-abcdef" in fake.removed
         assert not leftover.exists()
         assert [p.name for p in (root / "entries").iterdir()] == [KEY]
+
+    def _damage(self, fake):
+        entry = image_cache.ensure_prepared("pm-dev:latest")
+        (entry.path / "entry.json").write_text("not json")
+        assert image_cache.load_entry(KEY) is None
+        return entry.path, entry.path.stat().st_ino, fake.count("run")
+
+    def test_damaged_entry_a_container_mounts_is_not_replaced(self, fake,
+                                                              home):
+        """A consumer bind-mounts the entry dir itself: deleting it to
+        publish a fresh one empties the store under the consumer's
+        nested engine.  Refuse, naming the users, before any prep."""
+        path, ino, runs = self._damage(fake)
+        fake.users = [("pm-x-qa-pr-a-1-s1", KEY), ("pm-other", "f" * 20)]
+        with pytest.raises(ImageCacheError) as exc:
+            image_cache.ensure_prepared("pm-dev:latest")
+        msg = str(exc.value)
+        assert f"entry {KEY}" in msg and "unusable" in msg
+        assert "1 container(s)" in msg and "pm-x-qa-pr-a-1-s1" in msg
+        assert "pm-other" not in msg
+        assert "rm -f" in msg
+        assert f"pm set {image_cache.MODE_SETTING} off" in msg
+        assert fake.count("run") == runs      # no prep container started
+        assert path.stat().st_ino == ino and (path / "store").is_dir()
+
+    def test_damaged_entry_is_kept_when_users_cannot_be_listed(self, fake,
+                                                               home):
+        path, ino, runs = self._damage(fake)
+        fake.fail_users = True
+        with pytest.raises(ImageCacheError, match="could not be listed"):
+            image_cache.ensure_prepared("pm-dev:latest")
+        assert fake.count("run") == runs
+        assert path.stat().st_ino == ino and (path / "store").is_dir()
+
+    def test_damaged_entry_no_container_uses_is_replaced(self, fake, home):
+        path, ino, runs = self._damage(fake)
+        entry = image_cache.ensure_prepared("pm-dev:latest")
+        assert fake.count("run") == runs + 1
+        assert entry.path == path and image_cache.load_entry(KEY)
+        assert [p.name for p in path.parent.iterdir()] == [KEY]
 
     def test_id_mismatch_aborts(self, fake, home):
         fake.loaded_id = "sha256:" + "ef" * 32
