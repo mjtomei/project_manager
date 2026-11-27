@@ -367,6 +367,12 @@ the task and on the measurements above.
   `pm set list` shows each existing earlier location of a searched
   setting under its current value (`earlier, still searched: <dir>`), so
   the extra roots are visible (review 5875 i1).
+  Roots are compared by real path, so a location listed twice under two
+  spellings appears once.  This happens when the setting names the dir a
+  symlinked `~/.pm/workdirs` points at, or when an earlier value is a
+  symlink to the current one.  Listed twice, every QA run there was found
+  twice, and the TUI's restart scan dropped the session's own orphaned
+  run's only resume snapshot as "superseded" by itself (review 5875 i3).
 * Workspace trust follows the move: `workspace_trust.approved_roots()`
   includes `paths.qa_scratch_roots()` (`<scratch>/qa`).  The legacy scratch
   sat inside the trusted QA workdir, so a host-mode scenario's throwaway

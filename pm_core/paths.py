@@ -153,10 +153,20 @@ def set_path_setting(setting: str, value: Path | str | None) -> None:
 
 def _existing_roots(first: Path, candidates: list[Path]) -> list[Path]:
     """*first*, then each existing directory of *candidates* not already
-    listed, in order."""
+    listed, in order.
+
+    Compared by real path: another spelling of a listed root (a symlink to
+    it, e.g. a ``~/.pm/workdirs`` symlinked to the NAS dir ``workdirs-dir``
+    now names, or a value with ``..``) is that root.  Listed twice, every
+    run, scratch dir and report in it was found twice, and the TUI's resume
+    scan dropped a run's only snapshot as superseded by itself.
+    """
     roots = [first]
+    seen = {os.path.realpath(first)}
     for c in candidates:
-        if c not in roots and c.is_dir():
+        real = os.path.realpath(c)
+        if real not in seen and c.is_dir():
+            seen.add(real)
             roots.append(c)
     return roots
 

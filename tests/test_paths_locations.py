@@ -396,6 +396,31 @@ class TestConfigured:
         paths.set_global_setting_value("scratch-dir", "fast/scratch")
         assert paths.configured_dir("scratch-dir") == home / "fast" / "scratch"
 
+    def test_one_root_under_two_spellings_is_listed_once(self, home,
+                                                         tmp_path):
+        """A setting naming the directory a symlinked default (or an
+        earlier value) points at is that root, not a second one."""
+        pm = home / ".pm"
+        pm.mkdir()
+        for sub in ("workdirs", "scratch"):
+            real = tmp_path / f"real-{sub}"
+            (real / "qa").mkdir(parents=True)
+            (pm / sub).symlink_to(real)
+        paths.set_path_setting("workdirs-dir", tmp_path / "real-workdirs")
+        paths.set_path_setting("scratch-dir", tmp_path / "real-scratch")
+        assert paths.workdirs_roots() == [tmp_path / "real-workdirs"]
+        assert paths.qa_workdirs_roots() == [tmp_path / "real-workdirs" / "qa"]
+        assert paths.qa_scratch_roots() == [tmp_path / "real-scratch" / "qa"]
+        # An earlier value spelled through a symlink to the current one.
+        link = tmp_path / "ev-link"
+        real_ev = tmp_path / "ev"
+        (real_ev / "tag").mkdir(parents=True)
+        link.symlink_to(real_ev)
+        paths.set_path_setting("captures-dir", link)
+        paths.set_path_setting("captures-dir", real_ev)
+        assert paths.earlier_dirs("captures-dir") == [link]
+        assert paths.captures_roots("tag") == [real_ev / "tag"]
+
 
 class TestFilesystemType:
     def test_longest_mount_point_wins(self, tmp_path, nas):
@@ -500,6 +525,14 @@ class TestPmSet:
                                         str(a)]
         # Gone once the directory is.
         a.rmdir()
+        assert "still searched" not in self._set("list").output
+        # A symlink to the current location is that location.
+        b.mkdir()
+        link = tmp_path / "b-link"
+        link.symlink_to(b)
+        assert self._set("captures-dir", str(link)).exit_code == 0
+        assert self._set("captures-dir", str(b)).exit_code == 0
+        assert paths.earlier_dirs("captures-dir") == [link, a]
         assert "still searched" not in self._set("list").output
 
     def test_workdirs_dir_may_not_cover_home(self, home, tmp_path):

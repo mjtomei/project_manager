@@ -293,10 +293,17 @@ _LIST_ALIASES = {"list", "ls", "l"}
 
 def _list_settings():
     """Print all settings and their current values."""
-    from pm_core.paths import (IMAGE_CACHE_DIR_SETTING, earlier_dirs,
-                               get_global_setting, get_global_setting_value)
+    import os
+    from pm_core.paths import (IMAGE_CACHE_DIR_SETTING, SCRATCH_DIR_SETTING,
+                               WORKDIRS_DIR_SETTING, configured_dir,
+                               earlier_dirs, get_global_setting,
+                               get_global_setting_value, pm_home)
     all_settings = sorted(_BOOLEAN_SETTINGS | _INT_SETTINGS
                           | set(_ENUM_SETTINGS) | _PATH_SETTINGS)
+    # Default locations an earlier value may alias (captures-dir's default
+    # is per session tag, never the shape of a captures-dir value).
+    default_dirs = {WORKDIRS_DIR_SETTING: pm_home() / "workdirs",
+                    SCRATCH_DIR_SETTING: pm_home() / "scratch"}
     width = max(map(len, all_settings))
     for name in all_settings:
         if name in _BOOLEAN_SETTINGS:
@@ -310,9 +317,13 @@ def _list_settings():
         if name in _PATH_SETTINGS and name != IMAGE_CACHE_DIR_SETTING:
             # What pm still searches besides the current value (and the
             # default); it stops once the directory is gone.  An earlier
-            # image cache is only emptied ('pm container cache gc').
+            # image cache is only emptied ('pm container cache gc').  A
+            # spelling of the current location (a symlink to it) is that
+            # location, not an earlier one (paths._existing_roots).
+            current = configured_dir(name) or default_dirs.get(name)
+            current_real = os.path.realpath(current) if current else None
             for d in earlier_dirs(name):
-                if d.is_dir():
+                if d.is_dir() and os.path.realpath(d) != current_real:
                     click.echo(f"  {'':<{width}}   earlier, still searched: "
                                f"{d}")
 
