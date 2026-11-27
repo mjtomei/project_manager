@@ -921,6 +921,124 @@ def engine_config_problem(home: str | None = None) -> str | None:
     return None
 
 
+def _db_path(home: str) -> Path:
+    """The libpod state database of the engine at *home* (podman 3.x)."""
+    return _graphroot(home) / "libpod" / "bolt_state.db"
+
+
+def _configured_runroot(home: str) -> str | None:
+    """The runroot *home*'s storage.conf sets, or None."""
+    try:
+        text = (_config_dir(home) / "storage.conf").read_text()
+    except OSError:
+        return None
+    m = re.search(r'^\s*runroot\s*=\s*"([^"]+)"', text, re.M)
+    return m.group(1) if m else None
+
+
+def _podman_out(home: str, *args: str) -> str | None:
+    """stdout of ``podman <args>`` run with HOME=*home*, None on failure."""
+    try:
+        r = subprocess.run(["podman", *args], capture_output=True, text=True,
+                           timeout=60, env={**os.environ, "HOME": home})
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return r.stdout if r.returncode == 0 else None
+
+
+def runroot_problem(home: str) -> str | None:
+    """Why the engine at *home* does not use the runroot its config sets.
+
+    Podman records an engine's runtime dirs (runroot and tmp dir) in its
+    database when the first podman command with that HOME creates it, and
+    later commands keep those over storage.conf and containers.conf (podman
+    3.4 logs "Overriding run root ... from database" only at debug level).
+    An engine that ran before pm wrote its config — 'pm container enable'
+    and 'pm container status' run 'podman info' — therefore keeps podman's
+    default runtime dirs, shared with the other engines in this container.
+    None when they match, when the config sets no runroot (the default
+    engine), or when podman cannot tell (the mapping probes report that).
+    """
+    want = _configured_runroot(home)
+    if not want:
+        return None
+    got = (_podman_out(home, "info", "--format", "{{.Store.RunRoot}}")
+           or "").strip()
+    if not got or got == want:
+        return None
+    return (f"podman with HOME={home} uses runroot {got}, not the {want} its "
+            f"storage.conf sets: the engine's database {_db_path(home)} "
+            f"predates that config and podman keeps the runtime dirs "
+            f"recorded there, so this engine shares runtime state with the "
+            f"other engines in this container")
+
+
+_ENGINE_OBJECTS = (
+    ("container", ("ps", "-a", "--format", "{{.Names}}"), "podman rm -af"),
+    ("pod", ("pod", "ps", "--format", "{{.Name}}"), "podman pod rm -af"),
+    ("volume", ("volume", "ls", "--format", "{{.Name}}"),
+     "podman volume rm -af"),
+)
+
+
+def reset_stale_engine_db(home: str | None = None) -> Path | None:
+    """Make the engine at *home* use the runtime dirs its config sets.
+
+    When its database predates the config (:func:`runroot_problem`) and
+    holds no containers, pods or volumes, it is removed; the next podman
+    command recreates it with the configured runroot and tmp dir.  It holds
+    nothing else — images and layers live in the graphroot and the shared
+    store, which stay.  Returns the removed database's path, else None.
+    Raises :class:`ImageCacheError` when the database is in use or the
+    reset did not take.
+    """
+    from pm_core.store import bounded_flock
+    home = os.path.abspath(home or os.environ.get("HOME") or str(Path.home()))
+    if not _configured_runroot(home):
+        return None
+    lock = _config_dir(home) / ".pm-engine.lock"
+    with bounded_flock(lock, 120) as got:
+        if not got:
+            raise ImageCacheError(
+                f"timed out after 120s waiting for another pm process to "
+                f"check the engine at HOME={home} (lock {lock})")
+        problem = runroot_problem(home)
+        if not problem:
+            return None
+        held: list[str] = []
+        fixes: list[str] = []
+        for kind, args, fix in _ENGINE_OBJECTS:
+            out = _podman_out(home, *args)
+            if out is None:
+                raise ImageCacheError(
+                    f"{problem}; pm could not list the engine's {kind}s to "
+                    f"reset that database ('podman {' '.join(args[:2])}' "
+                    f"failed)")
+            if out.split():
+                held += [f"{kind} {n}" for n in out.split()]
+                fixes.append(fix)
+        if held:
+            shown = ", ".join(held[:5]) + (", …" if len(held) > 5 else "")
+            raise ImageCacheError(
+                f"{problem}. pm resets that database only while it is empty, "
+                f"and it holds {shown}: remove them (HOME={home} "
+                f"{'; '.join(fixes)}) and retry")
+        db = _db_path(home)
+        try:
+            db.unlink()
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            raise ImageCacheError(
+                f"{problem}; removing that database failed: {exc}") from exc
+        problem = runroot_problem(home)
+        if problem:
+            raise ImageCacheError(f"{problem} (still, after pm reset it)")
+    _log.info("image cache: reset the engine database of HOME=%s; it "
+              "predated pm's engine config", home)
+    return db
+
+
 def _mount_options(mount_point: str) -> str | None:
     """Options of the topmost mount at *mount_point*, or None."""
     from pm_core.paths import read_mountinfo
@@ -974,6 +1092,12 @@ def consumer_check(image_ref: str | None = None,
     res.add(overlay is None, overlay or "fuse-overlayfs available")
     home = os.path.abspath(home or os.environ.get("HOME") or str(Path.home()))
     problem = engine_config_problem(home)
+    if problem is None:
+        problem = runroot_problem(home)
+        if problem:
+            problem += ("; the next pm launch with this HOME, or 'pm "
+                        "container engine-setup', resets it while it holds "
+                        "no containers")
     res.add(problem is None, problem or f"engine config for HOME={home} "
                                         f"uses the shared store")
     problem = _graphroot_problem(home)
@@ -1044,6 +1168,9 @@ def ensure_consumer_engine(home: str | None = None) -> None:
         # The foreign config may be deliberate (a storage-driver test's own
         # engine): then the cache, not the config, is what to turn off.
         raise ImageCacheError(f"{problem}; " + _off_remedy())
+    # The config only takes effect once podman's database agrees with it:
+    # pm itself ran 'podman info' with this HOME before writing it.
+    reset_stale_engine_db(home)
     bad = _probe_mismatches(home)
     if bad:
         raise ImageCacheError(

@@ -133,6 +133,18 @@ fuse-overlayfs 1.7.1, kernel 7.0, rootless, keep-id):
    (`ensure_consumer_engine`, also when the engine's config already
    exists, as the default engine's always does) refuse a FUSE graphroot
    with the fix (review 62b4 i14).
+9. (Found in QA scenario 3.)  Podman records an engine's runroot and tmp
+   dir in its database (`<graphroot>/libpod/bolt_state.db`) when the first
+   podman command with that `HOME` creates it, and later commands keep
+   those over `storage.conf` / `containers.conf` — logged only at debug
+   level (`Overriding run root "/tmp/pm-eng-…/run" with
+   "/tmp/podman-run-1000/containers" from database`).  A nested pm runs
+   `podman info` (`pm container enable`/`status`) and `podman inspect`
+   with a private `HOME` before it writes that engine's config, so the
+   auto-configured engine kept podman's default runtime dirs (its tmp dir
+   is the consumer default engine's).  Removing the database while it holds
+   no containers, pods or volumes makes the configured dirs take effect;
+   images and layers are not in it.
 
 The audit evidence paths named in the task
 (`/home/matt/.local/state/pm-pr-shepherd/disk-audit-20261105T040137Z`,
@@ -225,6 +237,13 @@ the task and on the measurements above.
   engines also get `runroot = /tmp/pm-eng-<hash8>/run` (≤ 50 chars) and
   `[engine] tmp_dir = /tmp/pm-eng-<hash8>/tmp`, so two engines in one
   container never share runtime state.
+* Those dirs apply only once podman's database agrees (runtime fact 9).
+  A nested pm launch (`ensure_consumer_engine`) and `engine-setup` compare
+  `podman info`'s runroot with the configured one; on a mismatch they
+  remove the engine's database while it holds no containers, pods or
+  volumes (`image_cache.reset_stale_engine_db`, under a per-engine lock),
+  and otherwise refuse, naming what to remove.  `cache check` reports the
+  mismatch on its engine-config line.
 * The default engine (`/home/pm`) is written by `create_container`'s setup
   script from the same generator (no runtime dependency on pm inside the
   image).

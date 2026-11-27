@@ -673,6 +673,10 @@ class TestEnsureConsumerEngine:
         calls = []
 
         def run(argv, **kw):
+            if argv[1] == "info":
+                # An engine whose database agrees with its config.
+                home = kw["env"]["HOME"]
+                return _cp(out=f"{image_cache._configured_runroot(home)}\n")
             calls.append(argv)
             out = "".join(f"{path} {ids}\n"
                           for path, ids in zip(argv[5:], owners))
@@ -744,6 +748,105 @@ class TestEnsureConsumerEngine:
         # The foreign config may be deliberate: the cache can be turned off.
         assert f"pm set {image_cache.MODE_SETTING} off" in str(exc.value)
         assert "storage.conf" in cfg.name and "overlay" in cfg.read_text()
+
+
+class _StaleEngine:
+    """podman with HOME=*home* whose database predates pm's engine config.
+
+    Like podman 3.4, the database records the runroot in effect when a
+    command first creates it and keeps it over storage.conf afterwards.
+    """
+
+    DEFAULT = "/tmp/podman-run-1000/containers"
+
+    def __init__(self, home, objects=None):
+        self.home = str(home)
+        self.objects = objects or {}
+        self.calls = []
+        db = image_cache._db_path(self.home)
+        db.parent.mkdir(parents=True)
+        db.write_text("db")       # 'pm container enable' ran 'podman info'
+        self.recorded = self.DEFAULT
+
+    def __call__(self, argv, **kw):
+        assert kw["env"]["HOME"] == self.home
+        self.calls.append(argv[1:3])
+        db = image_cache._db_path(self.home)
+        if not db.exists():
+            db.write_text("db")
+            self.recorded = (image_cache._configured_runroot(self.home)
+                             or self.DEFAULT)
+        if argv[1] == "info":
+            return _cp(out=self.recorded + "\n")
+        if argv[1] == "unshare":
+            return _cp(out="".join(f"{p} {ids}\n" for p, ids in
+                                   zip(argv[5:], ["0:0", "1:1"])))
+        kind = {"ps": "container", "pod": "pod", "volume": "volume"}[argv[1]]
+        return _cp(out="".join(n + "\n" for n in self.objects.get(kind, [])))
+
+
+class TestStaleEngineDatabase:
+    """An engine that ran before pm wrote its config keeps podman's default
+    runtime dirs (QA scenario 3): the launch resets its empty database."""
+
+    def test_launch_resets_an_empty_database(self, consumer, tmp_path,
+                                            monkeypatch):
+        eng = tmp_path / "nested-pm"
+        fake = _StaleEngine(eng)
+        monkeypatch.setattr(image_cache.subprocess, "run", fake)
+        image_cache.ensure_consumer_engine(str(eng))
+        want = image_cache._configured_runroot(str(eng))
+        assert want and want.startswith("/tmp/pm-eng-")
+        assert fake.recorded == want
+        assert ["info", "--format"] in fake.calls
+        assert fake.calls[-1][0] == "unshare"
+        assert image_cache.runroot_problem(str(eng)) is None
+        assert str(eng) in image_cache._checked_homes
+
+    def test_check_reports_the_override(self, consumer, tmp_path,
+                                       monkeypatch):
+        eng = tmp_path / "nested-pm"
+        monkeypatch.setattr(image_cache.subprocess, "run", _StaleEngine(eng))
+        image_cache.write_engine_config(str(eng))
+        res = image_cache.consumer_check(home=str(eng))
+        problems = [t for t in res.problems() if "runroot" in t]
+        assert len(problems) == 1
+        assert (f"uses runroot {_StaleEngine.DEFAULT}, not the /tmp/pm-eng-"
+                in problems[0])
+        assert "predates that config" in problems[0]
+        assert "resets it while it holds no containers" in problems[0]
+        assert image_cache.reset_stale_engine_db(str(eng)) == \
+            image_cache._db_path(str(eng))
+        res = image_cache.consumer_check(home=str(eng))
+        assert not [t for t in res.problems() if "runroot" in t]
+
+    def test_a_database_in_use_is_kept_and_the_launch_refused(
+            self, consumer, tmp_path, monkeypatch):
+        eng = tmp_path / "busy"
+        fake = _StaleEngine(eng, objects={"container": ["web"],
+                                          "volume": ["data"]})
+        monkeypatch.setattr(image_cache.subprocess, "run", fake)
+        with pytest.raises(ImageCacheError) as exc:
+            image_cache.ensure_consumer_engine(str(eng))
+        msg = str(exc.value)
+        assert "holds container web, volume data" in msg
+        assert "podman rm -af; podman volume rm -af" in msg
+        assert "pod rm" not in msg
+        assert image_cache._db_path(str(eng)).exists()
+        assert fake.recorded == _StaleEngine.DEFAULT
+        assert str(eng) not in image_cache._checked_homes
+
+    def test_default_engine_is_not_checked(self, consumer, tmp_path,
+                                          monkeypatch):
+        """The container user's engine keeps podman's own runtime dirs."""
+        from pm_core import container
+        eng = tmp_path / "default"
+        monkeypatch.setattr(container, "_CONTAINER_HOME", str(eng))
+        fake = _StaleEngine(eng)
+        monkeypatch.setattr(image_cache.subprocess, "run", fake)
+        image_cache.ensure_consumer_engine(str(eng))
+        assert [c[0] for c in fake.calls] == ["unshare"]
+        assert image_cache._db_path(str(eng)).exists()
 
 
 class TestStatusLine:
@@ -875,6 +978,17 @@ class TestCli:
         assert f"Root: {root}" in r.output
         assert f"{KEY}" in r.output and "[in use]" in r.output
         assert "[unused]" in r.output
+
+    def test_engine_setup_resets_a_database_that_predates_it(
+            self, consumer, home, monkeypatch):
+        fake = _StaleEngine(home)
+        monkeypatch.setattr(image_cache.subprocess, "run", fake)
+        r = self._invoke("engine-setup")
+        db = image_cache._db_path(str(home))
+        assert f"reset {db} (it predated this config)" in r.output, r.output
+        assert fake.recorded == image_cache._configured_runroot(str(home))
+        assert f"[ok] engine config for HOME={home} uses the shared store" \
+            in r.output
 
     def test_engine_setup_outside_a_consumer_fails(self, home):
         r = self._invoke("engine-setup")

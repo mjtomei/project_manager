@@ -442,17 +442,24 @@ def engine_setup(home: str | None, force: bool):
     private graphroot under HOME, the shared store as an additional image
     store) and, for any HOME but the default user's, a containers.conf
     giving the engine its own runroot and tmp dir — so several isolated
-    engines can run side by side on the same shared layers.  Then runs
+    engines can run side by side on the same shared layers.  An engine
+    that already ran keeps the runtime dirs recorded in its database, so
+    pm resets that database while it holds no containers.  Then runs
     'pm container cache check' for that HOME.
     """
     from pm_core import image_cache
     try:
         written = image_cache.write_engine_config(home, force=force)
+        for path in written.values():
+            click.echo(f"wrote {path}")
+        # An engine that already ran keeps the runtime dirs recorded in its
+        # database over the config just written; reset it while it is empty.
+        reset = image_cache.reset_stale_engine_db(home)
+        if reset:
+            click.echo(f"reset {reset} (it predated this config)")
     except image_cache.ImageCacheError as exc:
         click.echo(f"Error: {exc}", err=True)
         raise SystemExit(1)
-    for path in written.values():
-        click.echo(f"wrote {path}")
     res = image_cache.consumer_check(home=home)
     for ok, text in res.lines:
         click.echo(f"  [{'ok' if ok else 'FAIL'}] {text}")
