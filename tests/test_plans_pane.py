@@ -236,3 +236,114 @@ class TestPlansPaneHeightTracksContent:
         ])
         assert any("Line three." in line for line in grown)
         assert any("a=add" in line for line in grown)
+
+
+class TestPlansPaneYieldsToChordPrefix:
+    """``w`` (watcher) and ``y`` (cleanup-then) are app-level prefixes.
+    With one armed, the plans pane must leave the next key to
+    ``ProjectManagerApp.on_key``.  Before the fix ``w c r`` in the plans
+    view opened a plan review (the pane stopped ``c``), left the prefix
+    armed, and the ``r`` then launched a watcher review session; ``w l``
+    and ``w e`` did the same (QA S10, pr-30888b1)."""
+
+    def _press(self, *keys):
+        import asyncio
+
+        from textual.app import App, ComposeResult
+
+        from pm_core.tui.app import ProjectManagerApp
+
+        class Host(App):
+            _command_pending = False
+            _w_mode = False
+            _y_mode = False
+            _z_count = 0
+            _w_cancel_timer = None
+            _y_cancel_timer = None
+            _prefix_hint_seq = 0
+            on_key = ProjectManagerApp.on_key
+            chord_prefix_armed = ProjectManagerApp.chord_prefix_armed
+            _command_bar = ProjectManagerApp._command_bar
+            _cancel_w_mode = ProjectManagerApp._cancel_w_mode
+            _cancel_y_mode = ProjectManagerApp._cancel_y_mode
+
+            def __init__(self):
+                super().__init__()
+                self.logged: list[str] = []
+                self.watcher: list[str] = []
+                self.plan_actions: list[str] = []
+
+            def compose(self) -> ComposeResult:
+                yield PlansPane(id="plans-pane")
+
+            def check_action(self, action, parameters):
+                return True
+
+            def log_message(self, msg, *args, **kwargs):
+                self.logged.append(Text.from_markup(msg).plain)
+                return len(self.logged)
+
+            def _clear_prefix_hint(self):
+                pass
+
+            def _action_watcher_list(self):
+                self.watcher.append("list")
+
+            def _action_focus_watcher(self):
+                self.watcher.append("focus")
+
+            def _action_watcher_toggle(self):
+                self.watcher.append("toggle")
+
+            def _action_watcher_review(self):
+                self.watcher.append("review")
+
+            def on_plan_action(self, message):
+                self.plan_actions.append(message.action)
+
+        async def run():
+            app = Host()
+            async with app.run_test(size=(100, 30)) as pilot:
+                pane = app.query_one("#plans-pane", PlansPane)
+                pane.update_plans([
+                    {"id": f"plan-00{i}", "name": f"Plan {i}", "file": f"p{i}.md",
+                     "status": "draft", "intro": "", "pr_count": 0}
+                    for i in (1, 2)])
+                pane.focus()
+                await pilot.pause()
+                await pilot.press(*keys)
+                await pilot.pause()
+                return (app.plan_actions, app.watcher, app.logged,
+                        pane.selected_index, app._w_mode, app._y_mode)
+        return asyncio.run(run())
+
+    @pytest.mark.parametrize("key", ["c", "l", "e", "a", "D"])
+    def test_w_then_plan_key_cancels_without_action(self, key):
+        actions, watcher, logged, _, w_mode, _ = self._press("w", key, "r")
+        assert actions == []
+        assert logged[-1] == "w cancelled"
+        # The r after the cancelled chord is not a watcher review.
+        assert watcher == []
+        assert w_mode is False
+
+    def test_w_then_j_does_not_move_selection(self):
+        _, _, logged, index, w_mode, _ = self._press("w", "j")
+        assert index == 0
+        assert logged[-1] == "w cancelled"
+        assert w_mode is False
+
+    def test_w_chords_still_dispatch(self):
+        _, watcher, _, _, _, _ = self._press("w", "r", "w", "w")
+        assert watcher == ["review", "list"]
+
+    def test_y_then_plan_key_cancels_without_action(self):
+        actions, _, logged, _, _, y_mode = self._press("y", "c")
+        assert actions == []
+        assert logged[-1] == "y cancelled"
+        assert y_mode is False
+
+    def test_plan_keys_fire_without_prefix(self):
+        actions, watcher, _, index, _, _ = self._press("c", "j", "l", "e")
+        assert actions == ["review", "load", "edit"]
+        assert index == 1
+        assert watcher == []

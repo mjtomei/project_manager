@@ -1421,6 +1421,16 @@ class ProjectManagerApp(App):
         during the 2s prefix window) keeps the line."""
         self._clear_log_message(seq=self._prefix_hint_seq)
 
+    def chord_prefix_armed(self) -> bool:
+        """True while a ``w`` or ``y`` prefix waits for its second key.
+
+        A focused pane that handles its own keys must then leave the key
+        to :meth:`on_key`, which resolves it as part of the chord.
+        Otherwise the pane's action fires and the prefix stays armed, so a
+        later ``r``/``s`` is swallowed as a watcher or cleanup command.
+        """
+        return bool(self._w_mode or self._y_mode)
+
     def _cancel_w_mode(self) -> None:
         """Auto-cancel w prefix mode after timeout."""
         if self._w_mode:

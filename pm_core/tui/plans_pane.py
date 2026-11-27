@@ -156,6 +156,13 @@ class PlansPane(Widget):
     def on_key(self, event) -> None:
         if not self.has_focus:
             return
+        # An armed app-level w/y prefix owns the next key: "w c" must
+        # cancel the prefix rather than open a plan review with the prefix
+        # still armed.  Leave the key unhandled so it bubbles to the app's
+        # on_key, which dispatches or cancels the chord.
+        armed = getattr(self.app, "chord_prefix_armed", None)
+        if armed is not None and armed():
+            return
 
         if event.key in ("up", "k"):
             if self._plans and self.selected_index > 0:

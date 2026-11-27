@@ -67,6 +67,7 @@ key. `pm plan breakdown` then fails with Click's standard
 - `pm_core/tui/pane_ops.py::handle_plan_action`: drop the `breakdown` branch. Fix the `handle_plan_add` comment that lists breakdown as a later action.
 - `pm_core/tui/screens.py::HelpScreen`: drop the "w  Break plan into PRs" row.
 - `pm_core/tui/plans_pane.py::update_plans` (QA S3 incidental fix, 2261f26a): call `refresh(layout=True)`. The pane is `height: auto`, so a plain `refresh()` kept the old height and clipped the footer once `a` added a second plan. This predates the PR and is also on master.
+- `pm_core/tui/plans_pane.py::on_key` + `pm_core/tui/app.py::ProjectManagerApp.chord_prefix_armed` (QA S10 fix): while a `w` or `y` prefix is armed, the pane leaves every key unhandled so `App.on_key` resolves the chord. `w c`/`w l`/`w e` log `w cancelled`, the plan action does not fire, and a following `r` is a plain refresh. Before the fix the pane stopped the key, the plan action fired, the prefix stayed armed and `r` opened a watcher review. Tree-view `w j` is the same pre-existing ordering in `TechTree` and is filed as pr-c2bcb0a. Pinned by `tests/test_plans_pane.py::TestPlansPaneYieldsToChordPrefix`.
 
 ### R4. Review prompts
 
@@ -89,7 +90,7 @@ key. `pm plan breakdown` then fails with Click's standard
 
 ### R6. Tests
 
-- `tests/test_plans_pane.py`: the key map excludes `w`; the footer no longer asserts "breakdown"; the routing test covers `review` (from the merge). `TestPlansPaneHeightTracksContent` pins the footer staying visible after a plan is added or an intro grows (QA S3).
+- `tests/test_plans_pane.py`: the key map excludes `w`; the footer no longer asserts "breakdown"; the routing test covers `review` (from the merge). `TestPlansPaneHeightTracksContent` pins the footer staying visible after a plan is added or an intro grows (QA S3). `TestPlansPaneYieldsToChordPrefix` pins `w`/`y` then a plan key cancelling the prefix without the plan action (QA S10).
 - `tests/test_plan_review.py`: `REVIEW_PROMPTS` keys exclude `plan-breakdown` (from the merge).
 - `tests/test_plans_window_per_plan.py`: the shared-window test uses edit / view (`launch_plan_activated`) / review instead of breakdown, keeping its three-pane, two-split assertion.
 - `tests/test_prompt_bounds.py`: the two tests that invoked `plan breakdown` now invoke `plan add` (300 other PRs, and long titles), so the existing-PR listing stays bounded under `PROMPT_ARG_LIMIT`.
@@ -109,7 +110,7 @@ key. `pm plan breakdown` then fails with Click's standard
 - **The existing-PR listing stays bounded.** Master bounded breakdown's listing after this branch was written. The branch's own plan add listing was an unbounded `"\n".join`. Re-applying the fold must use the bounded form, or `plan add` on a project with hundreds of PRs could exceed the single-argv prompt limit (`test_prompt_bounds` pins this).
 - **There is still a way to add PRs to a plan that has none.** With `w` gone, `pm plan review` (key `c`) handles it via R4's new paragraph, and the guide and the `plan load` error point at it. The background plan-add check was meant to be a second path (NEEDS_FIX, then `pm plan fix --review …`), but QA planning found it never reports: `review_step` runs `claude -p` in a daemon thread that dies when `pm plan add` exits, so no `pm/reviews/plan-add-*` file is written. That is the same on master and is filed as pr-e2cd753. Until it is fixed, `plan review` is the only working recovery path.
 - **No live reference to a removed command or key.** This covers `pm help`, the TUI help screen, the plans footer, the guide, the prompts and the `plan load` error. The source-scan test enforces it.
-- **Pressing `w` in the plans view no longer means breakdown.** Plans-pane `on_key` no longer handles it, so the key bubbles to the app-level `w` prefix (watcher `w`/`f`/`s`/`r`), exactly as in the tree view. That is consistent and harmless; nothing extra is needed.
+- **Pressing `w` in the plans view no longer means breakdown.** Plans-pane `on_key` no longer handles it, so the key bubbles to the app-level `w` prefix (watcher `w`/`f`/`s`/`r`), exactly as in the tree view. The key after `w` must then reach the prefix too. QA S10 found that the pane stopped `c`/`l`/`e` before `App.on_key` saw them, so `w c r` opened a plan review and then a watcher review. R3's `chord_prefix_armed` check fixes that.
 - **The merge with master must not regress master behaviour.** That includes per-plan windows for edit, `session_type="plan"`, the load-first wording and the `tui_tests.py` → `pm/qa` move. The deletion of `tui_tests.py` is kept; its plans-pane regression is already retired in `pm/qa/retired-regressions.md`.
 
 ## Ambiguities
