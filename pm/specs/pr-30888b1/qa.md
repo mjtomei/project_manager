@@ -21,7 +21,12 @@
   to propose a breakdown first when the plan has none.
 - Help and docs:
   - `pm help` COMMANDS, `pm getting-started`, `pm plan --help` and `pm plan add --help` no longer mention breakdown.
-  - The plans-view key list reads `a=add c=review l=load e=edit …`.
+  - The plans-view key list in `pm getting-started` reads
+    `a=add  c=review  l=load  e=edit  D=deps  Enter=view file`. The guide's
+    plans-view reference lists `Enter` (view plan file), not the `v` key the
+    pane lost in 81b19294 (c04c6bd5; fixes pr-c428279).
+  - `org-demo.md` step 4 says plan add writes the plan and its PRs; step 5 is
+    "Review and load the PRs" (b1cbdd99).
 - Guide:
   - The `has_plan_draft` step label is now "Finish plan with PR breakdown". The TUI guide status bar shows it.
   - The `pm guide` setup prompt describes the flow `a` → `c` → `l`, says `a` writes the plan and its `## PRs`, and has a section "If the plan has no PRs yet" that points at `c`.
@@ -67,7 +72,9 @@
   - it reports "Found 3 PRs", "Created …" lines and "Loaded 3 PRs from plan <id>";
   - `pm pr list` and `pm pr graph` show the PRs under that plan with the dependency resolved;
   - the TUI tech tree shows them.
-- A second load reports every PR as "Skipped … (already exists)".
+- A second CLI load reports every PR as "Skipped … (already exists)". A second
+  TUI `l` logs `Loaded 0 PRs from plan <id>.` (the Skipped lines are CLI-only),
+  and the tree is unchanged.
 
 **R6: Breakdown command removed.**
 - Given any initialized project.
@@ -79,7 +86,7 @@
 - Then:
   - no breakdown command or `w=breakdown` key appears;
   - `plan add` is described as adding a plan and breaking it into PRs;
-  - the plan key list reads `a=add  c=review  l=load …`.
+  - the plan key list reads `a=add  c=review  l=load  e=edit  D=deps  Enter=view file`, with no `v=view`.
 - In an uninitialized directory, `pm help` shows the getting-started text with the same content.
 
 **R8: TUI plans view.**
@@ -91,7 +98,11 @@
   `pm plan add` from another shell that triggers a TUI refresh) and as PR
   counts change after `l`. QA S3 found it clipped once a second plan was added;
   fixed in 2261f26a (`update_plans` now refreshes with `layout=True`). With more
-  plans than fit, the footer is reached by moving to the last plan.
+  plans than fit (e.g. 7 plans at 80x24), moving the selection to the last plan
+  brings the whole footer into view, and moving back to the first plan brings
+  the header back. QA S9 found the footer unreachable; fixed in 7688eb64
+  (`_scroll_selected_into_view` counts the top padding and scrolls the last plan
+  to the pane's full height).
 
 **R9: `w` in the plans view.**
 - Given the plans view with a plan selected.
@@ -119,7 +130,8 @@
 - Given a plan whose file has a body but no `## PRs` section, for example because the plan add session was closed early.
 - When the user runs `pm plan load <id>`, or presses `l` in the TUI.
 - Then:
-  - the command fails (non-zero exit; in the TUI, an error in the log);
+  - the command fails (non-zero exit; in the TUI, an error in the log; at 80
+    columns the log line is clipped, so read the full text from the pm log);
   - the error names `pm plan review <id>` (key `c`) and editing the plan file directly, and does not suggest `pm plan add` or `pm plan breakdown`;
   - no PRs are created and no new plan entry appears.
 
@@ -144,7 +156,8 @@
   - the printed setup prompt says `a` develops the plan **and** writes `## PRs`;
   - it has the "If the plan has no PRs yet" section pointing at `c`;
   - it gives the plans-view flow as `a` → `c` → `l`;
-  - it does not mention `w`, `pm plan breakdown` or "Break plan into PRs".
+  - its plans-view reference lists `a`, `c`, `l`, `e` and `Enter` (view plan file);
+  - it does not mention `w`, `v`, `pm plan breakdown` or "Break plan into PRs".
 
 **R15: Guide auto-load.**
 - Given the plan file has gained a `## PRs` section and no PRs are loaded.
@@ -186,6 +199,11 @@
       `export EDITOR=vi` before `pm session`, or the Enter / `e` panes die at once.
     - building a 300-PR fixture takes about 8 minutes of `pm pr add`; run it in
       the background.
+    - a stand-in that exits at once closes its per-plan window. For flows that
+      reuse the window (Enter / `e` / `c` after `a`), the stand-in must hold the
+      pane open (e.g. `exec sleep` on a tty after recording) (QA S9).
+    - the first `w r` clones the pm repo to `~/.pm/workdirs/meta-<tag>`, which
+      takes about 16 s with the TUI blocked. Wait for it before judging (QA S10).
 - **Standing in for the plan session's output:** the fake does not write files.
   To get "the session wrote the plan and its PRs", write the plan file in the
   format the prompt asks for: a body, then `## PRs`, then `### PR:` entries
@@ -237,11 +255,16 @@
 - Then the key after `w` is resolved as part of the `w` chord. `c` / `l` / `e`
   are not watcher keys, so the prefix cancels ("w cancelled") and the plan action
   does not also fire. The following `r` / `s` is not swallowed as a watcher command.
-- Why this can go wrong: the plans pane sees keys before the app-level prefix
-  handler, so its action keys can fire while the prefix stays armed. That
-  ordering is pre-existing: tree-view `w` then `j` / `k` leaves the prefix armed.
-  This PR is what exposes the plans view to it, because `w` used to be consumed
-  as breakdown there. Record what happens and compare with tree-view `w` then `j`.
+- The same holds for the `y` prefix (`y c` logs "y cancelled"), and for `j` / `k` /
+  `Enter` after `w` in the plans view (they cancel the chord instead of moving or
+  opening while it stays armed).
+- Once the prefix is cancelled (by a key, Escape or the 2 s timeout), plain
+  `c` / `l` / `e` / `a` fire their plan actions again as usual.
+- QA S10 confirmed the bug live and it is fixed in e5573ed0: the plans pane yields
+  every key to the app while `ProjectManagerApp.chord_prefix_armed()` is true.
+- Tree-view `w` / `y` then `j` / `k` / `Enter` still moves the tree and leaves the
+  prefix armed. That is pre-existing and filed as pr-c2bcb0a; it is not a failure
+  here.
 
 **E9: Other Claude-facing TUI prompts.**
 - The TUI's interactive Claude session (tree view) and the watcher review session
@@ -270,12 +293,16 @@
 - `plan load` on a PR-less plan suggests `plan add` or `plan breakdown`;
 - the pre-load review prompt lacks the propose-breakdown paragraph;
 - the guide still shows a breakdown step;
+- a plans-view key reference (getting-started, guide prompt) still names a `v` key;
+- in the plans view, a plan action (`c` / `l` / `e`) fires while a `w` or `y` prefix is armed, or the prefix stays armed after it;
+- with more plans than fit, the footer cannot be brought into view by moving to the last plan;
 - a concurrent different-name add or load loses or duplicates entries.
 
 **Not failures for this PR:**
 - E3 (pr-2b9d002) and E7 (pr-5cee3d5);
 - the background check never reporting (A2, pr-e2cd753);
-- `v=view` in `pm getting-started` with no `v` key (pre-existing; pr-fa9f172 rewords it);
+- tree-view `w` / `y` prefix then `j` / `k` / `Enter` leaves the prefix armed (pr-c2bcb0a);
+- the command-bar focus handback (`/` then Escape, or any submitted command) scrolls an overflowing plans list or tree to its top (pr-25d4825);
 - tech tree keeps only its first row after a refresh while the plans view is open (pr-29690d8);
 - plan review prompt renders "(plan: None)" for PRs with no plan (pr-95286f9);
 - plans-view Enter runs bare `less` with no fallback (pr-2ea2797);
@@ -303,7 +330,8 @@ These are handled by notes on those PRs and do not affect what is tested on this
 **A6: `w` then a plans-view action key (E8).**
 R9 already says a non-matching key cancels the prefix. A plan action that fires
 while the prefix stays armed therefore fails R9, because this PR is what exposes
-the plans view to it. Tree-view `w` then `j` / `k` behaving the same way is a
-pre-existing sibling. Note it, but it does not excuse the plans-view case.
+the plans view to it. It was fixed in e5573ed0 and is now a pass criterion.
+Tree-view `w` then `j` / `k` behaving the same way is a pre-existing sibling
+(pr-c2bcb0a). Note it, but it does not excuse the plans-view case.
 
 No **[UNRESOLVED]** items.
