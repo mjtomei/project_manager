@@ -2569,8 +2569,18 @@ prs:
       files pass twice in one HOME: /pm-captures/pr-30888b1-review-bb8a-i2/.'
     created_at: '2026-11-27T06:16:37Z'
     last_edited: '2026-11-27T06:16:37Z'
+  - id: note-b4dd2d5
+    text: 'Review bb8a i3 (b5051640): comment-only. The plan add background-check
+      comment no longer says ''now includes'' (history wording); it states that the
+      session writes both the plan body and ## PRs. Code diff, tests and QA code re-read
+      clean. Prompt re-render has no drift, master is still ac719072, and no branch
+      pushed since i2 adds breakdown lines (pr-6c0ee2d still d5d780b8 with the known
+      [breakdown] test case). 507 tests in 14 PR-affected files pass twice in one
+      HOME: /pm-captures/pr-30888b1-review-bb8a-i3/.'
+    created_at: '2026-11-27T06:24:15Z'
+    last_edited: '2026-11-27T06:24:15Z'
   created_at: '2026-03-01T17:51:46.490716+00:00'
-  updated_at: '2026-11-27T06:16:38.209601+00:00'
+  updated_at: '2026-11-27T06:24:16.275970+00:00'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-30888b1-fold-plan-breakdown-into-plan-add-st-ab512a43
 - id: pr-3116896
   plan: tui-ux
