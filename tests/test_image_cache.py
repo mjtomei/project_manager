@@ -234,6 +234,15 @@ class TestEnsurePrepared:
         assert fake.removed and fake.removed[0].startswith(
             "pm-image-cache-prep-")
 
+    def test_prep_container_stops_without_the_stop_timeout(self, fake, home):
+        """Its PID 1 is ``sleep infinity`` (ignores SIGTERM): without
+        --stop-timeout 0 each removal waits podman's 10 s default while
+        the per-key lock is held and every launch waits behind it."""
+        image_cache.ensure_prepared("pm-dev:latest")
+        run = next(c for c in fake.calls if c[0] == "run")
+        assert run[run.index("--stop-timeout") + 1] == "0"
+        assert run.index("--stop-timeout") < run.index(IMAGE_ID)
+
     def test_streams_save_into_load_without_an_archive(self, fake, home):
         image_cache.ensure_prepared("pm-dev:latest")
         save, load = fake.popens

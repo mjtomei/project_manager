@@ -378,8 +378,14 @@ def _prepare(root: Path, image_ref: str, image_id: str, tags: list[str],
     try:
         # Same user namespace and nested-podman flags as every consumer
         # (create_container), mounted where consumers mount it.
+        # ``sleep infinity`` is the container's PID 1, which ignores
+        # SIGTERM: without --stop-timeout 0 every ``rm -f`` of this
+        # container (publish, failure cleanup, a waiter clearing a killed
+        # preparer's leftover) waits podman's 10 s stop timeout before the
+        # SIGKILL, with the per-key lock held and every launch waiting.
         run = _rt("run", "-d", "--name", name,
                   "--label", f"{PREP_LABEL}={key}",
+                  "--stop-timeout", "0",
                   "--userns=keep-id",
                   *container_mod._nested_podman_run_args(),
                   "-v", f"{prep_dir}:{CONSUMER_MOUNT}",
